@@ -1,6 +1,7 @@
 #include "Memory.h"
 #include "VideoDriver.h"
 #include "errno.h"
+#include "utils.h"
 #define PAGE_SIZE 0x1000
 uint8_t busymasks[8]={128,64,32,16,8,4,2,1};
 uint8_t PartialUsed[4]={BM_PARTIAL<<6,BM_PARTIAL<<4,BM_PARTIAL<<2,BM_PARTIAL<<0};
@@ -224,31 +225,120 @@ not_alignedin3bits4:
     }
 }
 
-int BitmapFreeMemmgr_t::SetBitmapentryiesmulty(uint8_t lv, uint64_t start_index, uint64_t numofEntries, uint8_t state)
+
+inline int BitmapFreeMemmgr_t::SetBitmapentryiesmulty(uint8_t lv, uint64_t start_index, uint64_t numofEntries, uint8_t state)
 {
     if(AllLvsBitmapCtrl[lv].flags.type!=BMLV_STATU_STATIC)
     {
         kputsSecure("SetBitmapentryiesmulty:bitmap not static");
         return EINVAL;
     }
-    uint8_t* bitmapbase=AllLvsBitmapCtrl[lv].base.bitmap;
-    if (lv)
+    uint8_t* bitmapbase=AllLvsBitmapCtrl[lv].base.bitmap;//基址由于是使用的页分配器，所以说至少12bit对齐
+    if (lv)//非0级位图一个项两个bit
     {
-        /* code */
-    }else{
-        if(state>2)
+        if(state>3)
         {
-            kputsSecure("SetBitmapentryiesmulty:in 0 lv state must be 0 or 1")  ;
+            kputsSecure("SetBitmapentryiesmulty:in not 0 entry state only for states: 0,1,2,3")  ;
             return EINVAL;
         }
-        uint8_t byte_entry_content=0-state;
-        uint64_t Qword_entry_content=0-state;
+        uint8_t byte_entry_content=0;
+        uint64_t Qword_entry_content=0;
+        switch (state)
+        {
+        case BM_FREE:     
+            break;
+        case BM_PARTIAL: 
+        byte_entry_content=0x55;
+        Qword_entry_content=0x5555555555555555;
+            break;
+        case BM_RESERVED_PARTIAL:
+        byte_entry_content=0xAA;
+        Qword_entry_content=0xAAAAAAAAAAAAAAAA;
+            break;
+        case BM_FULL:
+        byte_entry_content=0xFF;
+        Qword_entry_content=0xFFFFFFFFFFFFFFFF;
+            break;
+        }
         for (uint64_t i = start_index; i < start_index+numofEntries; )
         {
-            
+            if(i&31ULL)
+            {
+Index_not_alignedin5bits1:
+                if (i&3ULL)
+                {
+Index_not_alignedin2bits1:
+                SetBitsinMask<uint8_t>(bitmapbase[i>>2],FullUsed_and_Filtermasks[i&3],state) ;
+                i++;
+                continue;
+            }else{
+                if (start_index+numofEntries-i>=4)
+                {
+                    bitmapbase[i>>2]=byte_entry_content;
+                    i+=4;
+                    continue;
+                }else{
+                    goto Index_not_alignedin2bits1;
+                }
+                
+            }
+                
+            } else{
+                if (start_index+numofEntries-i>=32)
+                {
+                    uint64_t*bitmapbase_of32bit=(uint64_t*)bitmapbase;
+                    bitmapbase_of32bit[i>>5]=Qword_entry_content;
+                    i+=32;
+                    continue;
+                }else{
+                    goto Index_not_alignedin5bits1;
+                }
+            }
         }
-    }
-    
+    }else{//0级位图一个项一个bit
+        if(state>1)
+        {
+            kputsSecure("SetBitmapentryiesmulty:in 0 entry state must be 0 or 1")  ;
+            return EINVAL;
+        }
+        uint8_t byte_entry_content=state?0xff:0;
+        uint64_t Qword_entry_content=state?0xffffffffffffffff:0;    
+        for (uint64_t i = start_index; i < start_index+numofEntries; )
+        {
+            if(i&63ULL)
+            {
+not_alignedin6bits3:
+                if(i&7ULL)
+                {
+not_alignedin3bits5:
+                    SetBitsinMask<uint8_t>(bitmapbase[i>>3],busymasks[i&7],state) ;
+                    i++;
+                    continue;
+                }else{
+                    if (start_index+numofEntries-i>=8)
+                    {
+                        bitmapbase[i>>3]=byte_entry_content;
+                        i+=8;
+                        continue;
+                    }else{
+                        goto not_alignedin3bits5;
+                    }
+                    
+                }
+            }else{
+                if (start_index+numofEntries-i>=64)
+                {
+                    uint64_t*bitmapbase_of64bit=(uint64_t*)bitmapbase;
+                    bitmapbase_of64bit[i>>6]=Qword_entry_content;
+                    i+=64;
+                    continue;
+                }else{
+                    goto not_alignedin6bits3;
+                }
+
+            }
+        }
+    } 
 }
 
 BitmapFreeMemmgr_t::BitmapFreeMemmgr_t()
@@ -373,116 +463,122 @@ void BitmapFreeMemmgr_t::PrintBitmapInfo()
 }
 inline void BitmapFreeMemmgr_t::StaticBitmapInit(uint8_t lv)
 {
-    phy_memDesriptor*gphymem=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
-    uint64_t PhyMemdescriptorentrycount=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    if(lv)
+    phy_memDesriptor* gphymem = gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    uint64_t PhyMemdescriptorentrycount = gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
+    
+    if (lv) // 非0级位图
     {
-        uint64_t bitmapsEntryCount=AllLvsBitmapCtrl[lv].entryCount;
-        uint64_t BitsEntrymanagedSize=AllLvsBitmapCtrl[lv].managedSize;
-        uint64_t descriptor_index=0;
-        uint64_t bitmap_index=0;
-      for (; descriptor_index < PhyMemdescriptorentrycount;descriptor_index++ )
-      {
-        // 跳过空闲系统内存类型
-        if(gphymem[descriptor_index].Type==freeSystemRam)continue;
-        uint64_t phystart=gphymem[descriptor_index].PhysicalStart;
-        uint64_t segment_size_inbyte=gphymem[descriptor_index].NumberOfPages*PAGE_SIZE;
-        uint64_t phyend=phystart+segment_size_inbyte-1;
-        uint64_t startBitmapIndex=phystart/BitsEntrymanagedSize;
-        uint64_t endBitmapIndex=phyend/BitsEntrymanagedSize;
+        uint64_t BitsEntrymanagedSize = AllLvsBitmapCtrl[lv].managedSize;
         
-        // 判断起始和结束位置是否对齐到管理的内存块边界
-        uint8_t isbeginfull,isendfull;
-        if (phystart%BitsEntrymanagedSize==0)
+        for (uint64_t descriptor_index = 0; descriptor_index < PhyMemdescriptorentrycount; descriptor_index++)
         {
-            // 起始地址对齐，且跨越了多个内存块
-            if (startBitmapIndex<endBitmapIndex)
+            // 跳过空闲系统内存类型
+            if (gphymem[descriptor_index].Type == freeSystemRam) continue;
+            
+            uint64_t phystart = gphymem[descriptor_index].PhysicalStart;
+            uint64_t segment_size_inbyte = gphymem[descriptor_index].NumberOfPages * PAGE_SIZE;
+            uint64_t phyend = phystart + segment_size_inbyte - 1;
+            uint64_t startBitmapIndex = phystart / BitsEntrymanagedSize;
+            uint64_t endBitmapIndex = phyend / BitsEntrymanagedSize;
+            
+            // 根据内存类型判断该内存段是否可以被回收（重新分配）
+            uint8_t entryrecycable = 0;
+            switch(gphymem[descriptor_index].Type)
             {
-                isbeginfull=1;
-                        }else               isbeginfull=0;
-        }else    isbeginfull=0;
-        if((phyend+1)%BitsEntrymanagedSize==0)
-        {
-            // 结束地址对齐，且跨越了多个内存块
-            if (endBitmapIndex>startBitmapIndex)
-            {
-                isendfull=1;
-            }else               isendfull=0;
-        }else    isendfull=0;
-        
-        // 根据内存类型判断该内存段是否可以被回收（重新分配）
-        uint8_t entryrecycable=0;
-        switch(gphymem[descriptor_index].Type)
-        {
-            case EFI_LOADER_CODE:
-            case EFI_LOADER_DATA:
-         case OS_KERNEL_DATA:
-          case OS_KERNEL_CODE:
-           case OS_KERNEL_STACK:entryrecycable=1;break;
-            case EFI_RESERVED_MEMORY_TYPE: 
-            case EFI_RUNTIME_SERVICES_CODE:
-            case EFI_RUNTIME_SERVICES_DATA:
-            case EFI_MEMORY_MAPPED_IO:
-            case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
-            case EFI_PAL_CODE:
-            case EFI_ACPI_MEMORY_NVS:
-            case EFI_ACPI_RECLAIM_MEMORY:entryrecycable=0;break;
-            default:kputsSecure("[ERROR] BitmapFreeMemmgr_t::pageRecycle: Invalid memory type\n");
-            return ;
-        }    
-       uint8_t*bitmapbase=AllLvsBitmapCtrl[lv].base.bitmap;
-       uint8_t*masks=(entryrecycable?PartialUsed:PartialReserved);
-       
-       // 处理起始内存块
-       if(isbeginfull){
-        // 起始地址对齐，整个内存块都被占用
-        bitmapbase[startBitmapIndex>>2]|=FullUsed_and_Filtermasks[startBitmapIndex&3];
-       }else{
-        // 起始地址未对齐，只部分占用
-        uint8_t bits_entry_value_start=bitmapbase[startBitmapIndex>>2]&FullUsed_and_Filtermasks[startBitmapIndex&3];
-        if (bits_entry_value_start==BM_RESERVED_PARTIAL)
-        {
-            // 如果已经是保留状态，则跳到中间处理
-            goto middle_entry;
-        }else{
-            // 设置部分使用或部分保留状态
-            bitmapbase[startBitmapIndex>>2]|=masks[startBitmapIndex&3];
+                case EFI_LOADER_CODE:
+                case EFI_LOADER_DATA:
+                case OS_KERNEL_DATA:
+                case OS_KERNEL_CODE:
+                case OS_KERNEL_STACK:
+                    entryrecycable = 1;
+                    break;
+                case EFI_RESERVED_MEMORY_TYPE:
+                case EFI_RUNTIME_SERVICES_CODE:
+                case EFI_RUNTIME_SERVICES_DATA:
+                case EFI_MEMORY_MAPPED_IO:
+                case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+                case EFI_PAL_CODE:
+                case EFI_ACPI_MEMORY_NVS:
+                case EFI_ACPI_RECLAIM_MEMORY:
+                    entryrecycable = 0;
+                    break;
+                default:
+                    kputsSecure("[ERROR] BitmapFreeMemmgr_t::StaticBitmapInit: Invalid memory type\n");
+                    continue;
+            }
+            
+            // 处理起始块（可能部分占用）
+            uint8_t start_state = GetBitmapEntryState(lv, startBitmapIndex);
+            if (start_state != BM_RESERVED_PARTIAL) {
+                bool start_full = (phystart % BitsEntrymanagedSize == 0);
+                uint8_t state_to_set = start_full ? 
+                    (entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL) :
+                    (entryrecycable ? BM_PARTIAL : BM_RESERVED_PARTIAL);
+                
+                SetBitmapentryiesmulty(lv, startBitmapIndex, 1, state_to_set);
+            }
+            
+            // 处理结束块（可能部分占用）
+            if (endBitmapIndex > startBitmapIndex) {
+                uint8_t end_state = GetBitmapEntryState(lv, endBitmapIndex);
+                if (end_state != BM_RESERVED_PARTIAL) {
+                    bool end_full = ((phyend + 1) % BitsEntrymanagedSize == 0);
+                    uint8_t state_to_set = end_full ? 
+                        (entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL) :
+                        (entryrecycable ? BM_PARTIAL : BM_RESERVED_PARTIAL);
+                    
+                    SetBitmapentryiesmulty(lv, endBitmapIndex, 1, state_to_set);
+                }
+            }
+            
+            // 处理中间完全占用的块（批量设置）
+            if (endBitmapIndex > startBitmapIndex + 1) {
+                uint64_t middle_start = startBitmapIndex + 1;
+                uint64_t middle_end = endBitmapIndex - 1;
+                uint64_t middle_count = middle_end - middle_start + 1;
+                
+                // 检查中间块是否已经有保留状态
+                bool has_reserved = false;
+                for (uint64_t i = middle_start; i <= middle_end; i++) {
+                    if (GetBitmapEntryState(lv, i) == BM_RESERVED_PARTIAL) {
+                        has_reserved = true;
+                        break;
+                    }
+                }
+                
+                if (!has_reserved) {
+                    // 批量设置中间块为全占用状态
+                    uint8_t state_to_set = entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL;
+                    SetBitmapentryiesmulty(lv, middle_start, middle_count, state_to_set);
+                } else {
+                    // 有保留状态，需要逐个设置
+                    for (uint64_t i = middle_start; i <= middle_end; i++) {
+                        uint8_t current_state = GetBitmapEntryState(lv, i);
+                        if (current_state != BM_RESERVED_PARTIAL) {
+                            uint8_t state_to_set = entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL;
+                            SetBitmapentryiesmulty(lv, i, 1, state_to_set);
+                        }
+                    }
+                }
+            }
         }
-        
-       }
-       
-       // 处理结束内存块
-        if(isendfull){
-        // 结束地址对齐，整个内存块都被占用
-        bitmapbase[endBitmapIndex>>2]|=FullUsed_and_Filtermasks[endBitmapIndex&3];
-       }else{
-        // 结束地址未对齐，只部分占用
-        uint8_t bits_entry_value_end=bitmapbase[endBitmapIndex>>2]&FullUsed_and_Filtermasks[endBitmapIndex&3];
-        if (bits_entry_value_end==BM_RESERVED_PARTIAL)
-        {
-            // 如果已经是保留状态，则跳到中间处理
-            goto middle_entry;
-        }else{
-            // 设置部分使用或部分保留状态
-            bitmapbase[endBitmapIndex>>2]|=masks[endBitmapIndex&3];
-        }
-        
-       }
-       
-       // 处理中间完整的内存块
- middle_entry:       for(uint64_t i = startBitmapIndex+1; i < endBitmapIndex; i++){
-        // 中间内存块全部被占用
-        bitmapbase[i>>2]|=FullUsed_and_Filtermasks[i&3];
-       }
-       
     }
-    }else{
-       for (int i = 0; i < PhyMemdescriptorentrycount; i++)
+    else // 0级位图
+    {
+        for (int i = 0; i < PhyMemdescriptorentrycount; i++)
         {
-            if(gphymem[i].Type==freeSystemRam)continue;
-            phymementry_to_4kbbitmap(gphymem,i,AllLvsBitmapCtrl[lv].base.bitmap);
+            if (gphymem[i].Type == freeSystemRam) continue;
+            
+            // 计算内存段在位图中的起始索引和页数
+            uint64_t entryStartIndex = gphymem[i].PhysicalStart >> 12;
+            uint64_t entryCount = gphymem[i].NumberOfPages;
+            
+            // 根据内存类型设置位图状态
+            uint8_t state = (gphymem[i].Type == EfiConventionalMemory) ? 0 : 1;
+            
+            // 使用 SetBitmapentryiesmulty 设置连续位图项
+            SetBitmapentryiesmulty(lv, entryStartIndex, entryCount, state);
         }
-        
     }
 }
 void BitmapFreeMemmgr_t::Init()

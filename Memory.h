@@ -213,7 +213,7 @@ class BitmapFreeMemmgr_t {
     int BitmaplvctrlsInit(uint64_t entryCount[5]);                      ///< 位图初始化函数
     void StaticBitmapInit(uint8_t lv);
     void phymementry_to_4kbbitmap(phy_memDesriptor*gphymemtbbase,uint16_t index,uint8_t*bitmapbase);
-    
+    int SetBitmapentryiesmulty(uint8_t lv, uint64_t start_index,uint64_t numofEntries, uint8_t state);//设置从某一个引索开始的连续多个位图项
     public:
     BitmapFreeMemmgr_t();
     void PrintBitmapInfo();
