@@ -1,0 +1,31 @@
+# 编译生成的文件和目录
+/build/
+/kernel.elf
+/*.o
+/*.a
+/*.so
+/*.out
+/CMakeCache.txt
+/CMakeFiles/
+/cmake_install.cmake
+/Makefile
+/.ninja_deps
+/.ninja_log
+/rules.ninja
+/build.ninja
+/compile_commands.json # 这个文件有时可以保留，但通常也会重新生成
+
+# 编辑器和IDE文件
+/.vscode/
+/.cache/
+/.clangd/
+/cscope.*
+/tags
+*.swp
+*~
+
+# 日志文件
+/*.log
+/log*.txt
+/*testlog.txt
+/*deslog.txt
