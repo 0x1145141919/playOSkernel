@@ -139,6 +139,16 @@ void GlobalMemoryPGlevelMgr_t::Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptrom
     reclaimBootTimeMemoryonEfiTb();
     InitrootPhyMemDscptTbBsPtr();
     //再正式回收loadercode,loaderdata类型的内存（只对PhyMemDscptTb这个表回收），参照reclaimBootTimeMemoryonEfiTb()这个函数，注意回收不标记为Runtime参数的项
+    for (int i = rootPhymemTbentryCount-1; i >=0; i--)
+    {
+       if (rootPhyMemDscptTbBsPtr[i].Type==EfiReservedMemoryType)
+       {
+        rootPhymemTbentryCount--;
+        
+       }else{
+        break;
+       }
+    }//删除那些留有冗余的表
     Statusflags=1;
 }
 phy_memDesriptor *GlobalMemoryPGlevelMgr_t::getGlobalPhysicalMemoryInfo()
@@ -154,7 +164,7 @@ phy_memDesriptor *GlobalMemoryPGlevelMgr_t::queryPhysicalMemoryUsage(uint64_t ad
     for(int i = 0; i < rootPhymemTbentryCount; i++)
     {
         if (rootPhyMemDscptTbBsPtr[i].PhysicalStart<=addr&&addr<
-            rootPhyMemDscptTbBsPtr[i].PhysicalStart+rootPhyMemDscptTbBsPtr[i].NumberOfPages*PAGE_SIZE)
+            rootPhyMemDscptTbBsPtr[i].PhysicalStart+rootPhyMemDscptTbBsPtr[i].NumberOfPages*PAGE_SIZE_4KB)
         {
             return rootPhyMemDscptTbBsPtr+i;
         }
@@ -306,7 +316,7 @@ void GlobalMemoryPGlevelMgr_t::reclaimBootTimeMemoryonEfiTb()
 void GlobalMemoryPGlevelMgr_t::InitrootPhyMemDscptTbBsPtr()
 {
         int pgcounts_for_phyramtb=(EfiMemMapEntryCount*sizeof(EFI_MEMORY_DESCRIPTORX64)+
-    PAGE_SIZE-1)/PAGE_SIZE+15;
+    PAGE_SIZE_4KB-1)/PAGE_SIZE_4KB+15;
     int kernelcodeDesIndex;
     for (int i=0; i < EfiMemMapEntryCount; i++)
     {
@@ -327,9 +337,9 @@ void GlobalMemoryPGlevelMgr_t::InitrootPhyMemDscptTbBsPtr()
     }
    rootPhyMemDscptTbBsPtr=\
    (phy_memDesriptor*)(EfiMemMap[kerneldataDesIndex].PhysicalStart+
-    PAGE_SIZE*EfiMemMap[kerneldataDesIndex].NumberOfPages);
+    PAGE_SIZE_4KB*EfiMemMap[kerneldataDesIndex].NumberOfPages);
    EfiMemMap[kerneldataDesIndex].NumberOfPages+=pgcounts_for_phyramtb;
-   EfiMemMap[kerneldataDesIndex+1].PhysicalStart+=pgcounts_for_phyramtb*PAGE_SIZE;
+   EfiMemMap[kerneldataDesIndex+1].PhysicalStart+=pgcounts_for_phyramtb*PAGE_SIZE_4KB;
    EfiMemMap[kerneldataDesIndex+1].NumberOfPages-=pgcounts_for_phyramtb;
     ksystemramcpy(EfiMemMap,
     rootPhyMemDscptTbBsPtr,
@@ -454,10 +464,10 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
        return -EINVAL;
     }
     
-    const uint64_t requiredPages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    const uint64_t requiredPages = (size + PAGE_SIZE_4KB - 1) / PAGE_SIZE_4KB;
     
     // 验证地址对齐
-    if (addr % PAGE_SIZE != 0) {
+    if (addr % PAGE_SIZE_4KB != 0) {
         return -EINVAL;
     }
     
@@ -466,15 +476,15 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
         return -ENOMEM;
     }
     
-    const uint64_t endAddr = addr + requiredPages * PAGE_SIZE;
-    const uint64_t descEnd = desc->PhysicalStart + desc->NumberOfPages * PAGE_SIZE;
+    const uint64_t endAddr = addr + requiredPages * PAGE_SIZE_4KB;
+    const uint64_t descEnd = desc->PhysicalStart + desc->NumberOfPages * PAGE_SIZE_4KB;
     
     if (endAddr > descEnd) {
         return -ENOMEM;
     }
     
-    const uint64_t beforePages = (addr - desc->PhysicalStart) / PAGE_SIZE;
-    const uint64_t afterPages = (descEnd - endAddr) / PAGE_SIZE;
+    const uint64_t beforePages = (addr - desc->PhysicalStart) / PAGE_SIZE_4KB;
+    const uint64_t afterPages = (descEnd - endAddr) / PAGE_SIZE_4KB;
     
     if (beforePages > 0 && afterPages > 0) {
         // ==== 修复1：正确分裂为三个区域 ====
@@ -567,7 +577,7 @@ int GlobalMemoryPGlevelMgr_t::defaultPhyaddPgallocate(
     {
        return -EINVAL;
     }
-    const uint64_t requiredPages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    const uint64_t requiredPages = (size + PAGE_SIZE_4KB - 1) / PAGE_SIZE_4KB;
     
     // 遍历查找合适的空闲块
     for (uint64_t i = 0; i < rootPhymemTbentryCount; ++i) {

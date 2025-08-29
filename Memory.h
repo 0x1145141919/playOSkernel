@@ -107,10 +107,19 @@ extern GlobalMemoryPGlevelMgr_t gBaseMemMgr;
 enum BitmapEntryState : uint8_t {
     BM_FREE        = 0x0, // 00: 完全空闲
     BM_PARTIAL     = 0x1, // 01: 部分使用(需要查下级位图)
+    BM_USED=0x1,
     BM_RESERVED_PARTIAL    = 0x2, // 10: 包含不可分配内存
     BM_FULL        = 0x3  // 11: 完全分配
+    //如果一个大页是完全分配的保留型内存，那么也会被初始化为BM_FULL
 };
-
+enum OPERATION :uint8_t{
+    OPERATION_ALLOCATE = 0x1,
+    OPERATION_RECYCLE = 0x0
+};
+enum ALLOCATE_TYPE :uint8_t{
+    ALLOCATE_TYPE_FIXED_ADDR = 0x0,
+    ALLOCATE_TYPE_DEFAULT = 0x1,
+};
 // 页表级别定义
 enum PageTableLevel {
     LEVEL_4K = 0,  // 4KB页
@@ -212,8 +221,8 @@ class BitmapFreeMemmgr_t {
     uint8_t GetBitmapEntryState(uint8_t lv, uint64_t index);
     int BitmaplvctrlsInit(uint64_t entryCount[5]);                      ///< 位图初始化函数
     void StaticBitmapInit(uint8_t lv);
-    void phymementry_to_4kbbitmap(phy_memDesriptor*gphymemtbbase,uint16_t index,uint8_t*bitmapbase);
     int SetBitmapentryiesmulty(uint8_t lv, uint64_t start_index,uint64_t numofEntries, uint8_t state);//设置从某一个引索开始的连续多个位图项
+    int InnerFixedaddrPgManage(IN phyaddr_t addr, IN uint64_t numofpgs_in4kb, IN OPERATION Op);
     public:
     BitmapFreeMemmgr_t();
     void PrintBitmapInfo();
@@ -223,5 +232,7 @@ class BitmapFreeMemmgr_t {
      * 设置并初始化位图内存管理器的各项参数和数据结构
      */
     void Init();
+    int PgsAlloc(IN ALLOCATE_TYPE type, IN OUT phyaddr_t paddr,IN uint64_t sizein_bytes); 
+    int PgsFree(IN phyaddr_t paddr,IN uint64_t sizein_bytes);
 };
 extern BitmapFreeMemmgr_t gBitmapFreePhyMemPGmgr;

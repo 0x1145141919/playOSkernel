@@ -2,7 +2,7 @@
 #include "VideoDriver.h"
 #include "errno.h"
 #include "utils.h"
-#define PAGE_SIZE 0x1000
+#define PAGE_SIZE_4KB 0x1000
 uint8_t busymasks[8]={128,64,32,16,8,4,2,1};
 uint8_t PartialUsed[4]={BM_PARTIAL<<6,BM_PARTIAL<<4,BM_PARTIAL<<2,BM_PARTIAL<<0};
 uint8_t PartialReserved[4]={BM_RESERVED_PARTIAL<<6,BM_RESERVED_PARTIAL<<4,BM_RESERVED_PARTIAL<<2,BM_RESERVED_PARTIAL<<0};
@@ -53,6 +53,7 @@ int BitmapFreeMemmgr_t::BitmaplvctrlsInit(uint64_t entryCount[5])
             AllLvsBitmapCtrl[i].flags.type=BMLV_STATU_DYNAMIC;
         }        
     }
+    gBaseMemMgr.printPhyMemDesTb();
     StaticBitmapInit(mainbitmaplv);
     StaticBitmapInit(subbitmaplv);
     return OS_SUCCESS;
@@ -60,170 +61,7 @@ int BitmapFreeMemmgr_t::BitmaplvctrlsInit(uint64_t entryCount[5])
 
 
 
-/**
- * @brief 将物理内存描述符条目转换为4KB粒度的位图表示
- * 
- * 该函数将UEFI提供的物理内存描述符中的一个条目转换为4KB页面粒度的位图表示。
- * 位图中每个bit表示一个4KB页面的状态：
- * - 1: 页面已被使用或保留
- * - 0: 页面空闲可用
- * 
- * 根据内存段的大小采用不同的优化处理策略：
- * 1. 小于15页：逐位设置，不进行优化
- * 2. 小于127页：按字节对齐优化，尽可能使用0xFF或0x00直接赋值
- * 3. 大于等于127页：按64位对齐优化，尽可能使用0xFFFFFFFFFFFFFFFF或0x0直接赋值
- * 
- * 这种优化可以显著提高大内存段位图初始化的性能。
- * 
- * @param gphymemtbbase 指向全局物理内存描述符表的指针
- * @param index 当前处理的描述符表项索引
- * @param bitmapbase 指向目标位图的指针
- */
-inline void BitmapFreeMemmgr_t::phymementry_to_4kbbitmap(phy_memDesriptor *gphymemtbbase, uint16_t index, uint8_t *bitmapbase)
-{  uint64_t entryStartIndex=gphymemtbbase[index].PhysicalStart>>12;
-    uint64_t entryCount=gphymemtbbase[index].NumberOfPages;
-    uint64_t entryEndIndex=entryStartIndex+entryCount-1;
-    bool ispgbusy=gphymemtbbase[index].Type==EfiConventionalMemory?FALSE:TRUE;
-    if(entryCount<15)//>=15页保证会有一个字节被占全
-    {
-        if (ispgbusy)
-        {
-            for (uint64_t i = entryStartIndex; i <= entryEndIndex; i++)
-        {
-           bitmapbase[i>>3]|=busymasks[i&7];
-        }
-        }else
-        {
-            for (uint64_t i = entryStartIndex; i <= entryEndIndex; i++)
-        {
-           bitmapbase[i>>3]&=~busymasks[i&7];
-        }
-        }
-        
-        return;
-    }
-    if(entryCount<127)
-    {
-        if (ispgbusy)
-        {
-            for (uint64_t i = entryStartIndex; i <= entryEndIndex; )
-        {
-           if (i&7ULL)
-           {
- not_3bit_agline1      :     
-            bitmapbase[i>>3]|=busymasks[i&7];
-            i++;
-            continue;
-           }else
-           {
-            if(entryEndIndex-i>=7){
-            bitmapbase[i>>3]=0xFF;
-            i+=8;
-            continue;
-        }else{
-            goto not_3bit_agline1;
-        }
-           }
-           
-        }
-        }else{
-             for (uint64_t i = entryStartIndex; i <= entryEndIndex; )
-        {
-           if (i&7ULL)
-           {
- not_3bit_agline2      :     
-            bitmapbase[i>>3]&=~busymasks[i&7];
-            i++;
-            continue;
-           }else
-           {
-            if(entryEndIndex-i>=7){
-            bitmapbase[i>>3]=0;
-            i+=8;
-            continue;
-        }else{
-            goto not_3bit_agline2;
-        }
-           }
-           
-        }
-        }
-        
-    }else{
-      if(ispgbusy)
-            { 
-            for (uint64_t i = entryStartIndex; i <= entryEndIndex; )
-        {
-            if(i&63ULL)
-            {
-not_alignedin6bits1:               
-             if(i&7ULL)
-                {
-not_alignedin3bits3:
-                    bitmapbase[i>>3]|=busymasks[i&7];
-                    i++;
-                    continue;
-                }else{
 
-                if (entryEndIndex-i>=7)
-                {
-                    bitmapbase[i>>3]=0xff;
-                    i+=8;
-                    continue;
-                }else{
-                    goto not_alignedin3bits3;
-                }
-                }
-            }else{
-                if (entryEndIndex-i>=63)
-                {
-                    uint64_t*bitmapbase_of64bit=(uint64_t*)bitmapbase;
-                    bitmapbase_of64bit[i>>6]=0xffffffffffffffff;
-                    i+=64;
-                    continue;
-                }else{
-                    goto not_alignedin6bits1;
-                } 
-            }                
-        }
-        }else{ 
-        for (uint64_t i = entryStartIndex; i <= entryEndIndex; )
-        {
-            if(i&63ULL)
-            {
-not_alignedin6bits2:               
-             if(i&7ULL)
-                {
-not_alignedin3bits4:
-                    bitmapbase[i>>3]&=~busymasks[i&7];
-                    i++;
-                    continue;
-                }else{
-
-                    if (entryEndIndex-i>=7)
-                {
-                    bitmapbase[i>>3]=0;
-                    i+=8;
-                    continue;
-                }else{
-                    goto not_alignedin3bits4;
-                }
-                }
-            }else{
-                if (entryEndIndex-i>=63)
-                {
-                    uint64_t*bitmapbase_of64bit=(uint64_t*)bitmapbase;
-                    bitmapbase_of64bit[i>>6]=0;
-                    i+=64;
-                    continue;
-                }else{
-                    goto not_alignedin6bits2;
-                } 
-            }                
-        }
-        }
-    }
-}
 
 
 inline int BitmapFreeMemmgr_t::SetBitmapentryiesmulty(uint8_t lv, uint64_t start_index, uint64_t numofEntries, uint8_t state)
@@ -339,6 +177,98 @@ not_alignedin3bits5:
             }
         }
     } 
+    return OS_SUCCESS;
+}
+/**
+ * @brief 固定地址分配连续页的分配器
+ * 
+ * @param addr 要分配的页的起始物理地址
+ * @param numofpgs_in4kb 要分配的页数（4kb页）
+ * @param Op 操作类型 OPERATION_ALLOCATE 或 OPERATION_RECYCLE
+ * @return int 错误码
+ * 
+ * 内部接口只管改不管验证，但是要对主副级别的位图都进行修改：
+ * 那么就先改副图（地址肯定要根据副图的页大小来对齐），再根据副图的变化改主图
+ */
+int BitmapFreeMemmgr_t::InnerFixedaddrPgManage(IN phyaddr_t addr, IN uint64_t numofpgs_in4kb,OPERATION Op)
+{   
+    int Status = OS_SUCCESS;
+    uint64_t entryIndex_sublv_start=addr/AllLvsBitmapCtrl[subbitmaplv].managedSize;
+    uint64_t entryIndex_sublv_end=(addr+(numofpgs_in4kb<<12)-1)/AllLvsBitmapCtrl[subbitmaplv].managedSize;
+    switch(statuflags.state)
+    {
+        case BM_STATU_STATIC_ONLY://静态模式下只有两个级别的位图，如果副级别非0不会对分配未满进行标记，因为没有相关数据结构保存相关信息
+        SetBitmapentryiesmulty(subbitmaplv,
+            entryIndex_sublv_start,
+            entryIndex_sublv_end-entryIndex_sublv_start+1,
+            Op==OPERATION_ALLOCATE?
+            subbitmaplv?BM_FULL:BM_USED
+            :BM_FREE);
+        break;
+        case BM_STATU_DYNAMIC://后面有了内核池分配器后再考虑动态分配
+        { 
+        }
+        case BM_STATU_UNINITIALIZED:
+        return EINTR;
+    }
+    
+    // 根据副图同步到主图
+    // 先根据副图的起始，终止索引算出主图的起始，终止索引
+    // 然后以主图项遍历为主，逐项遍历对应的副图项（副图级别会因为是否为0遍历方式有所区别，但都是逐64bit遍历）同步
+    // 还要考虑到可能主级别图最后一项无法完整对应512项，这时主图项为BM_RESERVED_PARTIAL，不过在初始化函数中没有看到相关的保证
+    // 主图项为BM_RESERVED_PARTIAL跳过这个主图项
+    uint64_t entryIndex_mainlv_start=entryIndex_sublv_start>>9;
+    uint64_t entryIndex_mainlv_end=(addr+numofpgs_in4kb*PAGE_SIZE_4KB-1)/AllLvsBitmapCtrl[mainbitmaplv].managedSize;
+    uint64_t* subbitmap=(uint64_t*)AllLvsBitmapCtrl[subbitmaplv].base.bitmap;
+    
+    // 遍历主图项并同步副图状态
+    for(uint64_t i=entryIndex_mainlv_start;i<=entryIndex_mainlv_end;i++){
+        // 跳过保留的部分项
+        if(GetBitmapEntryState(mainbitmaplv,i)==BM_RESERVED_PARTIAL)continue;
+        
+        uint64_t filter_content_or=0;
+        uint64_t filter_content_and=0xFFFFFFFFFFFFFFFF;
+        uint64_t start_sublv_entry_index_to_trivial=i<<9;
+        uint64_t entryIndextoTrivial_start_in_64bits=0;
+        
+        if(subbitmaplv){
+            entryIndextoTrivial_start_in_64bits=start_sublv_entry_index_to_trivial>>5;
+            bool has_reserved = false;
+            const uint64_t high_mask = 0xAAAAAAAAAAAAAAAAULL;
+            const uint64_t low_mask = 0x5555555555555555ULL;
+            // 对于非0级位图，处理16个64位块
+            for(int j = 0; j < 16; j++) {  // 添加num_qwords限界
+        uint64_t sub = subbitmap[entryIndextoTrivial_start_in_64bits + j];
+        filter_content_or |= sub;
+        filter_content_and &= sub;
+        has_reserved |= ((sub & high_mask) & ~(sub & low_mask)) != 0;
+        if (has_reserved) break;  // 优化early exit
+    }
+    if (has_reserved) {
+        SetBitmapentryiesmulty(mainbitmaplv, i, 1, BM_RESERVED_PARTIAL);
+        continue;
+    }
+        }else{
+            entryIndextoTrivial_start_in_64bits=start_sublv_entry_index_to_trivial>>6;
+            // 对于0级位图，处理8个64位块
+            for(int j=0;j<8;j++){
+                filter_content_or|=subbitmap[entryIndextoTrivial_start_in_64bits+j];
+                filter_content_and&=subbitmap[entryIndextoTrivial_start_in_64bits+j];
+            }
+        }
+        
+        // 根据过滤内容设置主图项状态
+        if(filter_content_and==~0ULL){
+            SetBitmapentryiesmulty(mainbitmaplv,i,1,BM_FULL);
+            continue;
+        }
+        if(filter_content_or==0){
+            SetBitmapentryiesmulty(mainbitmaplv,i,1,BM_FREE);
+            continue;
+        }
+        SetBitmapentryiesmulty(mainbitmaplv,i,1,BM_PARTIAL);
+    }
+    return Status;
 }
 
 BitmapFreeMemmgr_t::BitmapFreeMemmgr_t()
@@ -476,7 +406,7 @@ inline void BitmapFreeMemmgr_t::StaticBitmapInit(uint8_t lv)
             if (gphymem[descriptor_index].Type == freeSystemRam) continue;
             
             uint64_t phystart = gphymem[descriptor_index].PhysicalStart;
-            uint64_t segment_size_inbyte = gphymem[descriptor_index].NumberOfPages * PAGE_SIZE;
+            uint64_t segment_size_inbyte = gphymem[descriptor_index].NumberOfPages * PAGE_SIZE_4KB;
             uint64_t phyend = phystart + segment_size_inbyte - 1;
             uint64_t startBitmapIndex = phystart / BitsEntrymanagedSize;
             uint64_t endBitmapIndex = phyend / BitsEntrymanagedSize;
@@ -510,7 +440,7 @@ inline void BitmapFreeMemmgr_t::StaticBitmapInit(uint8_t lv)
             // 处理起始块（可能部分占用）
             uint8_t start_state = GetBitmapEntryState(lv, startBitmapIndex);
             if (start_state != BM_RESERVED_PARTIAL) {
-                bool start_full = (phystart % BitsEntrymanagedSize == 0);
+                bool start_full = (phystart % BitsEntrymanagedSize == 0&&endBitmapIndex>startBitmapIndex);
                 uint8_t state_to_set = start_full ? 
                     (entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL) :
                     (entryrecycable ? BM_PARTIAL : BM_RESERVED_PARTIAL);
@@ -547,15 +477,14 @@ inline void BitmapFreeMemmgr_t::StaticBitmapInit(uint8_t lv)
                 }
                 
                 if (!has_reserved) {
-                    // 批量设置中间块为全占用状态
-                    uint8_t state_to_set = entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL;
-                    SetBitmapentryiesmulty(lv, middle_start, middle_count, state_to_set);
+                    // 批量设置中间块为全占用状
+                    SetBitmapentryiesmulty(lv, middle_start, middle_count, BM_FULL);
                 } else {
                     // 有保留状态，需要逐个设置
                     for (uint64_t i = middle_start; i <= middle_end; i++) {
                         uint8_t current_state = GetBitmapEntryState(lv, i);
                         if (current_state != BM_RESERVED_PARTIAL) {
-                            uint8_t state_to_set = entryrecycable ? BM_FULL : BM_RESERVED_PARTIAL;
+                            uint8_t state_to_set = BM_FULL;
                             SetBitmapentryiesmulty(lv, i, 1, state_to_set);
                         }
                     }
@@ -581,6 +510,7 @@ inline void BitmapFreeMemmgr_t::StaticBitmapInit(uint8_t lv)
         }
     }
 }
+
 void BitmapFreeMemmgr_t::Init()
 {
  // 通过内联汇编获取当前CPU的分页等级
@@ -599,14 +529,14 @@ void BitmapFreeMemmgr_t::Init()
     // 遍历物理内存描述符表计算最大物理地址
     for(uint64_t i = 0; i < phymemtbentryCount; i++)
     { 
-        if (i==phymemtbentryCount-1&&phymemtb[i].Type==PHY_MEM_TYPE::EFI_RESERVED_MEMORY_TYPE)
+        if (phymemtb[i].Type==PHY_MEM_TYPE::EFI_RESERVED_MEMORY_TYPE)
         {
-            break;
+            continue;
         }
         
         // 计算当前内存区域的结束地址
         uint64_t regionEnd = phymemtb[i].PhysicalStart + 
-                            (phymemtb[i].NumberOfPages * PAGE_SIZE);
+                            (phymemtb[i].NumberOfPages * PAGE_SIZE_4KB);
         
         // 更新最大物理地址
         if (regionEnd > maxphyaddr) {
@@ -622,7 +552,7 @@ void BitmapFreeMemmgr_t::Init()
     uint64_t entryCount[5] = {0,0,0,0,0};
     
     // 修正层级项数计算逻辑
-    entryCount[0] = (maxphyaddr + PAGE_SIZE - 1) / PAGE_SIZE;
+    entryCount[0] = (maxphyaddr + PAGE_SIZE_4KB - 1) / PAGE_SIZE_4KB;
     for (int i = 1; i < 5; i++) {
         entryCount[i] = (entryCount[i-1] + 511) >> 9;  // 向上取整除以512
     }
@@ -644,4 +574,119 @@ void BitmapFreeMemmgr_t::Init()
     //接着就是为主级别与副级别构建静态数据结构的位图了,使用各自的私有成员函数
     BitmaplvctrlsInit(entryCount);
     statuflags.state=BM_STATU_STATIC_ONLY;
+}
+int BitmapFreeMemmgr_t::PgsAlloc(IN ALLOCATE_TYPE type, IN OUT phyaddr_t paddr, IN uint64_t sizein_bytes)
+{//未完全完成
+    // 检查管理器状态
+    if (statuflags.state == BM_STATU_UNINITIALIZED) {
+        kputsSecure("PgsAlloc: Bitmap memory manager not initialized\n");
+        return EINTR;
+    }
+    
+    // 检查参数有效性
+    if (sizein_bytes == 0) {
+        kputsSecure("PgsAlloc: size cannot be zero\n");
+        return EINVAL;
+    }
+    
+    // 计算需要分配的4KB页数（向上取整）
+    uint64_t numofpgs_in4kb = (sizein_bytes + PAGE_SIZE_4KB - 1) / PAGE_SIZE_4KB;
+    
+    if (type == ALLOCATE_TYPE_FIXED_ADDR) {
+        // 固定地址分配：检查地址对齐
+        if (paddr % PAGE_SIZE_4KB != 0) {
+            kputsSecure("PgsAlloc: fixed address must be 4KB aligned\n");
+            return EINVAL;
+        }
+        
+        // 检查地址范围是否在有效物理内存范围内
+        phyaddr_t endAddr = paddr + numofpgs_in4kb * PAGE_SIZE_4KB - 1;
+        if (endAddr > maxphyaddr) {
+            kputsSecure("PgsAlloc: address range exceeds maximum physical address\n");
+            return EINVAL;
+        }
+        
+        // 获取全局物理内存描述符表
+        phy_memDesriptor* memDescTable = gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+        uint64_t entryCount = gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
+        
+        // 查找起始地址所在的描述符项
+        int startIndex = -1;
+        for (uint64_t i = 0; i < entryCount; i++) {
+            phyaddr_t descStart = memDescTable[i].PhysicalStart;
+            phyaddr_t descEnd = descStart + memDescTable[i].NumberOfPages * PAGE_SIZE_4KB - 1;
+            
+            if (paddr >= descStart && paddr <= descEnd) {
+                startIndex = i;
+                break;
+            }
+        }
+        
+        if (startIndex == -1) {
+            kputsSecure("PgsAlloc: start address not found in memory descriptor table\n");
+            return EINVAL;
+        }
+        
+        // 查找结束地址所在的描述符项
+        int endIndex = -1;
+        for (uint64_t i = startIndex; i < entryCount; i++) {
+            phyaddr_t descStart = memDescTable[i].PhysicalStart;
+            phyaddr_t descEnd = descStart + memDescTable[i].NumberOfPages * PAGE_SIZE_4KB - 1;
+            
+            if (endAddr >= descStart && endAddr <= descEnd) {
+                endIndex = i;
+                break;
+            }
+            
+            // 如果当前描述符的起始地址已经超过结束地址，提前退出
+            if (descStart > endAddr) {
+                break;
+            }
+        }
+        
+        if (endIndex == -1) {
+            kputsSecure("PgsAlloc: end address not found in memory descriptor table\n");
+            return EINVAL;
+        }
+        
+        // 检查从startIndex到endIndex的所有描述符项是否都是空闲系统RAM
+        for (int i = startIndex; i <= endIndex; i++) {
+            if (memDescTable[i].Type != freeSystemRam) {
+                kputsSecure("PgsAlloc: address range includes non-free memory\n");
+                return EINVAL;
+            }
+            
+            // 对于起始项，检查paddr是否在该项范围内
+            if (i == startIndex) {
+                phyaddr_t descStart = memDescTable[i].PhysicalStart;
+                if (paddr < descStart) {
+                    kputsSecure("PgsAlloc: start address not aligned with memory descriptor\n");
+                    return EINVAL;
+                }
+            }
+            
+            // 对于结束项，检查endAddr是否在该项范围内
+            if (i == endIndex) {
+                phyaddr_t descEnd = memDescTable[i].PhysicalStart + 
+                                   memDescTable[i].NumberOfPages * PAGE_SIZE_4KB - 1;
+                if (endAddr > descEnd) {
+                    kputsSecure("PgsAlloc: end address not aligned with memory descriptor\n");
+                    return EINVAL;
+                }
+            }
+        }
+        
+        // TODO: 检查位图状态，确保该范围未被分配
+        
+        // 调用内部函数进行分配
+        return InnerFixedaddrPgManage(paddr, numofpgs_in4kb, OPERATION_ALLOCATE);
+    } else if (type == ALLOCATE_TYPE_DEFAULT) {
+        // 默认分配：需要实现查找合适地址的算法
+        // 这里先返回未实现错误，后续完善
+        kputsSecure("PgsAlloc: default allocation not implemented yet\n");
+        return ENOSYS;
+    } else {
+        kputsSecure("PgsAlloc: invalid allocation type\n");
+        return EINVAL;
+    }
 }
