@@ -64,3 +64,19 @@ inline void SetBitsinMask(T& uint,T mask,T value)
     background|=transformValueForMask(value, mask);
     uint=background;
 }
+void ksystemramcpy(void*src,void*dest,size_t length);
+void linearTBSerialDelete(//这是一个对于线性表删除一段连续项,起始索引a,结束索引b的函数
+    uint64_t*TotalEntryCount,
+    uint64_t a,
+    uint64_t b,
+    void*linerTbBase,
+    uint32_t entrysize
+);
+void linearTBSerialInsert(
+    uint64_t* TotalEntryCount,
+    uint64_t insertIndex,
+    void* newEntry,
+    void* linerTbBase,
+    uint32_t entrysize,
+    uint64_t entryCount = 1
+) ;

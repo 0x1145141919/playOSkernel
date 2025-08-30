@@ -30,6 +30,7 @@ typedef enum {
   MEMORY_TYPE_OS_RESERVED_MAX  = 0xFFFFFFFF
 } PHY_MEM_TYPE;
 typedef uint64_t phyaddr_t;
+typedef uint64_t vaddr_t;
 #define IN
 #define OUT
 #pragma pack(push, 8)  // 强制8字节对齐（x64 ABI要求）

@@ -39,6 +39,7 @@ add_executable(kernel.elf
     PortDriver.c
     Memory.cpp
     gBitmapFreePhyMemMgr.cpp
+    kpoolmemmgr.cpp
 )
 
 # 头文件路径（对 C/C++ 均可见）
