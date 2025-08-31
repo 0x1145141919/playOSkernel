@@ -1,0 +1,81 @@
+ENTRY(_kernel_Init)
+__HEAP_SIZE = 4M;
+__KLOG_SIZE = 2M;
+/* 定义内存布局 */
+MEMORY {
+    RAM (rwx) : ORIGIN = 0x4000000, LENGTH = 128M  /* 内核加载地址 */
+    STACK (rw) : ORIGIN = 0x400000, LENGTH = 64K    /* 栈空间 */
+}
+
+SECTIONS {
+    /* 代码段（RX） */
+    .text : ALIGN(4096) {
+        *(.text .text.*)
+        . = ALIGN(4096); 
+    } >RAM :text
+
+    /* 只读数据段（R） */
+    .rodata : ALIGN(4096) {
+        *(.rodata .rodata.*)
+         . = ALIGN(4096); 
+    } >RAM :rodata
+
+    /* 已初始化数据段（RW） */
+    .data : ALIGN(4096) {
+        *(.data .data.*)
+    } >RAM :data
+    
+    /* 堆段（RW） */
+    .heap (NOLOAD) : ALIGN(2M) {
+        /* 导出堆的起始和结束符号 */
+        __heap_start = .;
+        . = . + __HEAP_SIZE;
+        __heap_end = .;
+    } >RAM :heap
+
+    .klog : ALIGN(2M) {
+        __klog_start = .;
+        . = . + __KLOG_SIZE;
+        __klog_end = .;
+    } >RAM :klog
+    /* 未初始化数据段（RW） */
+    .bss : ALIGN(4096) {
+        *(.bss .bss.*)
+        *(COMMON)
+    } >RAM :data
+
+    /* 栈段（RW） - 不占用文件空间 */
+    .stack (NOLOAD) : ALIGN(4096) {
+        _stack_bottom = .;
+        . += 64K;  /* 64KB 栈空间 */
+        _stack_top = .;
+    } >STACK :stack
+
+    /* C++异常处理信息 */
+    .eh_frame : ALIGN(4096) {
+        *(.eh_frame)
+        *(.eh_frame_hdr)
+    } >RAM :data
+
+    /* 其他元数据 */
+    .note : ALIGN(4096) {
+        *(.note.*)
+        *(.gnu.property)
+    } >RAM :data
+
+    /* 丢弃其他不需要的段 */
+    /DISCARD/ : {
+        *(.comment)
+        *(.note.GNU-stack)
+    }
+}
+
+/* 定义段权限 */
+PHDRS {
+    text PT_LOAD FLAGS(5);      /* PF_R | PF_X (RX) */
+    rodata PT_LOAD FLAGS(4);    /* PF_R (R) */
+    data PT_LOAD FLAGS(6);      /* PF_R | PF_W (RW) */
+    stack PT_LOAD FLAGS(6);     /* PF_R | PF_W (RW) */
+    heap PT_LOAD FLAGS(6);
+    klog PT_LOAD FLAGS(6);
+}

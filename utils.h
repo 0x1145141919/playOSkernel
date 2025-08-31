@@ -1,3 +1,7 @@
+#pragma once
+#include "stdint.h"
+typedef uint64_t size_t;
+
 /**
  * @brief 根据给定掩码转换值的位布局
  * 
@@ -80,3 +84,4 @@ void linearTBSerialInsert(
     uint32_t entrysize,
     uint64_t entryCount = 1
 ) ;
+int strlen(const char *s);

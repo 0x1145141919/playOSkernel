@@ -4,6 +4,10 @@
 // 添加对error.h的引用，这样可以使用标准错误码
 #include "errno.h"
 #include "VideoDriver.h"
+#ifdef TEST_MODE
+#include "stdio.h"
+#include <inttypes.h>
+#endif
 //#define PRINT_OUT
 #define MAX_CHAR_WIDTH   32
 #define MAX_CHAR_HEIGHT  64
@@ -888,6 +892,7 @@ bufferout:
     }
 
 }
+#ifdef KERNEL_MODE
 int kputsSecure(char*strbuff)
 {
     // 检查帧缓冲区是否初始化
@@ -938,7 +943,14 @@ int kputsSecure(char*strbuff)
     }
     return OS_SUCCESS;
 }
-
+#endif
+#ifdef TEST_MODE
+    int kputsSecure(char* strbuff) {
+    if (!strbuff) return -1;
+    return printf("%s", strbuff);  // 用户空间直接使用printf
+}
+#endif
+#ifdef KERNEL_MODE
 
 
 int kpnumSecure(void* numptr, int format, int len)//有符号十进制的情况下只能处理1,2,4,8字节
@@ -1085,3 +1097,34 @@ int kpnumSecure(void* numptr, int format, int len)//有符号十进制的情况�
     SERIAL_PUTS(buf + buffer_index);
     return 0;
 }
+#endif
+#ifdef TEST_MODE
+int kpnumSecure(void* numptr, int format, int len)
+{ 
+    if (!numptr) return -1;
+    
+    uint32_t num = *(uint32_t*)numptr;
+    char buffer[64] = {0};
+    
+    switch (format) {
+        case UNBIN:  // 二进制
+            for (int i = len-1; i >= 0; i--) {
+                buffer[len-1-i] = (num & (1 << i)) ? '1' : '0';
+            }
+            break;
+        case UNDEC:  // 无符号十进制
+            snprintf(buffer, sizeof(buffer), "%*"PRIu32, len, num);
+            break;
+        case INDEC:  // 有符号十进制
+            snprintf(buffer, sizeof(buffer), "%*"PRId32, len, (int32_t)num);
+            break;
+        case UNHEX:  // 十六进制
+            snprintf(buffer, sizeof(buffer), "%0*"PRIX32, len, num);
+            break;
+        default:
+            return -1;
+    }
+    
+    return printf("%s", buffer);
+}
+#endif

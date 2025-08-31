@@ -1,6 +1,12 @@
 #include "utils.h"
 #include "stdint.h"
 typedef uint64_t size_t;
+int strlen(const char *s) {
+    int len = 0;
+    while (*s++)
+        len++;
+    return len;
+}
 void ksystemramcpy(void*src,void*dest,size_t length)
 //最好用于内核内存空间内的内存拷贝，不然会出现未定义行为
 {  uint64_t remainder=length&0x7;
@@ -72,7 +78,7 @@ void linearTBSerialInsert(
     void* newEntry,
     void* linerTbBase,
     uint32_t entrysize,
-    uint64_t entryCount = 1
+    uint64_t entryCount
 ) {
     if (insertIndex > *TotalEntryCount) {
         // 插入位置超出当前表范围，直接追加到末尾
