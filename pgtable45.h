@@ -22,6 +22,11 @@ typedef uint64_t paging_entry_t;
 #define R_FLAG_MASK           (1ULL << 11) // Restart (HLAT)
 #define PAT_FLAG_MASK         (1ULL << 12) // PAT位 (1GB/2MB页)
 #define XD_FLAG_MASK          (1ULL << 63) // Execute Disable
+constexpr uint64_t PT_INDEX_MASK_lv0=0x00000000000001FF<<12;
+constexpr uint64_t PD_INDEX_MASK_lv1=PT_INDEX_MASK_lv0<<9;
+constexpr uint64_t PDPT_INDEX_MASK_lv2=PD_INDEX_MASK_lv1<<9;
+constexpr uint64_t  PML4_INDEX_MASK_lv3=PDPT_INDEX_MASK_lv2<<9;
+constexpr uint64_t PML5_INDEX_MASK_lv4=PML4_INDEX_MASK_lv3<<9;
 //cr3寄存器结构体
 typedef uint64_t cr3_t;
 

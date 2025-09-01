@@ -4,7 +4,6 @@ __KLOG_SIZE = 2M;
 /* 定义内存布局 */
 MEMORY {
     RAM (rwx) : ORIGIN = 0x4000000, LENGTH = 128M  /* 内核加载地址 */
-    STACK (rw) : ORIGIN = 0x400000, LENGTH = 64K    /* 栈空间 */
 }
 
 SECTIONS {
@@ -49,7 +48,7 @@ SECTIONS {
         _stack_bottom = .;
         . += 64K;  /* 64KB 栈空间 */
         _stack_top = .;
-    } >STACK :stack
+    } >RAM :stack
 
     /* C++异常处理信息 */
     .eh_frame : ALIGN(4096) {

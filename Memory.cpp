@@ -238,12 +238,7 @@ void GlobalMemoryPGlevelMgr_t::InitrootPhyMemDscptTbBsPtr()
             break;
         }
     }
-   rootPhyMemDscptTbBsPtr=\
-   (phy_memDesriptor*)(EfiMemMap[kerneldataDesIndex].PhysicalStart+
-    PAGE_SIZE_4KB*EfiMemMap[kerneldataDesIndex].NumberOfPages);
-   EfiMemMap[kerneldataDesIndex].NumberOfPages+=pgcounts_for_phyramtb;
-   EfiMemMap[kerneldataDesIndex+1].PhysicalStart+=pgcounts_for_phyramtb*PAGE_SIZE_4KB;
-   EfiMemMap[kerneldataDesIndex+1].NumberOfPages-=pgcounts_for_phyramtb;
+   rootPhyMemDscptTbBsPtr=new phy_memDesriptor[EfiMemMapEntryCount+30];
     ksystemramcpy(EfiMemMap,
     rootPhyMemDscptTbBsPtr,
     EfiMemMapEntryCount*sizeof(EfiMemMap[0]));

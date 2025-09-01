@@ -11,7 +11,7 @@
 kpoolmemmgr_t gKpoolmemmgr;
 
 constexpr uint16_t FirstStaticHeapMaxObjCount = 4096;
-HeapObjectMeta objMetaTable_for_FirstStaticHeap[FirstStaticHeapMaxObjCount] = {0};
+HeapObjectMetav2 objMetaTable_for_FirstStaticHeap[FirstStaticHeapMaxObjCount] = {0};
 #ifdef KERNEL_MODE
 extern "C" {
     extern char __heap_start;
@@ -26,17 +26,36 @@ static inline uint8_t log2(size_t n) {
     }
     return result;
 }
+
+// 辅助函数：根据偏移量计算物理地址
+static inline uint8_t* offset_to_phys_addr(HCB_chainlist_node* node, uint32_t offset) {
+    return (uint8_t*)node->heap.heapStart + offset;
+}
+
+// 辅助函数：根据偏移量计算虚拟地址
+static inline uint8_t* offset_to_virt_addr(HCB_chainlist_node* node, uint32_t offset) {
+    return (uint8_t*)node->heap.heapVStart + offset;
+}
+
+// 辅助函数：根据物理地址计算偏移量
+static inline uint32_t phys_addr_to_offset(HCB_chainlist_node* node, uint8_t* addr) {
+    return (uint32_t)(addr - (uint8_t*)node->heap.heapStart);
+}
+
+// 辅助函数：根据虚拟地址计算偏移量
+static inline uint32_t virt_addr_to_offset(HCB_chainlist_node* node, uint8_t* addr) {
+    return (uint32_t)(addr - (uint8_t*)node->heap.heapVStart);
+}
 /**
  * 使用二分查找在元信息表中查找地址对应的对象索引
  * 如果地址在某个对象内，返回该对象的索引
  * 如果地址在堆空洞中，返回-1
  * 如果地址不在堆范围内，返回INDEX_NOT_EXIST (-100)
  */
-int kpoolmemmgr_t::addr_to_HCB_MetaInfotb_Index(HCB_chainlist_node HNode, uint8_t *addr)
-{
+int kpoolmemmgr_t::addr_to_HCB_MetaInfotb_Index(HCB_chainlist_node HNode, uint8_t* addr) {
     HeapMetaInfoArray* metaInfo = &HNode.heap.metaInfo;
     uint32_t objCount = metaInfo->header.objMetaCount;
-    HeapObjectMeta* metaTable = metaInfo->objMetaTable;
+    HeapObjectMetav2* metaTable = metaInfo->objMetaTable;
     
     // 检查地址是否在堆范围内
     uint8_t* heapStart = (uint8_t*)HNode.heap.heapStart;
@@ -51,19 +70,22 @@ int kpoolmemmgr_t::addr_to_HCB_MetaInfotb_Index(HCB_chainlist_node HNode, uint8_
         return OS_NOT_EXIST;
     }
     
+    // 计算地址在堆中的偏移量
+    uint32_t offset = phys_addr_to_offset(&HNode, addr);
+    
     // 使用二分查找找到地址所在的对象
     int32_t left = 0;
     int32_t right = objCount - 1;
     
     while (left <= right) {
         int32_t mid = left + (right - left) / 2;
-        uint8_t* objStart = (uint8_t*)metaTable[mid].base;
-        uint8_t* objEnd = objStart + metaTable[mid].size;
+        uint32_t objStart = metaTable[mid].offset_in_heap;
+        uint32_t objEnd = objStart + metaTable[mid].size;
         
-        if (addr >= objStart && addr < objEnd) {
+        if (offset >= objStart && offset < objEnd) {
             // 地址在对象范围内
             return mid;
-        } else if (addr < objStart) {
+        } else if (offset < objStart) {
             right = mid - 1;
         } else {
             left = mid + 1;
@@ -84,7 +106,7 @@ uint8_t* kpoolmemmgr_t::is_space_available(HCB_chainlist_node Heap, uint8_t* add
 {
     HeapMetaInfoArray* metaInfo = &Heap.heap.metaInfo;
     uint32_t objCount = metaInfo->header.objMetaCount;
-    HeapObjectMeta* metaTable = metaInfo->objMetaTable;
+    HeapObjectMetav2* metaTable = metaInfo->objMetaTable;
     uint8_t* heapStart = (uint8_t*)Heap.heap.heapStart;
     uint8_t* heapEnd = heapStart + Heap.heap.heapSize;
     
@@ -120,12 +142,14 @@ uint8_t* kpoolmemmgr_t::is_space_available(HCB_chainlist_node Heap, uint8_t* add
     
     // 处理地址在对象内的情况
     if (index >= 0 && index < objCount) {
-        HeapObjectMeta* meta = &metaTable[index];
+        HeapObjectMetav2* meta = &metaTable[index];
+        
+        // 计算对象的起始地址
+        uint8_t* objStart = heapStart + meta->offset_in_heap;
+        uint8_t* objEnd = objStart + meta->size;
         
         // 如果对象是空闲的，检查是否有足够空间
         if (meta->type == OBJ_TYPE_FREE) {
-            uint8_t* objEnd = (uint8_t*)meta->base + meta->size;
-            
             // 检查从给定地址开始是否有足够空间
             if (addr + size <= objEnd) {
                 return nullptr; // 空间可用
@@ -133,7 +157,7 @@ uint8_t* kpoolmemmgr_t::is_space_available(HCB_chainlist_node Heap, uint8_t* add
         }
         
         // 对象被占用或空间不足，返回对象结束地址
-        return (uint8_t*)meta->base + meta->size;
+        return objEnd;
     }
     
     // 默认情况下返回堆结束地址
@@ -155,13 +179,15 @@ uint8_t* kpoolmemmgr_t::is_space_available(HCB_chainlist_node Heap, uint8_t* add
  */
 /**
  * 目前的缺陷：
- * 这个函数如果要处理对齐问题，可能会产生内存碎屑，
- * 但是这个函数对于内存碎屑的处理是不处理，
- * 会产生元信息表没有映射到的内存空洞
+ * 只是返回内存地址，
+ * 没有提前清理地址以及相关内存，
+ * 可能造成未定义后果
+ * 不过可以用另外的成员函数来实现
  */
 void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t alignment)
 {   
-    if(size_in_bytes == 0)return nullptr;
+    if(size_in_bytes == 0) return nullptr;
+    
     if (kpoolmemmgr_flags.ableto_Expand == 0) {
         // 直接根据hcb.status里面的各个位进行判断
         bool is_free = (first_static_heap.heap.heapSize == first_static_heap.heap.freeSize);
@@ -171,16 +197,16 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                                 !first_static_heap.heap.status.block_full && 
                                 !first_static_heap.heap.status.block_reserved && 
                                 !first_static_heap.heap.status.block_merged);
-        if(!is_free && !is_partial_used)
-        {
+        
+        if(!is_free && !is_partial_used) {
             return nullptr;
         }
-        HeapObjectMeta* infotb = first_static_heap.heap.metaInfo.objMetaTable;
+        
+        HeapObjectMetav2* infotb = first_static_heap.heap.metaInfo.objMetaTable;
         uint64_t MaxObjCount = first_static_heap.heap.metaInfo.header.objMetaMaxCount;
         uint64_t ObjCount = first_static_heap.heap.metaInfo.header.objMetaCount;
         uint8_t* heap_phys_base = (uint8_t*)first_static_heap.heap.heapStart;
         uint8_t* heap_virt_base = (uint8_t*)first_static_heap.heap.heapVStart;
-        uint8_t* heap_phys_end = heap_phys_base + first_static_heap.heap.heapSize;
         
         // 计算对齐掩码
         uint64_t align_value = (1ULL << alignment);
@@ -189,16 +215,20 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
         // 遍历元信息表寻找合适的空闲块
         for (uint32_t i = 0; i < ObjCount; i++) {
             if (infotb[i].type == OBJ_TYPE_FREE) {
-                uint8_t* block_phys_start = (uint8_t*)infotb[i].base;
-                uint8_t* block_virt_start = (uint8_t*)infotb[i].vbase;
+                // 计算块的物理和虚拟起始地址
+                uint8_t* block_phys_start = heap_phys_base + infotb[i].offset_in_heap;
+                uint8_t* block_virt_start = heap_virt_base + infotb[i].offset_in_heap;
                 uint64_t block_size = infotb[i].size;
+                
                 // 计算对齐后的物理起始地址
                 uint8_t* aligned_phys_start = (uint8_t*)(((uint64_t)block_phys_start + align_mask) & ~align_mask);
                 uint64_t alignment_padding = aligned_phys_start - block_phys_start;
+                
                 // 计算对应的虚拟地址
-                uint8_t* aligned_virt_start = block_virt_start + (aligned_phys_start - block_phys_start);    
+                uint8_t* aligned_virt_start = block_virt_start + alignment_padding;
+                
                 // 检查是否有足够空间（包括对齐填充）
-                 if (alignment_padding + size_in_bytes <= block_size) {
+                if (alignment_padding + size_in_bytes <= block_size) {
                     // 计算剩余空间
                     uint64_t remaining_size = block_size - alignment_padding - size_in_bytes;
                     
@@ -211,9 +241,8 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                         // 处理对齐填充部分
                         if (alignment_padding > 0) {
                             // 创建对齐填充空闲块
-                            HeapObjectMeta padding_block;
-                            padding_block.base = (phyaddr_t)block_phys_start;
-                            padding_block.vbase = (vaddr_t)block_virt_start;
+                            HeapObjectMetav2 padding_block;
+                            padding_block.offset_in_heap = infotb[i].offset_in_heap;
                             padding_block.size = alignment_padding;
                             padding_block.type = OBJ_TYPE_FREE;
                             
@@ -223,16 +252,14 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                             // 如果有剩余空间，需要插入分配块和剩余空间块
                             if (remaining_size > 0) {
                                 // 创建分配块
-                                HeapObjectMeta alloc_block;
-                                alloc_block.base = (phyaddr_t)aligned_phys_start;
-                                alloc_block.vbase = (vaddr_t)aligned_virt_start;
+                                HeapObjectMetav2 alloc_block;
+                                alloc_block.offset_in_heap = infotb[i].offset_in_heap + alignment_padding;
                                 alloc_block.size = size_in_bytes;
                                 alloc_block.type = OBJ_TYPE_NORMAL;
                                 
                                 // 创建剩余空间空闲块
-                                HeapObjectMeta remaining_block;
-                                remaining_block.base = (phyaddr_t)(aligned_phys_start + size_in_bytes);
-                                remaining_block.vbase = (vaddr_t)(aligned_virt_start + size_in_bytes);
+                                HeapObjectMetav2 remaining_block;
+                                remaining_block.offset_in_heap = alloc_block.offset_in_heap + size_in_bytes;
                                 remaining_block.size = remaining_size;
                                 remaining_block.type = OBJ_TYPE_FREE;
                                 
@@ -242,7 +269,7 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                                     i + 1,
                                     &alloc_block,
                                     infotb,
-                                    sizeof(HeapObjectMeta),
+                                    sizeof(HeapObjectMetav2),
                                     1
                                 );
                                 
@@ -251,19 +278,17 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                                     i + 2,
                                     &remaining_block,
                                     infotb,
-                                    sizeof(HeapObjectMeta),
+                                    sizeof(HeapObjectMetav2),
                                     1
                                 );
                                 
                                 // 更新对象计数
                                 ObjCount += 2;
                             } else {
-                                //没法增加新的项的情况下zhi neng
                                 // 只有对齐填充，没有剩余空间
                                 // 创建分配块
-                                HeapObjectMeta alloc_block;
-                                alloc_block.base = (phyaddr_t)aligned_phys_start;
-                                alloc_block.vbase = (vaddr_t)aligned_virt_start;
+                                HeapObjectMetav2 alloc_block;
+                                alloc_block.offset_in_heap = infotb[i].offset_in_heap + alignment_padding;
                                 alloc_block.size = size_in_bytes;
                                 alloc_block.type = OBJ_TYPE_NORMAL;
                                 
@@ -273,7 +298,7 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                                     i + 1,
                                     &alloc_block,
                                     infotb,
-                                    sizeof(HeapObjectMeta),
+                                    sizeof(HeapObjectMetav2),
                                     1
                                 );
                                 
@@ -283,15 +308,13 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                         } else {
                             // 没有对齐填充，但有剩余空间
                             // 更新当前块为分配块
-                            infotb[i].base = (phyaddr_t)aligned_phys_start;
-                            infotb[i].vbase = (vaddr_t)aligned_virt_start;
+                            infotb[i].offset_in_heap += 0; // 偏移量不变
                             infotb[i].size = size_in_bytes;
                             infotb[i].type = OBJ_TYPE_NORMAL;
                             
                             // 创建剩余空间空闲块
-                            HeapObjectMeta remaining_block;
-                            remaining_block.base = (phyaddr_t)(aligned_phys_start + size_in_bytes);
-                            remaining_block.vbase = (vaddr_t)(aligned_virt_start + size_in_bytes);
+                            HeapObjectMetav2 remaining_block;
+                            remaining_block.offset_in_heap = infotb[i].offset_in_heap + size_in_bytes;
                             remaining_block.size = remaining_size;
                             remaining_block.type = OBJ_TYPE_FREE;
                             
@@ -301,7 +324,7 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                                 i + 1,
                                 &remaining_block,
                                 infotb,
-                                sizeof(HeapObjectMeta),
+                                sizeof(HeapObjectMetav2),
                                 1
                             );
                             
@@ -311,18 +334,16 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                         
                         // 更新堆的剩余空间
                         first_static_heap.heap.freeSize -= size_in_bytes;
-                    } else {
-                       return nullptr;  
-                    }  
-                    if(first_static_heap.heap.freeSize) {
-                        // 设置为部分使用状态
-                        first_static_heap.heap.status.block_exist = 1;
-                        first_static_heap.heap.status.block_full = 0;
-                    } else {
-                        // 设置为完全使用状态
-                        first_static_heap.heap.status.block_exist = 1;
-                        first_static_heap.heap.status.block_full = 1;
-                    }
+                        
+                        if(first_static_heap.heap.freeSize) {
+                            // 设置为部分使用状态
+                            first_static_heap.heap.status.block_exist = 1;
+                            first_static_heap.heap.status.block_full = 0;
+                        } else {
+                            // 设置为完全使用状态
+                            first_static_heap.heap.status.block_exist = 1;
+                            first_static_heap.heap.status.block_full = 1;
+                        }
                         
                         // 返回分配的内存地址
                         if (vaddraquire) {
@@ -330,6 +351,9 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
                         } else {
                             return aligned_phys_start;
                         }
+                    } else {
+                       return nullptr;  
+                    }  
                 }
             }
         }
@@ -340,6 +364,45 @@ void *kpoolmemmgr_t::kalloc(uint64_t size_in_bytes, bool vaddraquire, uint8_t al
         // ableto_Expand位开启的情况，暂不实现
         return nullptr;
     }
+}
+void kpoolmemmgr_t::Init()
+{
+#ifdef KERNEL_MODE
+    // 获取内核堆的起始地址和大小
+    first_static_heap.heap.heapStart = (phyaddr_t)&__heap_start;
+    first_static_heap.heap.heapVStart = (vaddr_t)&__heap_start;
+    first_static_heap.heap.heapSize = (uint64_t)(&__heap_end - &__heap_start);
+    first_static_heap.heap.freeSize = (uint64_t)(&__heap_end - &__heap_start);
+#endif    
+    first_static_heap.heap.status.block_exist = 0;
+    first_static_heap.heap.status.block_tb_full = 0;
+    first_static_heap.heap.status.block_full = 0;
+    first_static_heap.heap.status.block_reserved = 0;
+    first_static_heap.heap.status.block_merged = 0;
+    
+    // 初始化元信息数组
+    first_static_heap.heap.metaInfo.header.magic = 0x48504D41; // "HPM A"
+    first_static_heap.heap.metaInfo.header.version = 2; // 版本改为2，表示使用v2元信息
+    first_static_heap.heap.metaInfo.header.objMetaCount = 1;  // 初始时有一个空闲对象
+    first_static_heap.heap.metaInfo.header.objMetaMaxCount = FirstStaticHeapMaxObjCount;
+    first_static_heap.heap.metaInfo.objMetaTable = objMetaTable_for_FirstStaticHeap;
+    
+    // 初始化第一个元信息项（整个堆作为空闲块）
+    objMetaTable_for_FirstStaticHeap[0].offset_in_heap = 0;
+    objMetaTable_for_FirstStaticHeap[0].size = first_static_heap.heap.heapSize;
+    objMetaTable_for_FirstStaticHeap[0].type = OBJ_TYPE_FREE;
+    
+    // 初始化链表指针
+    first_static_heap.prev = nullptr;
+    first_static_heap.next = nullptr;
+    last_heap_node = &first_static_heap;
+    
+    // 初始化flags结构
+    kpoolmemmgr_flags.ableto_Expand = 0;
+    kpoolmemmgr_flags.heap_vaddr_enabled = 1; // 默认启用虚拟地址
+    kpoolmemmgr_flags.alignment = 3; // 默认8字节对齐 (2^3=8)
+    
+    HCB_count = 1;
 }
 HCB_chainlist_node *kpoolmemmgr_t::getFirst_static_heap()
 {
@@ -356,10 +419,10 @@ int kpoolmemmgr_t::mgr_vaddr_enabled()
     return kpoolmemmgr_flags.heap_vaddr_enabled;
 }
 
-void kpoolmemmgr_t::kfree(void*ptr)
+void kpoolmemmgr_t::kfree(void* ptr)
 {
     if (kpoolmemmgr_flags.ableto_Expand == 0) {
-        HeapObjectMeta* infotb = first_static_heap.heap.metaInfo.objMetaTable;
+        HeapObjectMetav2* infotb = first_static_heap.heap.metaInfo.objMetaTable;
         uint64_t ObjCount = first_static_heap.heap.metaInfo.header.objMetaCount;
         uint8_t* heap_phys_base = (uint8_t*)first_static_heap.heap.heapStart;
         uint8_t* heap_virt_base = (uint8_t*)first_static_heap.heap.heapVStart;
@@ -373,20 +436,21 @@ void kpoolmemmgr_t::kfree(void*ptr)
             is_virtual_addr = true;
         }
         
+        // 计算目标地址在堆中的偏移量
+        uint32_t target_offset;
+        if (is_virtual_addr) {
+            target_offset = virt_addr_to_offset(&first_static_heap, target_addr);
+        } else {
+            target_offset = phys_addr_to_offset(&first_static_heap, target_addr);
+        }
+        
         // 遍历元信息表查找对应的对象
         for (uint32_t i = 0; i < ObjCount; i++) {
-            uint8_t* obj_phys_addr = (uint8_t*)infotb[i].base;
-            uint8_t* obj_virt_addr = (uint8_t*)infotb[i].vbase;
+            uint32_t obj_offset = infotb[i].offset_in_heap;
+            uint32_t obj_end = obj_offset + infotb[i].size;
             
             // 检查地址是否匹配
-            bool addr_match = false;
-            if (is_virtual_addr) {
-                addr_match = (target_addr >= obj_virt_addr && 
-                             target_addr < obj_virt_addr + infotb[i].size);
-            } else {
-                addr_match = (target_addr >= obj_phys_addr && 
-                             target_addr < obj_phys_addr + infotb[i].size);
-            }
+            bool addr_match = (target_offset >= obj_offset && target_offset < obj_end);
             
             if (addr_match && infotb[i].type != OBJ_TYPE_FREE) {
                 // 找到要释放的对象
@@ -405,10 +469,10 @@ void kpoolmemmgr_t::kfree(void*ptr)
                     
                     // 尝试与前一个块合并
                     if (i > 0 && infotb[i-1].type == OBJ_TYPE_FREE) {
-                        uint8_t* prev_end = (uint8_t*)infotb[i-1].base + infotb[i-1].size;
+                        uint32_t prev_end = infotb[i-1].offset_in_heap + infotb[i-1].size;
                         
-                        // 检查物理地址是否连续
-                        if (prev_end == (uint8_t*)infotb[i].base) {
+                        // 检查偏移量是否连续
+                        if (prev_end == infotb[i].offset_in_heap) {
                             // 合并块
                             infotb[i-1].size += infotb[i].size;
                             
@@ -418,7 +482,7 @@ void kpoolmemmgr_t::kfree(void*ptr)
                                 i,
                                 i,
                                 infotb,
-                                sizeof(HeapObjectMeta)
+                                sizeof(HeapObjectMetav2)
                             );
                             
                             // 更新对象计数和索引
@@ -431,10 +495,10 @@ void kpoolmemmgr_t::kfree(void*ptr)
                     
                     // 尝试与后一个块合并
                     if (i < ObjCount - 1 && infotb[i+1].type == OBJ_TYPE_FREE) {
-                        uint8_t* curr_end = (uint8_t*)infotb[i].base + infotb[i].size;
+                        uint32_t curr_end = infotb[i].offset_in_heap + infotb[i].size;
                         
-                        // 检查物理地址是否连续
-                        if (curr_end == (uint8_t*)infotb[i+1].base) {
+                        // 检查偏移量是否连续
+                        if (curr_end == infotb[i+1].offset_in_heap) {
                             // 合并块
                             infotb[i].size += infotb[i+1].size;
                             
@@ -444,7 +508,7 @@ void kpoolmemmgr_t::kfree(void*ptr)
                                 i+1,
                                 i+1,
                                 infotb,
-                                sizeof(HeapObjectMeta)
+                                sizeof(HeapObjectMetav2)
                             );
                             
                             // 更新对象计数
@@ -465,12 +529,11 @@ void kpoolmemmgr_t::kfree(void*ptr)
     }
 }
 
-kpoolmemmgr_t::kpoolmemmgr_t()
-{
+kpoolmemmgr_t::kpoolmemmgr_t() {
 #ifdef TEST_MODE
     first_static_heap.heap.heapStart = (phyaddr_t)malloc(1ULL<<22);
-    first_static_heap.heap.heapVStart = first_static_heap.heap.heapStart ;
-    first_static_heap.heap.heapSize=first_static_heap.heap.freeSize=1ULL<<22;
+    first_static_heap.heap.heapVStart = first_static_heap.heap.heapStart;
+    first_static_heap.heap.heapSize = first_static_heap.heap.freeSize = 1ULL<<22;
 #endif  
 #ifdef KERNEL_MODE
     // 获取内核堆的起始地址和大小
@@ -488,25 +551,28 @@ kpoolmemmgr_t::kpoolmemmgr_t()
     
     // 初始化元信息数组
     first_static_heap.heap.metaInfo.header.magic = 0x48504D41; // "HPM A"
-    first_static_heap.heap.metaInfo.header.version = 1;
-    first_static_heap.heap.metaInfo.header.objMetaCount = 1;  // 初始时没有对象
+    first_static_heap.heap.metaInfo.header.version = 2; // 版本改为2，表示使用v2元信息
+    first_static_heap.heap.metaInfo.header.objMetaCount = 1;  // 初始时有一个空闲对象
     first_static_heap.heap.metaInfo.header.objMetaMaxCount = FirstStaticHeapMaxObjCount;
     first_static_heap.heap.metaInfo.objMetaTable = objMetaTable_for_FirstStaticHeap;
-    objMetaTable_for_FirstStaticHeap[0].base = first_static_heap.heap.heapStart;
+    
+    // 初始化第一个元信息项（整个堆作为空闲块）
+    objMetaTable_for_FirstStaticHeap[0].offset_in_heap = 0;
     objMetaTable_for_FirstStaticHeap[0].size = first_static_heap.heap.heapSize;
     objMetaTable_for_FirstStaticHeap[0].type = OBJ_TYPE_FREE;
+    
     // 初始化链表指针
     first_static_heap.prev = nullptr;
     first_static_heap.next = nullptr;
-    last_heap_node=&first_static_heap;
+    last_heap_node = &first_static_heap;
+    
     // 初始化flags结构
-    // 根据文档说明，设置flags里面的位域值
-    kpoolmemmgr_flags.ableto_Expand = 0;  // 使用0而不是false，因为这是位域
-
+    kpoolmemmgr_flags.ableto_Expand = 0;
+    kpoolmemmgr_flags.heap_vaddr_enabled = 1; // 默认启用虚拟地址
+    kpoolmemmgr_flags.alignment = 3; // 默认8字节对齐 (2^3=8)
     
     HCB_count = 1;
 }
-
 // 实现新的成员函数
 void kpoolmemmgr_t::print_hcb_status(HCB_chainlist_node* node) {
     const char* status_str = "UNKNOWN";
@@ -597,16 +663,18 @@ void kpoolmemmgr_t::print_meta_table(HCB_chainlist_node* node) {
     
     kputsSecure("IDX | PHYS ADDR    | SIZE       | TYPE    | VADDR\n");
     kputsSecure("----+-------------+------------+---------+------------\n");
-    
+    uint64_t phyaddr_temp = 0;
+    uint64_t vaddr_temp = 0;
     for(uint32_t i = 0; i < count; i++) {
-        HeapObjectMeta* entry = &meta->objMetaTable[i];
+        HeapObjectMetav2* entry = &meta->objMetaTable[i];
         
         // 打印索引
         kpnumSecure(&i, UNDEC, 3);
         kputsSecure(" | ");
         
         // 物理地址
-        kpnumSecure(&entry->base, UNHEX, sizeof(phyaddr_t));
+        phyaddr_temp = entry->offset_in_heap+node->heap.heapStart;
+        kpnumSecure(&phyaddr_temp, UNHEX, sizeof(phyaddr_t));
         kputsSecure(" | ");
         
         // 大小
@@ -620,7 +688,8 @@ void kpoolmemmgr_t::print_meta_table(HCB_chainlist_node* node) {
         kputsSecure(" | ");
         
         // 虚拟地址
-        kpnumSecure(&entry->vbase, UNHEX, sizeof(vaddr_t));
+        vaddr_temp = entry->offset_in_heap+node->heap.heapVStart;
+        kpnumSecure(&vaddr_temp, UNHEX, sizeof(vaddr_t));
         kputsSecure("\n");
     }
 }
@@ -689,4 +758,11 @@ void* operator new(size_t, void* ptr) noexcept {
 
 void* operator new[](size_t, void* ptr) noexcept {
     return ptr;
+}
+HCB::HCB(/* args */)
+{
+}
+
+HCB::~HCB()
+{
 }

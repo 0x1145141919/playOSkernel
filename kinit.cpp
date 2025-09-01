@@ -5,6 +5,7 @@
 #include "VideoDriver.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "Memory.h"
+#include "kpoolmemmgr.h"
 
 // 定义C++运行时需要的符号
 extern "C" {
@@ -28,6 +29,7 @@ extern "C" int _kernel_Init(void* TransferPage,
      EFI_SYSTEM_TABLE*gST) 
 {
     int  Status=0;
+    ;
     GlobalBasicGraphicInfoType* TFG=(GlobalBasicGraphicInfoType*)TransferPage;
     Status = InitialGlobalBasicGraphicInfo(
         TFG->horizentalResolution,
@@ -43,7 +45,7 @@ extern "C" int _kernel_Init(void* TransferPage,
         serial_puts("InitialGlobalBasicGraphicInfo Failed\n");
         return Status;
     }
-    
+    gKpoolmemmgr.Init();
     Status =InitialGlobalCharacterSetBitmapControler(
         32,
         16,
@@ -75,8 +77,5 @@ extern "C" int _kernel_Init(void* TransferPage,
     gBaseMemMgr.Init(memDescript,numofDiscriptors);
     //gBaseMemMgr.printEfiMemoryDescriptorTable();
     gBaseMemMgr.printPhyMemDesTb();
-    gBitmapFreePhyMemPGmgr.Init();
-    gBaseMemMgr.printPhyMemDesTb();
-    gBitmapFreePhyMemPGmgr.PrintBitmapInfo();
     asm volatile("hlt");    
 }

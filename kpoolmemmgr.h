@@ -32,15 +32,8 @@ enum KernelObjType : uint8_t {
     OBJ_TYPE_FIXED=13,
     OBJ_TYPE_MAX = 255
 };
-// 堆对象元信息
-struct HeapObjectMeta {
-    phyaddr_t base;          // 对象物理基址(8字节)
-    vaddr_t vbase;           // 对象虚拟基址(8字节)
-    uint64_t size;           // 对象大小(字节)(8字节)
-    KernelObjType type;      // 对象类型(1字节)
-    uint8_t  reserved[3];
-    uint32_t checksum;       // 校验和(4字节)
-};
+// 堆对象元信息v2
+
 struct HeapObjectMetav2
 {
     uint32_t offset_in_heap;
@@ -64,7 +57,7 @@ struct HeapMetaArrayHeader {
  */
 struct HeapMetaInfoArray {
     HeapMetaArrayHeader header;          
-    HeapObjectMeta*objMetaTable; 
+    HeapObjectMetav2*objMetaTable; 
 };
 
 // 堆控制块(HCB) - 管理一段连续堆内存的元信息
@@ -86,6 +79,17 @@ struct HeapControlBlock {
     uint8_t  reserved[7];    // 保留字段(对齐到8字节)
 
 };
+class HCB
+{
+private:
+    /* data */
+public:
+    HCB(/* args */);
+    ~HCB();
+};
+
+
+
 struct kpoolmemmgr_flags_t
    {
    uint64_t ableto_Expand :1;
@@ -124,6 +128,7 @@ public:
    void print_meta_table(HCB_chainlist_node* node); // 打印HCB的元信息表
    void print_all_hcb_status();                     // 打印所有HCB状态
    void*kalloc(uint64_t size,bool vaddraquire=false,uint8_t alignment=3);
+   void Init();
    HCB_chainlist_node*getFirst_static_heap();
    kpoolmemmgr_flags_t getkpoolmemmgr_flags();
    int mgr_vaddr_enabled();

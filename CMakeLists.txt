@@ -34,7 +34,6 @@ add_executable(kernel.elf #内核镜像
     VideoDriver.c
     PortDriver.c
     Memory.cpp
-    gBitmapFreePhyMemMgr.cpp
     kpoolmemmgr.cpp
     util.cpp
     
