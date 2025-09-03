@@ -36,7 +36,7 @@ add_executable(kernel.elf #内核镜像
     Memory.cpp
     kpoolmemmgr.cpp
     util.cpp
-    
+    phygpsmemmgr.cpp
 )
 #add_executable(test_moudle.elf
 #test_main.cpp

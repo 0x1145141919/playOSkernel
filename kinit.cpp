@@ -6,7 +6,7 @@
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "Memory.h"
 #include "kpoolmemmgr.h"
-
+#include "phygpsmemmgr.h"
 // 定义C++运行时需要的符号
 extern "C" {
     // DSO句柄，对于静态链接的内核，可以简单定义为空
@@ -28,6 +28,7 @@ extern "C" int _kernel_Init(void* TransferPage,
     int numofDiscriptors,
      EFI_SYSTEM_TABLE*gST) 
 {
+    //asm volatile("cli   ");
     int  Status=0;
     ;
     GlobalBasicGraphicInfoType* TFG=(GlobalBasicGraphicInfoType*)TransferPage;
@@ -77,5 +78,7 @@ extern "C" int _kernel_Init(void* TransferPage,
     gBaseMemMgr.Init(memDescript,numofDiscriptors);
     //gBaseMemMgr.printEfiMemoryDescriptorTable();
     gBaseMemMgr.printPhyMemDesTb();
+    gPgsMemMgr.Init();
+    gPgsMemMgr.PrintPgsMemMgrStructure();
     asm volatile("hlt");    
 }

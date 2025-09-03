@@ -678,7 +678,7 @@ void kpoolmemmgr_t::print_meta_table(HCB_chainlist_node* node) {
         kputsSecure(" | ");
         
         // 大小
-        kpnumSecure(&entry->size, UNDEC, 8);
+        kpnumSecure(&entry->size, UNHEX, 8);
         kputsSecure(" | ");
         
         // 类型
@@ -713,6 +713,110 @@ void kpoolmemmgr_t::print_all_hcb_status() {
     kputsSecure("\nTotal HCBs: ");
     kpnumSecure(&index, UNDEC, 0);
     kputsSecure("\n");
+}
+// 高效的内存设置函数
+static inline void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
+    uint8_t* p = static_cast<uint8_t*>(ptr);
+    
+    // 使用64位写入来加速内存设置
+    uint64_t value64 = value;
+    value64 |= value64 << 8;
+    value64 |= value64 << 16;
+    value64 |= value64 << 32;
+    
+    // 处理前缀不对齐部分
+    while (size_in_byte > 0 && (reinterpret_cast<uint64_t>(p) & 7)) {
+        *p++ = value;
+        size_in_byte--;
+    }
+    
+    // 使用64位写入处理主体部分
+    uint64_t* p64 = reinterpret_cast<uint64_t*>(p);
+    while (size_in_byte >= 8) {
+        *p64++ = value64;
+        size_in_byte -= 8;
+    }
+    
+    // 处理剩余部分
+    p = reinterpret_cast<uint8_t*>(p64);
+    while (size_in_byte > 0) {
+        *p++ = value;
+        size_in_byte--;
+    }
+}
+static inline int find_object_by_offset(HeapMetaInfoArray* metaInfo, uint32_t target_offset) {
+    uint32_t objCount = metaInfo->header.objMetaCount;
+    HeapObjectMetav2* metaTable = metaInfo->objMetaTable;
+    
+    int32_t left = 0;
+    int32_t right = objCount - 1;
+    
+    while (left <= right) {
+        int32_t mid = left + (right - left) / 2;
+        uint32_t obj_offset = metaTable[mid].offset_in_heap;
+        
+        if (obj_offset == target_offset) {
+            return mid; // 找到匹配的对象
+        } else if (obj_offset < target_offset) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    
+    return -1; // 没有找到匹配的对象
+}
+void kpoolmemmgr_t::clear(void* ptr)
+{
+    if (ptr == nullptr) {
+        return;
+    }
+    
+    if (kpoolmemmgr_flags.ableto_Expand == 0) {
+        HeapMetaInfoArray* metaInfo = &first_static_heap.heap.metaInfo;
+        uint8_t* heap_phys_base = (uint8_t*)first_static_heap.heap.heapStart;
+        uint8_t* heap_virt_base = (uint8_t*)first_static_heap.heap.heapVStart;
+        
+        // 判断ptr是物理地址还是虚拟地址
+        bool is_virtual_addr = false;
+        uint8_t* target_addr = (uint8_t*)ptr;
+        
+        // 检查高16位是否全1（虚拟地址特征）
+        if ((reinterpret_cast<uint64_t>(ptr) >> 48) == 0xFFFF) {
+            is_virtual_addr = true;
+        }
+        
+        // 计算目标地址在堆中的偏移量
+        uint32_t target_offset;
+        if (is_virtual_addr) {
+            target_offset = virt_addr_to_offset(&first_static_heap, target_addr);
+        } else {
+            target_offset = phys_addr_to_offset(&first_static_heap, target_addr);
+        }
+        
+        // 使用二分查找在元信息表中查找对象
+        int index = find_object_by_offset(metaInfo, target_offset);
+        
+        if (index >= 0 && metaInfo->objMetaTable[index].type != OBJ_TYPE_FREE) {
+            // 找到匹配的对象，计算要清零的内存区域
+            uint8_t* clear_start;
+            if (is_virtual_addr) {
+                clear_start = offset_to_virt_addr(&first_static_heap, target_offset);
+            } else {
+                clear_start = offset_to_phys_addr(&first_static_heap, target_offset);
+            }
+            
+            uint32_t clear_size = metaInfo->objMetaTable[index].size;
+            
+            // 使用优化的setmem函数将内存区域清零
+            setmem(clear_start, clear_size, 0);
+        } else {
+            // 如果没有找到匹配的对象，可能是错误的指针
+            // 在内核环境中，可能需要记录错误或触发断言
+        }
+    } else {
+        // ableto_Expand位开启的情况，暂不实现
+    }
 }
 
 kpoolmemmgr_t::~kpoolmemmgr_t()
