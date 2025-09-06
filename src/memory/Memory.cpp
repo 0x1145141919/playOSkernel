@@ -7,7 +7,7 @@
 #define CLEAN_ENTRY 0
 #define PAGE_SIZE 0x1000
 #define PAGE_SIZE_4KB 0x1000
-
+GlobalMemoryPGlevelMgr_t gBaseMemMgr;
 //efi内存描述符表id为0,操作系统自己维护的内存描述符表id为1
 // 默认构造函数
 GlobalMemoryPGlevelMgr_t::GlobalMemoryPGlevelMgr_t() {

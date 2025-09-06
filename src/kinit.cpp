@@ -8,7 +8,7 @@
 #include "kpoolmemmgr.h"
 #include "phygpsmemmgr.h"
 // 定义C++运行时需要的符号
-extern "C" {
+ extern "C" {
     // DSO句柄，对于静态链接的内核，可以简单定义为空
     void* __dso_handle = 0;
     
@@ -21,7 +21,7 @@ extern "C" {
     }
 }
 
-GlobalMemoryPGlevelMgr_t gBaseMemMgr;
+
 extern "C" int _kernel_Init(void* TransferPage,
     int numofpages,
     EFI_MEMORY_DESCRIPTORX64*memDescript,

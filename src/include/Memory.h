@@ -24,6 +24,8 @@ typedef enum {
     OS_KERNEL_CODE,
     OS_KERNEL_STACK,
     ERROR_FAIL_TO_FIND,
+    OS_ALLOCATABLE_MEMORY,
+    OS_RESERVED_MEMORY,
     MEMORY_TYPE_OEM_RESERVED_MIN = 0x70000000,
   MEMORY_TYPE_OEM_RESERVED_MAX = 0x7FFFFFFF,
   MEMORY_TYPE_OS_RESERVED_MIN  = 0x80000000,
@@ -67,6 +69,12 @@ typedef struct phy_memDesriptor{
     EFI_VIRTUAL_ADDRESS             VirtualStart;   // Field size is 64 bits
     UINT64                          NumberOfPages;  // Field size is 64 bits
     UINT64                          Attribute;      // Field size is 64 bits
+    /**
+     *  上面的attribute0位是否占用，1位是否读，2位是否写，3位是否可执行，
+     * 
+     * 上面的约定只在phy_memDesriptor *PgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
+     * 的返回结果中有效
+     */
     phy_memDesriptor*submaptable;
 }  phy_memDesriptor; //PHY_MEMORY_DESCRIPTOR
 class GlobalMemoryPGlevelMgr_t {

@@ -28,60 +28,81 @@ set(CMAKE_C_EXTENSIONS ON)
 add_compile_options(-fno-stack-protector)
 
 
-# 添加可执行文件（混合 C/C++ 源文件）
-add_executable(kernel.elf #内核镜像
-    kinit.cpp           
-    VideoDriver.c
-    PortDriver.c
-    Memory.cpp
-    kpoolmemmgr.cpp
-    util.cpp
-    phygpsmemmgr.cpp
+# 定义通用源文件
+set(SRC_COMMON
+    src/memory/Memory.cpp
+    src/memory/kpoolmemmgr.cpp
+    src/memory/phygpsmemmgr_init.cpp
+    src/memory/phygpsmemmgr_print.cpp
+    src/memory/phygpsmemmgr_freememmanage.cpp
+    src/memory/pgtable_query.cpp
+    src/utils/util.cpp
+    src/drivers/VideoDriver.c
+    src/drivers/PortDriver.c
 )
-#add_executable(test_moudle.elf
-#test_main.cpp
-#test_gBitmapFreePhyMemMgr.cpp
-#)
 
+# 内核可执行文件
+add_executable(kernel.elf
+    ${CMAKE_SOURCE_DIR}/src/kinit.cpp
+    ${SRC_COMMON}
+)
+
+# Memory 模块测试可执行文件
+add_executable(memmory_module_test
+    ${CMAKE_SOURCE_DIR}/src/tests/Memory_moudle_test.cpp
+    ${SRC_COMMON}
+)
+
+# KPoolMemMgr 测试可执行文件
 add_executable(test_kpoolmemmgr
-test_kpoolmemmgr.cpp
-kpoolmemmgr.cpp
-util.cpp
-VideoDriver.c
-PortDriver.c
+    src/tests/test_kpoolmemmgr.cpp
+    src/memory/kpoolmemmgr.cpp
+    src/utils/util.cpp
+    src/drivers/VideoDriver.c
+    src/drivers/PortDriver.c
 )
 
 # 头文件路径（对 C/C++ 均可见）
 target_include_directories(kernel.elf PRIVATE
     "/usr/include/efi/"
     "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src/include"
 )
-
+target_include_directories(memmory_module_test PRIVATE
+    "/usr/include/efi/"
+    "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src/include"
+)
 target_include_directories(test_kpoolmemmgr PRIVATE
     "/usr/include/efi/"
     "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/src/include"
 )
-target_compile_options(kernel.elf PRIVATE 
-    "-nostdlib"#禁用标准库
-    "-ffreestanding"#自由环境
-    -fno-use-cxa-atexit #禁用c++的析构函数
-        -fno-exceptions #禁用异常
-     -fno-builtin #禁用内建函数
-    "-static"
-   -DKERNEL_MODE  # 内核专用宏定义
-)
-target_link_options(kernel.elf PRIVATE 
-    "-T${CMAKE_SOURCE_DIR}/linker_for_kernel.ld"
-    "-nostdlib"#禁用标准库
-    "-ffreestanding"#自由环境
-    -fno-use-cxa-atexit #禁用c++的析构函数
-        -fno-exceptions #禁用异常
-     -fno-builtin #禁用内建函数
-    "-static"
-    "-lgcc" 
-        
+# 定义内核专用编译选项
+set(KERNEL_COMPILE_OPTS
+    -nostdlib
+    -ffreestanding
+    -fno-use-cxa-atexit
+    -fno-exceptions
+    -fno-builtin
+    -static
+    -DKERNEL_MODE
 )
 
-target_compile_options(test_kpoolmemmgr PRIVATE
-        -DTEST_MODE    # 测试专用宏定义
+# 内核链接选项
+set(KERNEL_LINK_OPTS
+-nostdlib
+    -ffreestanding
+    -fno-use-cxa-atexit
+    -fno-exceptions
+    -fno-builtin
+    -static
+    -T${CMAKE_SOURCE_DIR}/linker_for_kernel.ld
+    -lgcc
 )
+
+# 应用编译选项
+target_compile_options(kernel.elf PRIVATE ${KERNEL_COMPILE_OPTS})
+target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})
+target_compile_options(memmory_module_test PRIVATE -DTEST_MODE)
+target_compile_options(test_kpoolmemmgr PRIVATE -DTEST_MODE)

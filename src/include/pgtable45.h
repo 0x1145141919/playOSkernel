@@ -6,6 +6,21 @@ typedef uint64_t phys_addr_t;
 #define PHYS_ADDR_MASK 0x000FFFFFFFFFF000  // 52位物理地址掩码
 #define HUGE_1GB_MASK 0x000FFFFFC0000000  // 1GB对齐
 #define HUGE_2MB_MASK 0x000FFFFFFFE00000  // 2MB对齐
+constexpr uint64_t PAGE_SIZE_IN_LV[] = {
+    (1ULL << 12) ,  // NORMAL_4kb_MASK_OFFSET
+    (1ULL << 21) ,  // NORMAL_2MB_MASK_OFFSET
+    (1ULL << 30) ,  // NORMAL_1GB_MASK_OFFSET
+    (1ULL << 39) ,  // NORMAL_512GB_MASK_OFFSET
+    (1ULL << 48)    // NORMAL_256TB_MASK_OFFSET
+};
+constexpr uint64_t PAGE_OFFSET_MASK[]={
+     (1ULL << 12)-1 ,  // NORMAL_4kb_MASK_OFFSET
+    (1ULL << 21) -1,  // NORMAL_2MB_MASK_OFFSET
+    (1ULL << 30) -1,  // NORMAL_1GB_MASK_OFFSET
+    (1ULL << 39) -1,  // NORMAL_512GB_MASK_OFFSET
+    (1ULL << 48)  -1
+};
+constexpr uint64_t Max_huge_pg_index =2;//上面那个表中现在的cpu暂时只支持到1GB大页
 // 页表项基础类型 (所有表项均为64位)
 typedef uint64_t paging_entry_t;
 

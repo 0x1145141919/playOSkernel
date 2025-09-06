@@ -126,6 +126,8 @@ int kputsSecure(char*strbuff);
 int kputcharSecure(UINT8 ch);
 int kernelshellmoveupSecure(int yMovement);
 int kpnumSecure(void* numptr, int format, int len);
+//这里的len是numptr开始的字节数，不是打印的位数
+//比如8位就使用1,16位就使用2,32位就使用4，64位就使用8
 #define UNBIN 1
 #define UNDEC 3
 #define INDEC 4
