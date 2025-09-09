@@ -15,11 +15,7 @@ void PgsMemMgr::PrintPgsMemMgrStructure()
     kpnumSecure(&kernel_space_cr3, UNHEX, 8);
     kputsSecure("\n");
     
-    // 打印标志位
-    kputsSecure(", PgtbSituate=");
-    uint64_t temp_flag2 = flags.is_pgsallocate_enable;
-    kpnumSecure(&temp_flag2, UNDEC, 1);
-    kputsSecure("\n\n");
+
     
     // 打印各级页表结构
     if (cpu_pglv == 5)
@@ -35,19 +31,7 @@ void PgsMemMgr::PrintPgsMemMgrStructure()
                 PrintPageTableEntry(&rootlv4PgCBtb[i], 4);
                 
                 // 打印下一级
-                if (rootlv4PgCBtb[i].flags.is_lowerlv_bitmap)
-                {
-                    // 处理位图情况
-                    if (rootlv4PgCBtb[i].flags.is_reserved)
-                    {
-                        PrintBitmap2bits(rootlv4PgCBtb[i].base.map_tpye2, 4, i);
-                    }
-                    else
-                    {
-                        PrintBitmap1bit(rootlv4PgCBtb[i].base.map_tpye1, 4, i);
-                    }
-                }
-                else if (!rootlv4PgCBtb[i].flags.is_atom && rootlv4PgCBtb[i].base.lowerlvPgCBtb)
+                if (!rootlv4PgCBtb[i].flags.is_atom && rootlv4PgCBtb[i].base.lowerlvPgCBtb)
                 {
                     PrintLevel4Table(rootlv4PgCBtb[i].base.lowerlvPgCBtb, i);
                 }
@@ -62,19 +46,7 @@ void PgsMemMgr::PrintPgsMemMgrStructure()
         PrintPageTableEntry(rootlv4PgCBtb, 4);
         
         // 打印下一级
-        if (rootlv4PgCBtb->flags.is_lowerlv_bitmap)
-        {
-            // 处理位图情况
-            if (rootlv4PgCBtb->flags.is_reserved)
-            {
-                PrintBitmap2bits(rootlv4PgCBtb->base.map_tpye2, 4, 0);
-            }
-            else
-            {
-                PrintBitmap1bit(rootlv4PgCBtb->base.map_tpye1, 4, 0);
-            }
-        }
-        else if (!rootlv4PgCBtb->flags.is_atom && rootlv4PgCBtb->base.lowerlvPgCBtb)
+        if (!rootlv4PgCBtb->flags.is_atom && rootlv4PgCBtb->base.lowerlvPgCBtb)
         {
             PrintLevel4Table(rootlv4PgCBtb->base.lowerlvPgCBtb, 0);
         }
@@ -97,19 +69,7 @@ void PgsMemMgr::PrintLevel4Table(lowerlv_PgCBtb* table, int parentIndex)
             PrintPageTableEntry(&table->entries[i], 3);
             
             // 打印下一级
-            if (table->entries[i].flags.is_lowerlv_bitmap)
-            {
-                // 处理位图情况
-                if (table->entries[i].flags.is_reserved)
-                {
-                    PrintBitmap2bits(table->entries[i].base.map_tpye2, 3, i);
-                }
-                else
-                {
-                    PrintBitmap1bit(table->entries[i].base.map_tpye1, 3, i);
-                }
-            }
-            else if (!table->entries[i].flags.is_atom && table->entries[i].base.lowerlvPgCBtb)
+             if (!table->entries[i].flags.is_atom && table->entries[i].base.lowerlvPgCBtb)
             {
                 PrintLevel3Table(table->entries[i].base.lowerlvPgCBtb, parentIndex, i);
             }
@@ -132,20 +92,7 @@ void PgsMemMgr::PrintLevel3Table(lowerlv_PgCBtb* table, int grandParentIndex, in
             kputsSecure("]: ");
             PrintPageTableEntry(&table->entries[i], 2);
             
-            // 打印下一级
-            if (table->entries[i].flags.is_lowerlv_bitmap)
-            {
-                // 处理位图情况
-                if (table->entries[i].flags.is_reserved)
-                {
-                    PrintBitmap2bits(table->entries[i].base.map_tpye2, 2, i);
-                }
-                else
-                {
-                    PrintBitmap1bit(table->entries[i].base.map_tpye1, 2, i);
-                }
-            }
-            else if (!table->entries[i].flags.is_atom && table->entries[i].base.lowerlvPgCBtb)
+ if (!table->entries[i].flags.is_atom && table->entries[i].base.lowerlvPgCBtb)
             {
                 PrintLevel2Table(table->entries[i].base.lowerlvPgCBtb, grandParentIndex, parentIndex, i);
             }
@@ -168,20 +115,7 @@ void PgsMemMgr::PrintLevel2Table(lowerlv_PgCBtb* table, int greatGrandParentInde
             kputsSecure("]: ");
             PrintPageTableEntry(&table->entries[i], 1);
             
-            // 打印下一级
-            if (table->entries[i].flags.is_lowerlv_bitmap)
-            {
-                // 处理位图情况
-                if (table->entries[i].flags.is_reserved)
-                {
-                    PrintBitmap2bits(table->entries[i].base.map_tpye2, 1, i);
-                }
-                else
-                {
-                    PrintBitmap1bit(table->entries[i].base.map_tpye1, 1, i);
-                }
-            }
-            else if (!table->entries[i].flags.is_atom && table->entries[i].base.lowerlvPgCBtb)
+ if (!table->entries[i].flags.is_atom && table->entries[i].base.lowerlvPgCBtb)
             {
                 PrintLevel1Table(table->entries[i].base.lowerlvPgCBtb, greatGrandParentIndex, grandParentIndex, parentIndex, i);
             }
@@ -247,17 +181,8 @@ void PgsMemMgr::PrintPageTableEntry(PgControlBlockHeader* entry, int level)
     kputsSecure(entry->flags.physical_or_virtual_pg ? (char*)"Virtual " : (char*)"Physical ");
     kputsSecure(entry->flags.is_exist ? (char*)"Exist " : (char*)"NotExist ");
     kputsSecure(entry->flags.is_atom ? (char*)"Atom " : (char*)"NonAtom ");
-    kputsSecure(entry->flags.is_dirty ? (char*)"Dirty " : (char*)"Clean ");
+
     
-    // 打印位图类型
-    if (entry->flags.is_lowerlv_bitmap)
-    {
-        kputsSecure(entry->flags.is_reserved ? (char*)"2bits " : (char*)"1bit ");
-    }
-    else
-    {
-        kputsSecure((char*)"Table ");
-    }
     
     kputsSecure(entry->flags.is_reserved ? (char*)"Reserved " : (char*)"NonReserved ");
     
@@ -269,87 +194,109 @@ void PgsMemMgr::PrintPageTableEntry(PgControlBlockHeader* entry, int level)
     
     // 打印其他标志
     kputsSecure(entry->flags.is_kernel ? (char*)"Kernel " : (char*)"User ");
-    kputsSecure(entry->flags.is_locked ? (char*)"Locked " : (char*)"Unlocked ");
-    kputsSecure(entry->flags.is_shared ? (char*)"Shared " : (char*)"Private ");
     kputsSecure(entry->flags.is_occupied ? (char*)"Occupied " : (char*)"Free ");
 }
 
 // 辅助函数：打印1bit位图
-void PgsMemMgr::PrintBitmap1bit(lowerlv_bitmap_entry_width1bit* bitmap_entry, int level, int index)
-{
-    kputsSecure("      Bitmap1bit[");
-    kpnumSecure(&index, UNDEC, 3);
-    kputsSecure("]: ");
+
+
+// 打印pgflags结构
+void print_pgflags(pgflags flags) {
+    kputsSecure("Flags:\n");
     
-    // 打印位图内容（每64位一行）
-    for (int i = 0; i < 64; i++)
-    {
-        uint8_t byte = bitmap_entry->bitmap[i];
-        
-        // 打印每个字节的二进制表示
-        for (int j = 0; j < 8; j++)
-        {
-            if (byte & (1 << (7 - j)))
-            {
-                kputsSecure("1");
-            }
-            else
-            {
-                kputsSecure("0");
-            }
-        }
-        
-        // 每8字节换行
-        if ((i + 1) % 8 == 0)
-        {
-            kputsSecure("\n                      ");
-        }
-        else
-        {
-            kputsSecure(" ");
-        }
-    }
+    // 打印标志位
+    kputsSecure("  physical_or_virtual_pg: ");
+
+    kputsSecure((bool)flags.physical_or_virtual_pg ? (char*)" (Virtual)" : (char*)" (Physical)\n");
+    
+    kputsSecure("  is_exist: ");
+    kputcharSecure(flags.is_exist ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  is_atom: ");
+    kputcharSecure(flags.is_atom ? '1' : '0');
+    kputsSecure("\n");
+
+    kputsSecure("  is_reserved: ");
+    kputcharSecure(flags.is_reserved ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  is_occupied: ");
+    kputsSecure(flags.is_occupied ? (char*)" (Occupied)" : (char*)" (Free)");
+    kputsSecure("\n");
+    
+    kputsSecure("  is_kernel: ");
+    kputcharSecure(flags.is_kernel ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  is_readable: ");
+    kputcharSecure  (flags.is_readable ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  is_writable: ");
+    kputcharSecure(flags.is_writable ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  is_executable: ");
+    kputcharSecure(flags.is_executable ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  is_remaped: ");
+    kputcharSecure(flags.is_remaped ? '1' : '0');
+    kputsSecure("\n");
+    
+    kputsSecure("  pg_lv: ");
+    uint8_t pg_lv = flags.pg_lv;
+    kpnumSecure(&pg_lv, UNDEC, 1);
     kputsSecure("\n");
 }
 
-// 辅助函数：打印2bits位图
-void PgsMemMgr::PrintBitmap2bits(lowerlv_bitmap_entry_width2bits* bitmap_entry, int level, int index)
-{
-    kputsSecure("      Bitmap2bits[");
-    kpnumSecure(&index, UNDEC, 3);
-    kputsSecure("]: ");
-    
-    // 打印位图内容（每32个条目一行）
-    for (int i = 0; i < 128; i++)
-    {
-        uint8_t byte = bitmap_entry->bitmap[i];
-        
-        // 每个字节包含4个2bit条目
-        for (int j = 0; j < 4; j++)
-        {
-            int entry_index = i * 4 + j;
-            if (entry_index >= 512) break;
-            
-            // 提取2bit值
-            uint8_t value = (byte >> (6 - j * 2)) & 3;
-            
-            // 根据值打印相应字符
-            switch (value)
-            {
-                case 0: kputsSecure("."); break; // 空闲
-                case 1: kputsSecure("X"); break; // 占用
-                case 2: kputsSecure("R"); break; // 保留
-                case 3: kputsSecure("?"); break; // 未知
-            }
-            
-            // 每32个条目换行
-            if ((entry_index + 1) % 32 == 0)
-            {
-                kputsSecure("\n                      ");
-            }
-        }
-    }
-    kputsSecure("\n");
-}
+// 打印1位宽位图
 
+const char* get_phy_mem_type_str(uint8_t type) {
+    switch (type) {
+        case FREE: return "FREE";
+        case OCCUPYIED: return "OCCUPYIED";
+        case RESERVED: return "RESERVED";
+        default: return "UNKNOWN";
+    }
+}
+// 打印2位宽位图
+
+void print_PgControlBlockHeader(struct PgControlBlockHeader* header) {
+    if (!header) {
+        kputsSecure("Invalid PgControlBlockHeader pointer\n");
+        return;
+    }
+    
+    kputsSecure("==== PgControlBlockHeader ====\n");
+    
+    // 打印标志
+    print_pgflags(header->flags);
+    
+    // 打印base联合体
+    kputsSecure("Base:\n");
+    
+    if (!header->flags.is_exist) {
+        kputsSecure("  Page not exists\n");
+        return;
+    }
+    
+    if (header->flags.is_atom) {
+        kputsSecure("  Atomic node - no lower levels\n");
+        return;
+    }
+    
+
+        kputsSecure("  Lower level table (lowerlv_PgCBtb):\n");
+        if (header->base.lowerlvPgCBtb) {
+            kputsSecure("    Table exists\n");
+            kputsSecure("    pgextention: ");
+            kpnumSecure(&header->base.lowerlvPgCBtb->pgextention, UNHEX, 8);
+            kputsSecure("\n");
+        } else {
+            kputsSecure("    Table pointer is NULL\n");
+        }
+    
+}
 

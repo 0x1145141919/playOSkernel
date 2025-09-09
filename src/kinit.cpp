@@ -1,8 +1,9 @@
 #include<stdint.h>
 #include<efi.h>
 #include "PortDriver.h"
-#include "errno.h"
+#include "os_error_definitions.h"
 #include "VideoDriver.h"
+#include "kcirclebufflogMgr.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "Memory.h"
 #include "kpoolmemmgr.h"
@@ -41,6 +42,7 @@ extern "C" int _kernel_Init(void* TransferPage,
         TFG->FrameBufferSize
     );
     serial_init();
+    gkcirclebufflogMgr.Init();
     if (Status!=OS_SUCCESS)
     {
         serial_puts("InitialGlobalBasicGraphicInfo Failed\n");
@@ -76,9 +78,7 @@ extern "C" int _kernel_Init(void* TransferPage,
     // 初始化全局Ascii位图控制器
     kputsSecure("Welcome to PlayOSKernelShell\n");
     gBaseMemMgr.Init(memDescript,numofDiscriptors);
-    //gBaseMemMgr.printEfiMemoryDescriptorTable();
     gBaseMemMgr.printPhyMemDesTb();
     gPgsMemMgr.Init();
-    gPgsMemMgr.PrintPgsMemMgrStructure();
     asm volatile("hlt");    
 }

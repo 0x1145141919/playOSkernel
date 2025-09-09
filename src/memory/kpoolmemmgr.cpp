@@ -1,6 +1,6 @@
 #include "kpoolmemmgr.h"
 #include "Memory.h"
-#include "utils.h"
+#include "OS_utils.h"
 #include "os_error_definitions.h"
 #include "VideoDriver.h"
 #ifdef TEST_MODE
@@ -531,12 +531,13 @@ void kpoolmemmgr_t::kfree(void* ptr)
 
 kpoolmemmgr_t::kpoolmemmgr_t() {
 #ifdef TEST_MODE
-    first_static_heap.heap.heapStart = (phyaddr_t)malloc(1ULL<<22);
+    first_static_heap.heap.heapStart = (phyaddr_t)aligned_alloc(1ULL<<21,1ULL<<22);
     first_static_heap.heap.heapVStart = first_static_heap.heap.heapStart;
     first_static_heap.heap.heapSize = first_static_heap.heap.freeSize = 1ULL<<22;
 #endif  
 #ifdef KERNEL_MODE
     // 获取内核堆的起始地址和大小
+    
     first_static_heap.heap.heapStart = (phyaddr_t)&__heap_start;
     first_static_heap.heap.heapVStart = (vaddr_t)&__heap_start;
     first_static_heap.heap.heapSize = (uint64_t)(&__heap_end - &__heap_start);

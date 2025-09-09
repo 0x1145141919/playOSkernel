@@ -37,13 +37,14 @@ set(SRC_COMMON
     src/memory/phygpsmemmgr_freememmanage.cpp
     src/memory/pgtable_query.cpp
     src/utils/util.cpp
-    src/drivers/VideoDriver.c
+    src/drivers/VideoDriver.cpp
     src/drivers/PortDriver.c
 )
 
 # 内核可执行文件
 add_executable(kernel.elf
     ${CMAKE_SOURCE_DIR}/src/kinit.cpp
+        src/utils/kcirclebufflogMgr.cpp
     ${SRC_COMMON}
 )
 
@@ -53,14 +54,6 @@ add_executable(memmory_module_test
     ${SRC_COMMON}
 )
 
-# KPoolMemMgr 测试可执行文件
-add_executable(test_kpoolmemmgr
-    src/tests/test_kpoolmemmgr.cpp
-    src/memory/kpoolmemmgr.cpp
-    src/utils/util.cpp
-    src/drivers/VideoDriver.c
-    src/drivers/PortDriver.c
-)
 
 # 头文件路径（对 C/C++ 均可见）
 target_include_directories(kernel.elf PRIVATE
@@ -73,11 +66,7 @@ target_include_directories(memmory_module_test PRIVATE
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src/include"
 )
-target_include_directories(test_kpoolmemmgr PRIVATE
-    "/usr/include/efi/"
-    "${CMAKE_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}/src/include"
-)
+
 # 定义内核专用编译选项
 set(KERNEL_COMPILE_OPTS
     -nostdlib
@@ -105,4 +94,3 @@ set(KERNEL_LINK_OPTS
 target_compile_options(kernel.elf PRIVATE ${KERNEL_COMPILE_OPTS})
 target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})
 target_compile_options(memmory_module_test PRIVATE -DTEST_MODE)
-target_compile_options(test_kpoolmemmgr PRIVATE -DTEST_MODE)

@@ -1,7 +1,7 @@
 #include "Memory.h"
 #include "VideoDriver.h"
 #include "errno.h"
-#include "utils.h"
+#include "OS_utils.h"
 #define KEFLBASE 0x4000000
 #define DIRTY_ENTRY 1
 #define CLEAN_ENTRY 0
@@ -51,7 +51,10 @@ void GlobalMemoryPGlevelMgr_t::Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptrom
        }else{
         break;
        }
-    }//删除那些留有冗余的表
+    }
+    max_phy_addr=rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].PhysicalStart+\
+    rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
+    //删除那些留有冗余的表
     Statusflags=1;
 }
 phy_memDesriptor *GlobalMemoryPGlevelMgr_t::getGlobalPhysicalMemoryInfo()
@@ -332,25 +335,24 @@ void GlobalMemoryPGlevelMgr_t::reclaimLoaderMemory() {
         }
     }
     
-    // 合并相邻的空闲内存块
-    bool merged;
-    do {
-        merged = false;
-        for (uint64_t i = 0; i < rootPhymemTbentryCount - 1; i++) {
-            if (rootPhyMemDscptTbBsPtr[i].Type == freeSystemRam &&
-                rootPhyMemDscptTbBsPtr[i+1].Type == freeSystemRam &&
-                Ismemspaceneighbors(i, i+1, 1)) {
-                // 合并到当前项
-                rootPhyMemDscptTbBsPtr[i].NumberOfPages += rootPhyMemDscptTbBsPtr[i+1].NumberOfPages;
-                // 标记下一项为脏
-                rootPhyMemDscptTbBsPtr[i+1].ReservedUnion.TmpChainList.Flags = DIRTY_ENTRY;
-                merged = true;
-            }
+   for (uint64_t i = 0; i < rootPhymemTbentryCount-1  ; i++)
+   {
+    if(rootPhyMemDscptTbBsPtr[i].Type == freeSystemRam)
+        {
+            if(rootPhyMemDscptTbBsPtr[i+1].Type == freeSystemRam)
+            {//后继也是启动时服务项
+                if (Ismemspaceneighbors(i,i+1,1))
+                {
+                    rootPhyMemDscptTbBsPtr[i].ReservedUnion.TmpChainList.Flags=DIRTY_ENTRY;
+                    rootPhyMemDscptTbBsPtr[i+1].PhysicalStart=rootPhyMemDscptTbBsPtr[i].PhysicalStart;
+                    rootPhyMemDscptTbBsPtr[i+1].NumberOfPages+=rootPhyMemDscptTbBsPtr[i].NumberOfPages;
+
+                }
+                
+            } 
         }
-        if (merged) {
-            dirtyentrydelete(1); // 删除脏项
-        }
-    } while (merged);
+   }
+   dirtyentrydelete(1);
 }
 int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
     IN phyaddr_t addr,
@@ -685,6 +687,10 @@ void PrintMemoryDescriptor(const EFI_MEMORY_DESCRIPTORX64* desc) {
     
     // 换行
     kputsSecure("\n");
+}
+phyaddr_t GlobalMemoryPGlevelMgr_t::getMaxPhyaddr()
+{
+    return max_phy_addr;
 }
 void GlobalMemoryPGlevelMgr_t::printEfiMemoryDescriptorTable()
 {

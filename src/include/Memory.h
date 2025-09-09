@@ -84,6 +84,7 @@ class GlobalMemoryPGlevelMgr_t {
     uint64_t EfiMemMapEntryCount;
     uint64_t rootPhymemTbentryCount;
     uint64_t Statusflags;
+    phyaddr_t max_phy_addr;
     void dirtyentrydelete(uint64_t tbid);
     bool Ismemspaceneighbors(uint16_t index_a, uint16_t index_b,uint64_t tbid);
     void reclaimBootTimeMemoryonEfiTb();
@@ -92,6 +93,7 @@ class GlobalMemoryPGlevelMgr_t {
     void fillMemoryHolesInEfiMap();
     void reclaimLoaderMemory();
     public:
+    phyaddr_t getMaxPhyaddr();
     void printEfiMemoryDescriptorTable();
     GlobalMemoryPGlevelMgr_t();
     GlobalMemoryPGlevelMgr_t(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount);

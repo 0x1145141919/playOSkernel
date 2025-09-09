@@ -4,6 +4,7 @@
 // 添加对error.h的引用，这样可以使用标准错误码
 #include "errno.h"
 #include "VideoDriver.h"
+#include "kcirclebufflogMgr.h"
 #ifdef TEST_MODE
 #include "stdio.h"
 #include <inttypes.h>
@@ -181,16 +182,17 @@ static inline void DrawPicture
 
 static inline int drawCharacterWithoutRendered(int start_x, int start_y, CHAR16 ch)
 {
-    switch (KernelShellController.CharacterSetType)
-    {
-    case ASCII:
-        UINT8 ascii = (UINT8)ch;
+     UINT8 ascii = (UINT8)ch;
     UINT32 chheight = GlobalCharacterSetBitmapControler.CharacterHeight;
     UINT32 chwidth = GlobalCharacterSetBitmapControler.CharacterWidth;
     UINT8 last_bit_index = chwidth % 8;
     UINT32 widthInByte=(chwidth+8-1)/8;
     UINT8 *WillBeFilttedBytePtr = GlobalCharacterSetBitmapControler.BitMapBase+ascii*chheight*widthInByte;
     static const UINT8 Filterbitmasks[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+    switch (KernelShellController.CharacterSetType)
+    {
+    case ASCII:
+       
     
     for (UINT32 i = 0; i < chheight; i++)
     {
@@ -228,8 +230,9 @@ static inline int drawCharacterWithoutRendered(int start_x, int start_y, CHAR16 
        
     }
     return OS_SUCCESS;
-    case UTF_8:
+    case 1:
         return EOPNOTSUPP;
+        break;
     default:
         return EFI_BMP_INVALID;
     }
@@ -797,8 +800,10 @@ linebreak:
     
     return OS_SUCCESS;
 }
+#ifdef KERNEL_MODE
 int kputcharSecure(UINT8 ch)//对于特殊字符只能处理换行符，退格符等其他特殊字符交由puts使用栈数据结构处理
 {
+
     // ==================== 1. 全局状态校验 ====================
     // 检查帧缓冲区是否初始化
     if (GlobalBasicGraphicInfo.FrameBufferBase == 0 || 
@@ -852,6 +857,14 @@ int kputcharSecure(UINT8 ch)//对于特殊字符只能处理换行符，退格�
     kputchar(ch);
     return OS_SUCCESS; 
 }
+#endif
+#ifdef TEST_MODE
+int kputcharSecure(UINT8 ch)
+{
+    putchar(ch);
+    return OS_SUCCESS;
+}
+#endif
 #define TextBufferMaxCount 4096
 static inline void kputsascii(char*strbuff)//只会打印到屏幕，不会打印到串口
 {
@@ -935,6 +948,7 @@ int kputsSecure(char*strbuff)
     
 #endif
         SERIAL_PUTS(strbuff);
+        gkcirclebufflogMgr.putsk(strbuff);
         break;
     default:
         DRAW_DEBUG_PRINT("Invalid character set type\n");
@@ -1095,6 +1109,7 @@ int kpnumSecure(void* numptr, int format, int len)//有符号十进制的情况�
     
 #endif
     SERIAL_PUTS(buf + buffer_index);
+    gkcirclebufflogMgr.putsk(buf + buffer_index);
     return 0;
 }
 #endif
@@ -1119,7 +1134,7 @@ int kpnumSecure(void* numptr, int format, int len)
             snprintf(buffer, sizeof(buffer), "%*"PRId32, len, (int32_t)num);
             break;
         case UNHEX:  // 十六进制
-            snprintf(buffer, sizeof(buffer), "%0*"PRIX32, len, num);
+            snprintf(buffer, sizeof(buffer), "%0*"PRIX64, len*2, num);
             break;
         default:
             return -1;

@@ -1,11 +1,12 @@
 #include "kcirclebufflogMgr.h"
-#include "utils.h"
+#include "OS_utils.h"
 extern "C"
 {
     extern char __klog_start;
     extern uint64_t __KLOG_SIZE;
 }
-kcirclebufflogMgr::kcirclebufflogMgr()
+ kcirclebufflogMgr gkcirclebufflogMgr;
+void kcirclebufflogMgr::Init()
 {
     buff= &__klog_start;
     buffSize=__KLOG_SIZE;
