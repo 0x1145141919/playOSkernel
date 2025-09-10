@@ -8,8 +8,9 @@ private:
         T data;
         Node* prev;
         Node* next;
-        
+
         Node(const T& value) : data(value), prev(nullptr), next(nullptr) {}
+        Node(): prev(nullptr), next(nullptr) {}
     };
 
     Node* head;

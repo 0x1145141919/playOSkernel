@@ -178,7 +178,7 @@ public:
 
 const pgaccess PG_RW={1,1,1,0};
 const pgaccess PG_RWX ={1,1,1,1};
-const pgaccess PG_R ={1,1,0,0};
+const pgaccess PG_R ={1,0,1,0};
 
     void*pgs_allocate(size_t size_in_byte,pgaccess access,uint8_t align_require=12);
     int pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte,IN pgaccess access);

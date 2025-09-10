@@ -39,7 +39,8 @@ phyaddr_t PgsMemMgr::Inner_fixed_addr_manage(phyaddr_t base, phymem_pgs_queue qu
 }
 void *PgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t align_require)
 {
-    phyaddr_t scan_addr = 0;
+    if(size_in_byte==0)return nullptr;
+    phyaddr_t scan_addr = 0x100000;
     size_in_byte += PAGE_OFFSET_MASK[0];
     size_in_byte &= ~PAGE_OFFSET_MASK[0];
     uint64_t align_require_mask = (1ULL << align_require) - 1;
@@ -52,11 +53,16 @@ void *PgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t al
     if(usage_query_result[0].Type==OS_ALLOCATABLE_MEMORY&&
     (usage_query_result[0].Attribute&1)==0&&
     usage_query_result[0].NumberOfPages*PAGE_SIZE_IN_LV[0]>=size_in_byte)
-    break;    
+    {
+        delete usage_query_result;
+        break;
+    }
+
     else {
         scan_addr+=PAGE_SIZE_IN_LV[0]*usage_query_result[0].NumberOfPages;
         scan_addr+=align_require_mask;
     scan_addr&=~align_require_mask;
+    delete usage_query_result;
     continue;
     }
     int i = 0;
@@ -74,8 +80,10 @@ void *PgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t al
     phyaddr_t alloced_addr= Inner_fixed_addr_manage(scan_addr,*queue,true,access);
     if (alloced_addr!=scan_addr+size_in_byte)
     {
+        delete queue;
         return nullptr;
     }
+    delete usage_query_result;
     delete queue;
     return (void*)scan_addr;
 }
@@ -86,10 +94,18 @@ int PgsMemMgr::pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte,
     size_in_byte += PAGE_OFFSET_MASK[0];
     size_in_byte &= ~PAGE_OFFSET_MASK[0];
     phy_memDesriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
-    if(usage_query_result[1].Type!=EfiReservedMemoryType)return OS_MEMRY_ALLOCATE_FALT;
+    if(usage_query_result[1].Type!=EfiReservedMemoryType)
+    {
+            delete usage_query_result;
+            return OS_MEMRY_ALLOCATE_FALT;
+     }
     //这个判定是因为如果确认是空闲内存，那么返回的结果必然只有一项，第二项必然是空不是一项可以返回不可分配
     if(usage_query_result[0].Type!=OS_ALLOCATABLE_MEMORY&&
-    usage_query_result[0].Attribute&1!=0)return OS_MEMRY_ALLOCATE_FALT;
+    usage_query_result[0].Attribute&1!=0)
+    {
+        delete usage_query_result;
+        return OS_MEMRY_ALLOCATE_FALT;
+    }
     //确定这一项是100%可分配内存，完全空闲
     delete usage_query_result;
     phymem_pgs_queue*queue=seg_to_queue(addr,size_in_byte);

@@ -134,7 +134,7 @@ int PgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
     uint16_t lv2_index=(addr&PDPT_INDEX_MASK_lv2)>>30;
     uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
     uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
-    
+    int status=0;
     PgCBlv4header* lv4_PgCBHeader = cpu_pglv == 5 ? &rootlv4PgCBtb[lv4_index] : rootlv4PgCBtb;
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist = 1;
@@ -153,11 +153,24 @@ int PgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
 
     // 确保lv3条目存在
     PgCBlv3header* lv3_PgCBHeader = &lv4_PgCBHeader->base.lowerlvPgCBtb->entries[lv3_index];
-    if (lv3_PgCBHeader->flags.is_exist != 1||lv3_PgCBHeader->flags.is_atom==1) {
+    if (lv3_PgCBHeader->flags.is_exist != 1) {
         higher_uninitialized_entry_flags.pg_lv = 3;
         int status = PgCBtb_lv3_entry_construct(addr, higher_uninitialized_entry_flags);
         if (status != OS_SUCCESS)
             return status;
+    }else{
+        if(lv3_PgCBHeader->flags.is_atom==1)
+        {
+            lv3_PgCBHeader->flags.is_atom=0;
+            status=PgCBtb_lv2_entry_construct(addr,lv3_PgCBHeader->flags);
+            pgflags lv2_flags=lv3_PgCBHeader->flags;
+            lv2_flags.is_atom=1;
+            lv2_flags.pg_lv=2;
+            for(int i = 0; i < 512; i++)
+            {
+                lv3_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv2_flags;
+            }
+        }
     }
 
     PgCBlv2header* lv2_PgCBHeader = &lv3_PgCBHeader->base.lowerlvPgCBtb->entries[lv2_index];
@@ -184,7 +197,7 @@ int PgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
     uint16_t lv2_index=(addr&PDPT_INDEX_MASK_lv2)>>30;
     uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
     uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
-    
+    int status=0;
     PgCBlv4header* lv4_PgCBHeader = cpu_pglv == 5 ? &rootlv4PgCBtb[lv4_index] : rootlv4PgCBtb;
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist = 1;
@@ -202,20 +215,46 @@ int PgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
 
     // 确保lv3条目存在
     PgCBlv3header* lv3_PgCBHeader = &lv4_PgCBHeader->base.lowerlvPgCBtb->entries[lv3_index];
-    if (lv3_PgCBHeader->flags.is_exist != 1||lv3_PgCBHeader->flags.is_atom==1) {
+    if (lv3_PgCBHeader->flags.is_exist != 1) {
         higher_uninitialized_entry_flags.pg_lv = 3;
         int status = PgCBtb_lv3_entry_construct(addr, higher_uninitialized_entry_flags);
         if (status != OS_SUCCESS)
             return status;
+    }else{
+        if(lv3_PgCBHeader->flags.is_atom==1)
+        {
+            lv3_PgCBHeader->flags.is_atom=0;
+            status=PgCBtb_lv2_entry_construct(addr,lv3_PgCBHeader->flags);
+            pgflags lv2_flags=lv3_PgCBHeader->flags;
+            lv2_flags.is_atom=1;
+            lv2_flags.pg_lv=2;
+            for(int i = 0; i < 512; i++)
+            {
+                lv3_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv2_flags;
+            }
+        }
     }
 
     // 确保lv2条目存在
     PgCBlv2header* lv2_PgCBHeader = &lv3_PgCBHeader->base.lowerlvPgCBtb->entries[lv2_index];
-    if (lv2_PgCBHeader->flags.is_exist != 1||lv2_PgCBHeader->flags.is_atom==1) {
+    if (lv2_PgCBHeader->flags.is_exist != 1) {
         higher_uninitialized_entry_flags.pg_lv = 2;
         int status = PgCBtb_lv2_entry_construct(addr, higher_uninitialized_entry_flags);
         if (status != OS_SUCCESS)
             return status;
+    }else{
+        if(lv2_PgCBHeader->flags.is_atom==1)
+        {
+            lv2_PgCBHeader->flags.is_atom=0;
+            status=PgCBtb_lv1_entry_construct(addr,lv2_PgCBHeader->flags);
+            pgflags lv1_flags=lv2_PgCBHeader->flags;
+            lv1_flags.is_atom=1;
+            lv1_flags.pg_lv=1;
+            for (int i = 0; i < 512; i++)
+            {
+                lv2_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv1_flags;
+            }        
+        }
     }
 
     PgCBlv1header* lv1_PgCBHeader = &lv2_PgCBHeader->base.lowerlvPgCBtb->entries[lv1_index];
@@ -262,30 +301,69 @@ int PgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags)
         
     }
     PgCBlv3header*lv3_PgCBHeader=&lv4_PgCBHeader->base.lowerlvPgCBtb->entries[lv3_index];
-    if(lv3_PgCBHeader->flags.is_exist!=1||lv3_PgCBHeader->flags.is_atom==1){
+    if(lv3_PgCBHeader->flags.is_exist!=1){
         higher_uninitialized_entry_flags.pg_lv=3;
         status=PgCBtb_lv3_entry_construct(addr,higher_uninitialized_entry_flags);
         if (status!=OS_SUCCESS)
         {
             return status;
         }
+    }else{
+        if(lv3_PgCBHeader->flags.is_atom==1)
+        {
+            lv3_PgCBHeader->flags.is_atom=0;
+            status=PgCBtb_lv2_entry_construct(addr,lv3_PgCBHeader->flags);
+            pgflags lv2_flags=lv3_PgCBHeader->flags;
+            lv2_flags.is_atom=1;
+            lv2_flags.pg_lv=2;
+            for(int i = 0; i < 512; i++)
+            {
+                lv3_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv2_flags;
+            }
+        }
     }
     PgCBlv2header*lv2_PgCBHeader=&lv3_PgCBHeader->base.lowerlvPgCBtb->entries[lv2_index];
-    if(lv2_PgCBHeader->flags.is_exist!=1||lv2_PgCBHeader->flags.is_atom==1){
+    if(lv2_PgCBHeader->flags.is_exist!=1){
         higher_uninitialized_entry_flags.pg_lv=2;
         status=PgCBtb_lv2_entry_construct(addr,higher_uninitialized_entry_flags);
         if (status!=OS_SUCCESS)
         {
             return status;
         }
+    }else{
+        if(lv2_PgCBHeader->flags.is_atom==1)
+        {
+            lv2_PgCBHeader->flags.is_atom=0;
+            status=PgCBtb_lv1_entry_construct(addr,lv2_PgCBHeader->flags);
+            pgflags lv1_flags=lv2_PgCBHeader->flags;
+            lv1_flags.is_atom=1;
+            lv1_flags.pg_lv=1;
+            for (int i = 0; i < 512; i++)
+            {
+                lv2_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv1_flags;
+            }        
+        }
     }
     PgCBlv1header*lv1_PgCBHeader=&lv2_PgCBHeader->base.lowerlvPgCBtb->entries[lv1_index];
-    if(lv1_PgCBHeader->flags.is_exist!=1||lv1_PgCBHeader->flags.is_atom==1){
+    if(lv1_PgCBHeader->flags.is_exist!=1){
         higher_uninitialized_entry_flags.pg_lv=1;
         status=PgCBtb_lv1_entry_construct(addr,higher_uninitialized_entry_flags);
         if (status!=OS_SUCCESS)
         {
             return status;
+        }
+    }else{
+        if(lv1_PgCBHeader->flags.is_atom==1)
+        {
+            lv1_PgCBHeader->flags.is_atom=0;
+            status=PgCBtb_lv1_entry_construct(addr,lv1_PgCBHeader->flags);
+            pgflags lv0_flags=lv1_PgCBHeader->flags;
+            lv0_flags.is_atom=1;
+            lv0_flags.pg_lv=0;
+            for (int i = 0; i < 512; i++)
+            {
+                lv1_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv0_flags;
+            }        
         }
     }
     PgCBlv0header*lv0_PgCBHeader=&lv1_PgCBHeader->base.lowerlvPgCBtb->entries[lv0_index];
