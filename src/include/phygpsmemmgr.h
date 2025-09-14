@@ -4,12 +4,16 @@
 typedef  uint64_t phyaddr_t;
 typedef uint8_t pgsbitmap_entry1bit_width[64];
 typedef uint8_t pgsbitmap_entry2bits_width[128];
-enum Phy_mem_type : uint8_t {
-    FREE=0,
-    RESERVED=2,
-    OCCUPYIED=1
-};
 
+enum cache_strategy_t:uint8_t
+{
+    None,
+    WB,//写回
+    WT,
+   UC,
+    UC_minus,
+    WC
+};
 struct pgflags
 {
     uint64_t physical_or_virtual_pg:1;//0表示物理页，1表示虚拟页
@@ -30,11 +34,14 @@ struct pgflags
     uint64_t is_remaped:1;
     //有些物理页必然会被重映射，无论内核还是用户态
     uint64_t pg_lv:3;
-
+    cache_strategy_t cache_strateggy:3;
+    uint64_t is_global:1;
 };
 struct psmemmgr_flags_t
 {   
-
+    uint64_t is_new_kspace_cr3_valid:1;
+    uint64_t is_PCID_enable:1;
+    
 };
 struct lowerlv_PgCBtb;
 struct lowerlv_bitmap_entry_width1bit;
@@ -56,21 +63,6 @@ struct lowerlv_PgCBtb
     uint8_t* pgextention;//父表项的拓展数据
     PgControlBlockHeader entries[512];
 };
-struct lowerlv_bitmap_entry_width2bits{
-    void* pgextention;
-    pgsbitmap_entry2bits_width bitmap;
-};
-struct lowerlv_bitmap_entry_width1bit
-{
-    void* pgextention;//父表项的拓展数据
-    pgsbitmap_entry1bit_width bitmap;
-};
-
-
-
-
-
-
 
 typedef struct PgControlBlockHeader PgCBlv4header;
 typedef struct PgControlBlockHeader PgCBlv3header;
@@ -78,7 +70,7 @@ typedef struct PgControlBlockHeader PgCBlv2header;
 typedef struct PgControlBlockHeader PgCBlv1header;
 typedef struct PgControlBlockHeader PgCBlv0header;
 
-class PgsMemMgr
+class KernelSpacePgsMemMgr
 {
 private:
 struct pgs_queue_entry_t
@@ -99,7 +91,10 @@ struct phymem_pgs_queue//这是在物理内存描述符表转换为类页表结�
 
 uint8_t cpu_pglv;//存着cpu处于几级分页模式/四级还是五级
 //四级分页最大支持128TB内存，五级分页最大支持64PB内存，留一半映射到高位内存空间作为高位内核空间
-uint64_t kernel_space_cr3;
+uint16_t kernel_sapce_PCID;
+uint64_t*RootAddr_ofpgtb_inlv5;
+uint64_t*RootAddr_ofpgtb_inlv4;
+
 psmemmgr_flags_t flags;
 struct pgaccess
 {
@@ -132,13 +127,13 @@ int PgCBtb_lv3_entry_construct(phyaddr_t addr,pgflags flags);
 int PgCBtb_lv2_entry_construct(phyaddr_t addr,pgflags flags);
 int PgCBtb_lv1_entry_construct(phyaddr_t addr,pgflags flags);
 int PgCBtb_lv0_entry_construct(phyaddr_t addr,pgflags flags);
-int (PgsMemMgr::*PgCBtb_construct_func[5])(phyaddr_t,pgflags)=
+int (KernelSpacePgsMemMgr::*PgCBtb_construct_func[5])(phyaddr_t,pgflags)=
 {
-    &PgsMemMgr::PgCBtb_lv0_entry_construct,
-    &PgsMemMgr::PgCBtb_lv1_entry_construct,
-    &PgsMemMgr::PgCBtb_lv2_entry_construct,
-    &PgsMemMgr::PgCBtb_lv3_entry_construct,
-    &PgsMemMgr::PgCBtb_lv4_entry_construct
+    &KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct,
+    &KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct,
+    &KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct,
+    &KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct,
+    &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct
 };
 int construct_pgsbasedon_phy_memDescriptor (phy_memDesriptor memDescriptor);
 /**
@@ -158,21 +153,76 @@ PgControlBlockHeader&PgCBtb_lv3_entry_query(phyaddr_t addr);
 PgControlBlockHeader&PgCBtb_lv2_entry_query(phyaddr_t addr);
 PgControlBlockHeader&PgCBtb_lv1_entry_query(phyaddr_t addr);
 PgControlBlockHeader&PgCBtb_lv0_entry_query(phyaddr_t addr);
-PgControlBlockHeader&(PgsMemMgr::*PgCBtb_query_func[5])(phyaddr_t)=
+PgControlBlockHeader&(KernelSpacePgsMemMgr::*PgCBtb_query_func[5])(phyaddr_t)=
 {
-    &PgsMemMgr::PgCBtb_lv0_entry_query,
-    &PgsMemMgr::PgCBtb_lv1_entry_query,
-    &PgsMemMgr::PgCBtb_lv2_entry_query,
-    &PgsMemMgr::PgCBtb_lv3_entry_query,
-    &PgsMemMgr::PgCBtb_lv4_entry_query
+    &KernelSpacePgsMemMgr::PgCBtb_lv0_entry_query,
+    &KernelSpacePgsMemMgr::PgCBtb_lv1_entry_query,
+    &KernelSpacePgsMemMgr::PgCBtb_lv2_entry_query,
+    &KernelSpacePgsMemMgr::PgCBtb_lv3_entry_query,
+    &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_query
 };
 
 // 定义函数指针类型
 /**
  * 此函数用于把一段内存转换成一个队列，方便后续处理，用完这个队列记得手动释放
  */
-phymem_pgs_queue*seg_to_queue(phyaddr_t base,uint64_t size_in_bytes);
 
+phymem_pgs_queue*seg_to_queue(phyaddr_t base,uint64_t size_in_bytes);
+int pgtb_construct_4lvpg();
+int pgtb_construct_5lvpg();
+/**
+ * 为了动态虚拟内存管理需要定义的数据结构有
+ * 1.虚拟内存对象表数组
+ * 2.可分配物理内存段表数组
+ */
+struct minimal_phymem_seg_t
+{
+    phyaddr_t base;
+    //一个64bit数据结构但是包含是否占用的信息，多少4kb页信息
+};
+struct vaddr_seg_subtb_t
+{
+    phyaddr_t phybase;
+    vaddr_t vbase;
+    uint64_t num_of_4kbpgs;
+};
+
+struct allocatable_mem_seg_t
+{
+    phyaddr_t base;
+    uint64_t size_in_numof4kbpgs;
+    uint32_t max_num_of_subtb_entries;
+    uint32_t num_of_subtb_entries;
+    minimal_phymem_seg_t*subtb;
+};
+class allocatable_mem_segs_manager{
+    public:
+      static constexpr uint8_t max_entry_count=64;
+      allocatable_mem_segs_manager();
+      void append(phy_memDesriptor*p);
+      private:
+     allocatable_mem_seg_t allocatable_mem_seg[max_entry_count];
+     uint8_t allocatable_mem_seg_count;
+};
+
+struct vaddr_seg_t
+{
+    vaddr_t base;
+    uint64_t size_in_numof4kbpgs;
+    uint32_t max_num_of_subtb_entries;
+    uint32_t num_of_subtb_entries;
+    vaddr_seg_subtb_t*subtb;
+};
+class vaddr_segs_manager{
+    public:
+      static constexpr uint8_t max_entry_count=64;
+      vaddr_segs_manager();
+
+      private:
+     allocatable_mem_seg_t allocatable_mem_seg[max_entry_count];
+     uint8_t allocatable_mem_seg_count;
+};
+vaddr_seg_t vaddr_seg[4096];
 phyaddr_t Inner_fixed_addr_manage(phyaddr_t base, phymem_pgs_queue queue,bool alloc_or_free,pgaccess access);
 public:
 
@@ -180,15 +230,19 @@ const pgaccess PG_RW={1,1,1,0};
 const pgaccess PG_RWX ={1,1,1,1};
 const pgaccess PG_R ={1,0,1,0};
 
-    void*pgs_allocate(size_t size_in_byte,pgaccess access,uint8_t align_require=12);
-    int pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte,IN pgaccess access);
-    int pgs_free(phyaddr_t addr,size_t size_in_byte);
+void*pgs_allocate_remapped(size_t size_in_byte,pgaccess access,uint8_t align_require=12);
+void*pgs_allocate(size_t size_in_byte,uint8_t align_require=12);//此接口分配的内存返回的是物理地址，不支持权限配置，只能配置为读写权限
+int pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte  );
+void* pgs_fixedaddr_allocate_remapped(IN phyaddr_t addr, IN size_t size_in_byte,IN pgaccess access);//此接口分配的内存基于物理地址，不支持权限配置，只能配置为读写权限
+    int pgs_free(phyaddr_t addr );//不用
     phy_memDesriptor* queryPhysicalMemoryUsage(phyaddr_t base,uint64_t len_in_bytes);
+    phy_memDesriptor* getPhyMemoryspace();
     /**
      * 上面四个页级别物理内存分配器必须在is_pgsallocate_enable开启后才能使用    
      */
     void Init();
     void PrintPgsMemMgrStructure();
+    void enable_new_cr3();
 };
-extern PgsMemMgr gPgsMemMgr;
+extern KernelSpacePgsMemMgr gKspacePgsMemMgr;
 void print_PgControlBlockHeader(struct PgControlBlockHeader* header);

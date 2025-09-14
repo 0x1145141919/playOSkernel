@@ -716,35 +716,7 @@ void kpoolmemmgr_t::print_all_hcb_status() {
     kputsSecure("\n");
 }
 // 高效的内存设置函数
-static inline void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
-    uint8_t* p = static_cast<uint8_t*>(ptr);
-    
-    // 使用64位写入来加速内存设置
-    uint64_t value64 = value;
-    value64 |= value64 << 8;
-    value64 |= value64 << 16;
-    value64 |= value64 << 32;
-    
-    // 处理前缀不对齐部分
-    while (size_in_byte > 0 && (reinterpret_cast<uint64_t>(p) & 7)) {
-        *p++ = value;
-        size_in_byte--;
-    }
-    
-    // 使用64位写入处理主体部分
-    uint64_t* p64 = reinterpret_cast<uint64_t*>(p);
-    while (size_in_byte >= 8) {
-        *p64++ = value64;
-        size_in_byte -= 8;
-    }
-    
-    // 处理剩余部分
-    p = reinterpret_cast<uint8_t*>(p64);
-    while (size_in_byte > 0) {
-        *p++ = value;
-        size_in_byte--;
-    }
-}
+
 static inline int find_object_by_offset(HeapMetaInfoArray* metaInfo, uint32_t target_offset) {
     uint32_t objCount = metaInfo->header.objMetaCount;
     HeapObjectMetav2* metaTable = metaInfo->objMetaTable;

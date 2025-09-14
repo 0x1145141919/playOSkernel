@@ -10,20 +10,20 @@
 PgControlBlockHeader NullPgCBHeader_prototype = {0};
 PgControlBlockHeader&NullPgCBHeader= NullPgCBHeader_prototype;
 // LV4查询（顶级节点，无父级位图处理）
-PgControlBlockHeader&PgsMemMgr::PgCBtb_lv4_entry_query(phyaddr_t addr) {
+PgControlBlockHeader&KernelSpacePgsMemMgr::PgCBtb_lv4_entry_query(phyaddr_t addr) {
     uint64_t lv4_index = (addr & PML5_INDEX_MASK_lv4) >> 48;
-    return gPgsMemMgr.rootlv4PgCBtb[lv4_index];
+    return gKspacePgsMemMgr.rootlv4PgCBtb[lv4_index];
 }
 
 // LV3查询（需处理LV4父级的位图存储）
-PgControlBlockHeader&PgsMemMgr::PgCBtb_lv3_entry_query(phyaddr_t addr) {
+PgControlBlockHeader&KernelSpacePgsMemMgr::PgCBtb_lv3_entry_query(phyaddr_t addr) {
     
     uint16_t lv3_index = (addr & PML4_INDEX_MASK_lv3) >> 39;
     uint64_t lv4_index = (addr & PML5_INDEX_MASK_lv4) >> 48;
 
-    PgCBlv4header* lv4_PgCBHeader = gPgsMemMgr.cpu_pglv == 5 ? 
-                                    &gPgsMemMgr.rootlv4PgCBtb[lv4_index] : 
-                                    gPgsMemMgr.rootlv4PgCBtb;
+    PgCBlv4header* lv4_PgCBHeader = gKspacePgsMemMgr.cpu_pglv == 5 ? 
+                                    &gKspacePgsMemMgr.rootlv4PgCBtb[lv4_index] : 
+                                    gKspacePgsMemMgr.rootlv4PgCBtb;
     if (lv4_PgCBHeader->flags.is_exist == 0||lv4_PgCBHeader->flags.is_atom==1) {
         return NullPgCBHeader;
     }
@@ -34,15 +34,15 @@ PgControlBlockHeader&PgsMemMgr::PgCBtb_lv3_entry_query(phyaddr_t addr) {
 }
 
 // LV2查询（需处理LV3父级的位图存储）
-PgControlBlockHeader&PgsMemMgr::PgCBtb_lv2_entry_query(phyaddr_t addr) {
+PgControlBlockHeader&KernelSpacePgsMemMgr::PgCBtb_lv2_entry_query(phyaddr_t addr) {
 
     uint16_t lv2_index = (addr & PDPT_INDEX_MASK_lv2) >> 30;
     uint16_t lv3_index = (addr & PML4_INDEX_MASK_lv3) >> 39;
     uint64_t lv4_index = (addr & PML5_INDEX_MASK_lv4) >> 48;
 
-    PgCBlv4header* lv4_PgCBHeader = gPgsMemMgr.cpu_pglv == 5 ? 
-                                    &gPgsMemMgr.rootlv4PgCBtb[lv4_index] : 
-                                    gPgsMemMgr.rootlv4PgCBtb;
+    PgCBlv4header* lv4_PgCBHeader = gKspacePgsMemMgr.cpu_pglv == 5 ? 
+                                    &gKspacePgsMemMgr.rootlv4PgCBtb[lv4_index] : 
+                                    gKspacePgsMemMgr.rootlv4PgCBtb;
     if (lv4_PgCBHeader->flags.is_exist == 0||lv4_PgCBHeader->flags.is_atom==1) {
         return NullPgCBHeader;
     }
@@ -58,16 +58,16 @@ PgControlBlockHeader&PgsMemMgr::PgCBtb_lv2_entry_query(phyaddr_t addr) {
 }
 
 // LV1查询（需处理LV2父级的位图存储）
-PgControlBlockHeader&PgsMemMgr::PgCBtb_lv1_entry_query(phyaddr_t addr) {
+PgControlBlockHeader&KernelSpacePgsMemMgr::PgCBtb_lv1_entry_query(phyaddr_t addr) {
 
     uint16_t lv1_index = (addr & PD_INDEX_MASK_lv1) >> 21;
     uint16_t lv2_index = (addr & PDPT_INDEX_MASK_lv2) >> 30;
     uint16_t lv3_index = (addr & PML4_INDEX_MASK_lv3) >> 39;
     uint64_t lv4_index = (addr & PML5_INDEX_MASK_lv4) >> 48;
 
-    PgCBlv4header* lv4_PgCBHeader = gPgsMemMgr.cpu_pglv == 5 ? 
-                                    &gPgsMemMgr.rootlv4PgCBtb[lv4_index] : 
-                                    gPgsMemMgr.rootlv4PgCBtb;
+    PgCBlv4header* lv4_PgCBHeader = gKspacePgsMemMgr.cpu_pglv == 5 ? 
+                                    &gKspacePgsMemMgr.rootlv4PgCBtb[lv4_index] : 
+                                    gKspacePgsMemMgr.rootlv4PgCBtb;
     if (lv4_PgCBHeader->flags.is_exist == 0||lv4_PgCBHeader->flags.is_atom==1) {
         return NullPgCBHeader;
     }
@@ -90,7 +90,7 @@ PgControlBlockHeader&PgsMemMgr::PgCBtb_lv1_entry_query(phyaddr_t addr) {
 }
 
 // LV0查询（需处理LV1父级的位图存储）
-PgControlBlockHeader&PgsMemMgr::PgCBtb_lv0_entry_query(phyaddr_t addr) {
+PgControlBlockHeader&KernelSpacePgsMemMgr::PgCBtb_lv0_entry_query(phyaddr_t addr) {
 
     uint16_t lv0_index = (addr & PT_INDEX_MASK_lv0) >> 12;
     uint16_t lv1_index = (addr & PD_INDEX_MASK_lv1) >> 21;
@@ -98,9 +98,9 @@ PgControlBlockHeader&PgsMemMgr::PgCBtb_lv0_entry_query(phyaddr_t addr) {
     uint16_t lv3_index = (addr & PML4_INDEX_MASK_lv3) >> 39;
     uint64_t lv4_index = (addr & PML5_INDEX_MASK_lv4) >> 48;
 
-    PgCBlv4header* lv4_PgCBHeader = gPgsMemMgr.cpu_pglv == 5 ? 
-                                    &gPgsMemMgr.rootlv4PgCBtb[lv4_index] : 
-                                    gPgsMemMgr.rootlv4PgCBtb;
+    PgCBlv4header* lv4_PgCBHeader = gKspacePgsMemMgr.cpu_pglv == 5 ? 
+                                    &gKspacePgsMemMgr.rootlv4PgCBtb[lv4_index] : 
+                                    gKspacePgsMemMgr.rootlv4PgCBtb;
     if (lv4_PgCBHeader->flags.is_exist == 0||lv4_PgCBHeader->flags.is_atom==1) {
         return NullPgCBHeader;
     }
@@ -144,7 +144,7 @@ PgControlBlockHeader&PgsMemMgr::PgCBtb_lv0_entry_query(phyaddr_t addr) {
  * 如果是类型为freeSystemRam则需要特殊处理，不过这部分我来研究
  */
 
-phy_memDesriptor *PgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
+phy_memDesriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
 {
     if (base & PAGE_OFFSET_MASK[0])         
         return (phy_memDesriptor*)OS_INVALID_ADDRESS;
@@ -224,4 +224,9 @@ phy_memDesriptor *PgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t l
         ksystemramcpy(&dyn2,result+index,sizeof(phy_memDesriptor));
     }
     return result;
+}
+
+phy_memDesriptor *KernelSpacePgsMemMgr::getPhyMemoryspace()
+{
+    return queryPhysicalMemoryUsage(0,gBaseMemMgr.getMaxPhyaddr());
 }

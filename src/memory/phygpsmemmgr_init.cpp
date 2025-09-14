@@ -4,7 +4,7 @@
 #include "VideoDriver.h"
 #include "os_error_definitions.h"
 #include "OS_utils.h"
-PgsMemMgr gPgsMemMgr;
+KernelSpacePgsMemMgr gKspacePgsMemMgr;
 
 
 /**
@@ -16,19 +16,19 @@ PgsMemMgr gPgsMemMgr;
  * 以便后面转换为真正页表
  * 为了兼容五级页表在四级页表的情况下lv4级别的表是只有一项的，也只为其分配一项
  */
-void PgsMemMgr::Init()
+void KernelSpacePgsMemMgr::Init()
 {
     uint64_t cr4_tmp;
-    PgCBtb_query_func[0] = &PgsMemMgr::PgCBtb_lv0_entry_query;
-PgCBtb_query_func[1] = &PgsMemMgr::PgCBtb_lv1_entry_query;
-PgCBtb_query_func[2] = &PgsMemMgr::PgCBtb_lv2_entry_query;
-PgCBtb_query_func[3] = &PgsMemMgr::PgCBtb_lv3_entry_query;
-PgCBtb_query_func[4] = &PgsMemMgr::PgCBtb_lv4_entry_query;
-PgCBtb_construct_func[0] = &PgsMemMgr::PgCBtb_lv0_entry_construct;
-PgCBtb_construct_func[1] = &PgsMemMgr::PgCBtb_lv1_entry_construct;
-PgCBtb_construct_func[2] = &PgsMemMgr::PgCBtb_lv2_entry_construct;
-PgCBtb_construct_func[3] = &PgsMemMgr::PgCBtb_lv3_entry_construct;
-PgCBtb_construct_func[4] = &PgsMemMgr::PgCBtb_lv4_entry_construct;
+    PgCBtb_query_func[0] = &KernelSpacePgsMemMgr::PgCBtb_lv0_entry_query;
+PgCBtb_query_func[1] = &KernelSpacePgsMemMgr::PgCBtb_lv1_entry_query;
+PgCBtb_query_func[2] = &KernelSpacePgsMemMgr::PgCBtb_lv2_entry_query;
+PgCBtb_query_func[3] = &KernelSpacePgsMemMgr::PgCBtb_lv3_entry_query;
+PgCBtb_query_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_query;
+PgCBtb_construct_func[0] = &KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct;
+PgCBtb_construct_func[1] = &KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct;
+PgCBtb_construct_func[2] = &KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct;
+PgCBtb_construct_func[3] = &KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct;
+PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
     int status=0;
 #ifdef     KERNEL_MODE
     asm volatile("mov %%cr4,%0" : "=r"(cr4_tmp));
@@ -43,26 +43,28 @@ PgCBtb_construct_func[4] = &PgsMemMgr::PgCBtb_lv4_entry_construct;
      else rootlv4PgCBtb=new PgControlBlockHeader;
      phy_memDesriptor* phy_memDesTb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
      uint64_t entryCount=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-     uint64_t entryCount_Without_tail_reserved = entryCount  -1;
-     for (; ; entryCount_Without_tail_reserved--)
-     {
-        if(phy_memDesTb[entryCount_Without_tail_reserved].Type==EfiReservedMemoryType)continue;
-        else break;
-     }//这一步操作是因为可能有些虚拟机的表在最后会有大量不可分配的保留型物理内存，必须去除
-     entryCount_Without_tail_reserved++;
-     phyaddr_t top_pg_ptr=0;
-     for(int i=0;i<entryCount_Without_tail_reserved;i++)
+    RootAddr_ofpgtb_inlv4=nullptr;
+    RootAddr_ofpgtb_inlv5=nullptr;
+    kernel_sapce_PCID=0;
+     for(int i=0;i<entryCount;i++)
      {
         status=construct_pgsbasedon_phy_memDescriptor(phy_memDesTb[i]);
         if (status!=OS_SUCCESS)
         {
             kputsSecure("construct_pgsbasedon_phy_memDescriptor failed");
             return ;
-        }
-        
+        }   
      }
 }
-int PgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags)
+KernelSpacePgsMemMgr::allocatable_mem_segs_manager::allocatable_mem_segs_manager()
+{
+    allocatable_mem_seg_count=0;
+    setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
+}
+void KernelSpacePgsMemMgr::allocatable_mem_segs_manager::append(phy_memDesriptor *p)
+{
+}
+int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags)
 {
     int status=0;
     uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
@@ -85,7 +87,7 @@ int PgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags)
     return OS_SUCCESS;
 }
 
-int PgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags flags)
 {
 
     uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
@@ -128,7 +130,7 @@ int PgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags flags)
 
     return OS_SUCCESS;
 }
-int PgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
 {
 
     uint16_t lv2_index=(addr&PDPT_INDEX_MASK_lv2)>>30;
@@ -190,7 +192,7 @@ int PgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
     return OS_SUCCESS;
 }
 
-int PgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
 {
 
     uint16_t lv1_index=(addr&PD_INDEX_MASK_lv1)>>21;
@@ -275,7 +277,7 @@ int PgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
 }
 
 
-int PgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags)
 {
     int status=0;
     uint16_t lv0_index=(addr&PT_INDEX_MASK_lv0)>>12;
@@ -370,7 +372,7 @@ int PgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags)
     lv0_PgCBHeader->flags=flags;
     return OS_SUCCESS;
 }
-int PgsMemMgr::construct_pgsbasedon_phy_memDescriptor(phy_memDesriptor memDescriptor)
+int KernelSpacePgsMemMgr::construct_pgsbasedon_phy_memDescriptor(phy_memDesriptor memDescriptor)
 {
     int status;
     PHY_MEM_TYPE type = (PHY_MEM_TYPE)memDescriptor.Type;
@@ -379,14 +381,15 @@ int PgsMemMgr::construct_pgsbasedon_phy_memDescriptor(phy_memDesriptor memDescri
     uint64_t seg_flags = memDescriptor.Attribute;
     phyaddr_t end_addr = base + numof_4kbgs * PAGE_SIZE_IN_LV[0] ; // 结束地址是最后一个字节的地址
     phyaddr_t scan_addr;
-    phymem_pgs_queue* queue =PgsMemMgr:: seg_to_queue(base,numof_4kbgs * PAGE_SIZE_IN_LV[0]);
+    phymem_pgs_queue* queue =KernelSpacePgsMemMgr:: seg_to_queue(base,numof_4kbgs * PAGE_SIZE_IN_LV[0]);
 
     // 设置页标志
     pgflags flags;
     flags.physical_or_virtual_pg = 0; // 物理页
     flags.is_exist = 1; // 存在
     flags.is_atom = 1; // 原子节点
-
+    flags.is_global=0;
+    flags.cache_strateggy=cache_strategy_t::WB;
 // 设置保留标志 - 不可分配的内存
 flags.is_reserved = (type == EFI_RESERVED_MEMORY_TYPE || 
                     type == EFI_UNUSABLE_MEMORY || 
@@ -418,7 +421,6 @@ flags.is_writable = (type == EFI_LOADER_DATA ||
                     type == EFI_UNACCEPTED_MEMORY_TYPE ||
                     type == EFI_ACPI_RECLAIM_MEMORY) 
                     ? 1 : 0;
-
 // 设置可执行标志 - 严格控制执行权限
 flags.is_executable = (type == EFI_LOADER_CODE || 
                       type == EFI_BOOT_SERVICES_CODE || 
@@ -426,18 +428,21 @@ flags.is_executable = (type == EFI_LOADER_CODE ||
                       type == OS_KERNEL_CODE ||
                       type == EFI_PAL_CODE) 
                       ? 1 : 0;
-
+if(type==EFI_RUNTIME_SERVICES_CODE||type==EFI_RUNTIME_SERVICES_DATA)
+flags.cache_strateggy=cache_strategy_t::WT;
 // 特殊处理ACPI内存
 if (type == EFI_ACPI_RECLAIM_MEMORY) {
     // ACPI回收内存：可读写但不可执行
     flags.is_writable = 1;
     flags.is_executable = 0;
+    flags.cache_strateggy=cache_strategy_t::WT;
 }
 
 if (type == EFI_ACPI_MEMORY_NVS) {
     // ACPI NVS内存：只读，不可写不可执行
     flags.is_writable = 0;
     flags.is_executable = 0;
+    flags.cache_strateggy=cache_strategy_t::UC;
 }
 
 if (type == EFI_MEMORY_MAPPED_IO || type == EFI_MEMORY_MAPPED_IO_PORT_SPACE) {
@@ -446,6 +451,7 @@ if (type == EFI_MEMORY_MAPPED_IO || type == EFI_MEMORY_MAPPED_IO_PORT_SPACE) {
     flags.is_writable = 1;
     flags.is_executable = 0;
     flags.is_reserved = 1; // MMIO必须保留
+    flags.cache_strateggy=cache_strategy_t::UC;
 }
 
 if (type == EFI_PERSISTENT_MEMORY) {
@@ -465,12 +471,14 @@ if (type == OS_KERNEL_DATA) {
     // 内核数据：可读写不可执行
     flags.is_writable = 1;
     flags.is_executable = 0;
+    flags.is_global = 1;
 }
 
 if (type == OS_KERNEL_CODE) {
     // 内核代码：可读可执行但不可写（代码保护）
     flags.is_writable = 0;
     flags.is_executable = 1;
+    flags.is_global = 1;
 }
     
     // 根据队列创建页表项

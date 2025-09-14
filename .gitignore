@@ -21,6 +21,7 @@
 /.clangd/
 /cscope.*
 /tags
+/logs
 *.swp
 *~
 

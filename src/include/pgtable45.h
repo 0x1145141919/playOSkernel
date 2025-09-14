@@ -3,9 +3,7 @@
 
 // 物理地址类型 (MAXPHYADDR ≤ 52)
 typedef uint64_t phys_addr_t;
-#define PHYS_ADDR_MASK 0x000FFFFFFFFFF000  // 52位物理地址掩码
-#define HUGE_1GB_MASK 0x000FFFFFC0000000  // 1GB对齐
-#define HUGE_2MB_MASK 0x000FFFFFFFE00000  // 2MB对齐
+
 constexpr uint64_t PAGE_SIZE_IN_LV[] = {
     (1ULL << 12) ,  // NORMAL_4kb_MASK_OFFSET
     (1ULL << 21) ,  // NORMAL_2MB_MASK_OFFSET
@@ -21,22 +19,9 @@ constexpr uint64_t PAGE_OFFSET_MASK[]={
     (1ULL << 48)  -1
 };
 constexpr uint64_t Max_huge_pg_index =2;//上面那个表中现在的cpu暂时只支持到1GB大页
-// 页表项基础类型 (所有表项均为64位)
+
 typedef uint64_t paging_entry_t;
 
-/* 通用标志位掩码 (图5-11) */
-#define P_FLAG_MASK           (1ULL << 0)  // Present
-#define RW_FLAG_MASK          (1ULL << 1)  // Read/Write
-#define US_FLAG_MASK          (1ULL << 2)  // User/Supervisor
-#define PWT_FLAG_MASK         (1ULL << 3)  // Page Write Through
-#define PCD_FLAG_MASK         (1ULL << 4)  // Page Cache Disable
-#define A_FLAG_MASK           (1ULL << 5)  // Accessed
-#define D_FLAG_MASK           (1ULL << 6)  // Dirty (仅页映射项)
-#define PS_FLAG_MASK          (1ULL << 7)  // Page Size (PDPTE/PDE)
-#define G_FLAG_MASK           (1ULL << 8)  // Global
-#define R_FLAG_MASK           (1ULL << 11) // Restart (HLAT)
-#define PAT_FLAG_MASK         (1ULL << 12) // PAT位 (1GB/2MB页)
-#define XD_FLAG_MASK          (1ULL << 63) // Execute Disable
 constexpr uint64_t PT_INDEX_MASK_lv0=0x00000000000001FF<<12;
 constexpr uint64_t PD_INDEX_MASK_lv1=PT_INDEX_MASK_lv0<<9;
 constexpr uint64_t PDPT_INDEX_MASK_lv2=PD_INDEX_MASK_lv1<<9;
@@ -44,179 +29,152 @@ constexpr uint64_t  PML4_INDEX_MASK_lv3=PDPT_INDEX_MASK_lv2<<9;
 constexpr uint64_t PML5_INDEX_MASK_lv4=PML4_INDEX_MASK_lv3<<9;
 //cr3寄存器结构体
 typedef uint64_t cr3_t;
+// 基础类型定义
+using uint64 = uint64_t;
 
-/**
- * PML5 Entry (5-level paging only)
- * 控制256TB地址空间，指向PML4表
- *
- * @field phys_addr   PML4表物理地址 (bits 51:12)
- * @field xd          执行禁止位 (bit 63)
- */
-#define PML5E_GET_ADDR(entry) ((entry) & PHYS_ADDR_MASK)
-#define PML5E_SET_ADDR(entry, addr) ((entry) = ((entry) & ~PHYS_ADDR_MASK) | ((addr) & PHYS_ADDR_MASK))
-#define PML5E_GET_XD(entry)    (!!((entry) & XD_FLAG_MASK))
-/**
- * PML4 Entry (控制512GB地址空间)
- * 指向页目录指针表(PDPT)或映射512GB大页
- *
- * @field phys_addr   PDPT物理地址 (bits 51:12)
- * @field ps          页大小标志 (reserved=0)
- * @field pk          保护键 (bits 62:59)
- */
-#define PML4E_GET_ADDR(entry)  ((entry) & PHYS_ADDR_MASK)
-#define PML4E_GET_PK(entry)    (((entry) >> 59) & 0xF)  // 保护键提取
-#define PML4E_SET_PK(entry, pk) ((entry) = ((entry) & ~(0xFULL << 59)) | ((uint64_t)(pk & 0xF) << 59))
-/**
- * PDPT Entry (控制1GB地址空间)
- *
- * PS=1时映射1GB页 (Table 5-16)
- *   @field phys_addr   1GB页基址 (bits 51:30)
- *   @field pat         PAT位 (bit 12)
- * 
- * PS=0时指向页目录 (Table 5-17)
- *   @field phys_addr   页目录物理地址 (bits 51:12)
- */
-#define PDPTE_GET_PS(entry)    (!!((entry) & PS_FLAG_MASK))
-#define PDPTE_GET_ADDR(entry)  (PDPTE_GET_PS(entry) ?  ((entry) & (PHYS_ADDR_MASK | 0x1FFFF000)) : ((entry) & PHYS_ADDR_MASK))
-/**
- * Page Directory Entry (控制2MB地址空间)
- *
- * PS=1时映射2MB页 (Table 5-18)
- *   @field phys_addr   2MB页基址 (bits 51:21)
- *   @field pat         PAT位 (bit 12)
- * 
- * PS=0时指向页表 (Table 5-19)
- *   @field phys_addr   页表物理地址 (bits 51:12)
- */
-#define PDE_GET_PS(entry)      (!!((entry) & PS_FLAG_MASK))
-#define PDE_GET_ADDR(entry)    (PDE_GET_PS(entry) ?((entry) & (PHYS_ADDR_MASK | 0x1FFFFF000)) : ((entry) & PHYS_ADDR_MASK))
-/**
- * Page Table Entry (控制4KB页)
- * 
- * @field phys_addr   4KB页物理地址 (bits 51:12)
- * @field pat         PAT位 (bit 7)
- * @field pk          保护键 (bits 62:59)
- * @field xd          执行禁止位 (bit 63)
- */
-#define PTE_GET_ADDR(entry)    ((entry) & PHYS_ADDR_MASK)
-#define PTE_GET_PAT(entry)     (!!((entry) & (1ULL << 7)))  // PAT位在bit7
-#define PTE_GET_XD(entry)      (!!((entry) & XD_FLAG_MASK))
-#define ENTRY_GET_FLAG(entry, mask) (!!((entry) & (mask)))
-#define ENTRY_SET_FLAG(entry, mask, val)    ((entry) = (val) ? ((entry) | (mask)) : ((entry) & ~(mask)))
-/**
- * 4级页表结构 (每表512条目)
- * 符合5.5.2节CR3格式要求
- */
-#define PAGING_LEVEL_ENTRIES 512
-/* 保护键作用域声明 (文档5.6.2节) */
-// PDPTE: 1GB页映射时有效 (Table 5-16)
-#define PDPTE_PK_VALID(entry) (PDPTE_GET_PS(entry))
-// PDE: 2MB页映射时有效 (Table 5-18)
-#define PDE_PK_VALID(entry)   (PDE_GET_PS(entry))
-// PTE: 始终有效 (Table 5-20)
-#define PTE_PK_VALID(entry)   (1)
-typedef struct {
-    union {
-        paging_entry_t pml4e[PAGING_LEVEL_ENTRIES]; // PML4表 (4级分页)
-        paging_entry_t pml5e[PAGING_LEVEL_ENTRIES]; // PML5表 (5级分页)
-    };
-} page_map_top_level;
+// 物理地址宽度（假设为52位）
+constexpr uint64 PHYS_ADDR_WIDTH = 52;
+constexpr uint64 PHYS_ADDR_MASK = (1ULL << PHYS_ADDR_WIDTH) - 1;
 
-/**
- * 页表结构内存布局示例:
- * 
- * 5级分页: CR3 → PML5 → PML4 → PDPT → PD → PT
- * 4级分页: CR3 → PML4 → PDPT → PD → PT
- */
-/**
- * 设置PML4E物理地址 (文档Table 5-15)
- * @param entry   PML4E表项指针
- * @param addr    52位物理地址 (bits 51:12)
- * @note 需确保地址4KB对齐且不超MAXPHYADDR
- */
-// 地址对齐验证
-static inline bool is_1gb_aligned(phys_addr_t addr) {
-    return (addr & 0x000000003FFFFFFF) == 0;
-}
- static inline void pml4e_set_addr(paging_entry_t *entry, phys_addr_t addr)
-{
-    *entry = (*entry & ~PHYS_ADDR_MASK) | (addr & PHYS_ADDR_MASK);
-}
-/**
- * 设置PDPTE物理地址 (文档Table 5-16/17)
- * @param entry   PDPTE表项指针
- * @param addr    物理地址
- * @param is_1gb  是否1GB大页映射 (PS=1)
- * 
- * 大页地址要求:
- *   - 1GB对齐 (bits 51:30)
- *   - 地址掩码: 0x000FFFFF_C0000000
- * 
- * 普通映射要求:
- *   - 4KB对齐 (bits 51:12)
- */
-static inline void pdpte_set_addr(paging_entry_t *entry, phys_addr_t addr, bool is_1gb)
-{
-    if (is_1gb) {
-        // 1GB大页处理 (文档5.5.4节)
-        *entry = (*entry & ~(PHYS_ADDR_MASK | 0x1FFFF000)) | 
-                 (addr & 0x000FFFFFC0000000);
-    } else {
-        // 普通页目录指针
-        *entry = (*entry & ~PHYS_ADDR_MASK) | (addr & PHYS_ADDR_MASK);
-    }
-}
-/**
- * 设置PDE物理地址 (文档Table 5-18/19)
- * @param entry   PDE表项指针
- * @param addr    物理地址
- * @param is_2mb  是否2MB大页映射 (PS=1)
- * 
- * 大页地址要求:
- *   - 2MB对齐 (bits 51:21)
- *   - 地址掩码: 0x000FFFFF_FFE00000
- */
-static inline void pde_set_addr(paging_entry_t *entry, phys_addr_t addr, bool is_2mb)
-{
-    if (is_2mb) {
-        // 2MB大页处理
-        *entry = (*entry & ~(PHYS_ADDR_MASK | 0x1FFFFF)) | 
-                 (addr & 0x000FFFFFFFE00000);
-    } else {
-        // 普通页表指针
-        *entry = (*entry & ~PHYS_ADDR_MASK) | (addr & PHYS_ADDR_MASK);
-    }
-}
-/**
- * 设置PTE物理地址 (文档Table 5-20)
- * @param entry   PTE表项指针
- * @param addr    4KB对齐物理地址 (bits 51:12)
- */
-static inline void pte_set_addr(paging_entry_t *entry, phys_addr_t addr)
-{
-    *entry = (*entry & ~PHYS_ADDR_MASK) | (addr & PHYS_ADDR_MASK);
-}
-/**
- * 提取有效保护键 (文档5.6.2节)
- * @return 4-bit保护键值 (bits 62:59)
- *         无效时返回PK_INVALID(0xF)
- */
-#define PK_INVALID 0xF
+// 通用页表项位字段偏移和掩码（适用于所有级别的页表项）
+namespace PageTableEntry {
+    constexpr uint64 P_BIT    = 0;   // Present 位偏移
+    constexpr uint64 RW_BIT   = 1;   // Read/Write 位偏移
+    constexpr uint64 US_BIT   = 2;   // User/Supervisor 位偏移
+    constexpr uint64 PWT_BIT  = 3;   // Page-Level Write-Through 位偏移
+    constexpr uint64 PCD_BIT  = 4;   // Page-Level Cache Disable 位偏移
+    constexpr uint64 A_BIT    = 5;   // Accessed 位偏移
+    constexpr uint64 XD_BIT   = 63;  // Execute-Disable 位偏移
 
-// PDPTE保护键提取
-static inline uint8_t pdpte_get_pk(paging_entry_t entry)
-{
-    return PDPTE_PK_VALID(entry) ? ((entry >> 59) & 0xF) : PK_INVALID;
+    // 通用掩码
+    constexpr uint64 P_MASK   = 1ULL << P_BIT;
+    constexpr uint64 RW_MASK  = 1ULL << RW_BIT;
+    constexpr uint64 US_MASK  = 1ULL << US_BIT;
+    constexpr uint64 PWT_MASK = 1ULL << PWT_BIT;
+    constexpr uint64 PCD_MASK = 1ULL << PCD_BIT;
+    constexpr uint64 A_MASK   = 1ULL << A_BIT;
+    constexpr uint64 XD_MASK  = 1ULL << XD_BIT;
 }
 
-// PDE保护键提取
-static inline uint8_t pde_get_pk(paging_entry_t entry)
-{
-    return PDE_PK_VALID(entry) ? ((entry >> 59) & 0xF) : PK_INVALID;
+// PML5E（指向PML4表）
+namespace PML5E {
+    // 特定字段偏移（除通用字段外）
+    constexpr uint64 R_BIT    = 11;  // Restart 位偏移（HLAT分页）
+    constexpr uint64 PS_BIT   = 7;   // Reserved（必须为0）
+
+    // 特定字段掩码
+    constexpr uint64 R_MASK   = 1ULL << R_BIT;
+    constexpr uint64 PS_MASK  = 1ULL << PS_BIT;
+
+    // 物理地址字段（位12到M-1，M通常为52）
+    constexpr uint64 ADDR_OFFSET = 12;
+    constexpr uint64 ADDR_BITS = PHYS_ADDR_WIDTH - ADDR_OFFSET;
+    constexpr uint64 ADDR_MASK = ((1ULL << ADDR_BITS) - 1) << ADDR_OFFSET;
 }
 
-// PTE保护键提取
-static inline uint8_t pte_get_pk(paging_entry_t entry)
-{
-    return (entry >> 59) & 0xF;
+// PML4E（指向PDPT）
+namespace PML4E {
+    // 特定字段偏移（除通用字段外）
+    constexpr uint64 R_BIT    = 11;  // Restart 位偏移（HLAT分页）
+    constexpr uint64 PS_BIT   = 7;   // Reserved（必须为0）
+
+    // 特定字段掩码
+    constexpr uint64 R_MASK   = 1ULL << R_BIT;
+    constexpr uint64 PS_MASK  = 1ULL << PS_BIT;
+
+    // 物理地址字段（位12到M-1，M通常为52）
+    constexpr uint64 ADDR_OFFSET = 12;
+    constexpr uint64 ADDR_BITS = PHYS_ADDR_WIDTH - ADDR_OFFSET;
+    constexpr uint64 ADDR_MASK = ((1ULL << ADDR_BITS) - 1) << ADDR_OFFSET;
 }
+
+// PDPTE（映射1GB页或指向PD）
+namespace PDPTE {
+    // 特定字段偏移（除通用字段外）
+    constexpr uint64 D_BIT    = 6;   // Dirty 位偏移
+    constexpr uint64 PS_BIT   = 7;   // Page Size 位偏移
+    constexpr uint64 G_BIT    = 8;   // Global 位偏移
+    constexpr uint64 R_BIT    = 11;  // Restart 位偏移（HLAT分页）
+    constexpr uint64 PAT_BIT  = 12;  // PAT 位偏移
+    constexpr uint64 PK_BITS  = 59;  // Protection Key 起始位（4位）
+
+    // 特定字段掩码
+    constexpr uint64 D_MASK   = 1ULL << D_BIT;
+    constexpr uint64 PS_MASK  = 1ULL << PS_BIT;
+    constexpr uint64 G_MASK   = 1ULL << G_BIT;
+    constexpr uint64 R_MASK   = 1ULL << R_BIT;
+    constexpr uint64 PAT_MASK = 1ULL << PAT_BIT;
+    constexpr uint64 PK_MASK  = 0xFULL << PK_BITS;
+
+    // 物理地址字段（根据PS位决定）
+    // 当PS=0（指向页目录）时
+    constexpr uint64 ADDR_PD_OFFSET = 12;
+    constexpr uint64 ADDR_PD_BITS = PHYS_ADDR_WIDTH - ADDR_PD_OFFSET;
+    constexpr uint64 ADDR_PD_MASK = ((1ULL << ADDR_PD_BITS) - 1) << ADDR_PD_OFFSET;
+    
+    // 当PS=1（映射1GB页）时
+    constexpr uint64 ADDR_1GB_OFFSET = 30;
+    constexpr uint64 ADDR_1GB_BITS = PHYS_ADDR_WIDTH - ADDR_1GB_OFFSET;
+    constexpr uint64 ADDR_1GB_MASK = ((1ULL << ADDR_1GB_BITS) - 1) << ADDR_1GB_OFFSET;
+}
+
+// PDE（映射2MB页或指向PT）
+namespace PDE {
+    // 特定字段偏移（除通用字段外）
+    constexpr uint64 D_BIT    = 6;   // Dirty 位偏移
+    constexpr uint64 PS_BIT   = 7;   // Page Size 位偏移
+    constexpr uint64 G_BIT    = 8;   // Global 位偏移
+    constexpr uint64 R_BIT    = 11;  // Restart 位偏移（HLAT分页）
+    constexpr uint64 PAT_BIT  = 12;  // PAT 位偏移
+    constexpr uint64 PK_BITS  = 59;  // Protection Key 起始位（4位）
+
+    // 特定字段掩码
+    constexpr uint64 D_MASK   = 1ULL << D_BIT;
+    constexpr uint64 PS_MASK  = 1ULL << PS_BIT;
+    constexpr uint64 G_MASK   = 1ULL << G_BIT;
+    constexpr uint64 R_MASK   = 1ULL << R_BIT;
+    constexpr uint64 PAT_MASK = 1ULL << PAT_BIT;
+    constexpr uint64 PK_MASK  = 0xFULL << PK_BITS;
+
+    // 物理地址字段（根据PS位决定）
+    // 当PS=0（指向页表）时
+    constexpr uint64 ADDR_PT_OFFSET = 12;
+    constexpr uint64 ADDR_PT_BITS = PHYS_ADDR_WIDTH - ADDR_PT_OFFSET;
+    constexpr uint64 ADDR_PT_MASK = ((1ULL << ADDR_PT_BITS) - 1) << ADDR_PT_OFFSET;
+    
+    // 当PS=1（映射2MB页）时
+    constexpr uint64 ADDR_2MB_OFFSET = 21;
+    constexpr uint64 ADDR_2MB_BITS = PHYS_ADDR_WIDTH - ADDR_2MB_OFFSET;
+    constexpr uint64 ADDR_2MB_MASK = ((1ULL << ADDR_2MB_BITS) - 1) << ADDR_2MB_OFFSET;
+}
+
+// PTE（映射4KB页）
+namespace PTE {
+    // 特定字段偏移（除通用字段外）
+    constexpr uint64 D_BIT    = 6;   // Dirty 位偏移
+    constexpr uint64 PAT_BIT  = 7;   // PAT 位偏移
+    constexpr uint64 G_BIT    = 8;   // Global 位偏移
+    constexpr uint64 R_BIT    = 11;  // Restart 位偏移（HLAT分页）
+    constexpr uint64 PK_BITS  = 59;  // Protection Key 起始位（4位）
+
+    // 特定字段掩码
+    constexpr uint64 D_MASK   = 1ULL << D_BIT;
+    constexpr uint64 PAT_MASK = 1ULL << PAT_BIT;
+    constexpr uint64 G_MASK   = 1ULL << G_BIT;
+    constexpr uint64 R_MASK   = 1ULL <<R_BIT;
+    constexpr uint64 PK_MASK  = 0xFULL << PK_BITS;
+
+    // 物理地址字段（位12到M-1，M通常为52）
+    constexpr uint64 ADDR_OFFSET = 12;
+    constexpr uint64 ADDR_BITS = PHYS_ADDR_WIDTH - ADDR_OFFSET;
+    constexpr  uint64 ADDR_MASK = ((1ULL << ADDR_BITS) - 1) << ADDR_OFFSET;
+}
+
+// 枚举类型用于表示页表项类型
+enum class PageTableEntryType {
+    PML5,
+    PML4,
+    PDPT,
+    PD,
+    PT
+};

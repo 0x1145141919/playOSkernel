@@ -92,3 +92,4 @@ void setbits_entry1bit_width(pgsbitmap_entry1bit_width*bitmap,bool value,uint16_
 uint8_t getentry_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint16_t index);
 void setentry_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t value, uint16_t index);
 void setentries_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t value, uint16_t start_index, uint16_t len_in_entries);
+void setmem(void* ptr, uint64_t size_in_byte, uint8_t value);

@@ -72,7 +72,7 @@ typedef struct phy_memDesriptor{
     /**
      *  上面的attribute0位是否占用，1位是否读，2位是否写，3位是否可执行，
      * 
-     * 上面的约定只在phy_memDesriptor *PgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
+     * 上面的约定只在phy_memDesriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
      * 的返回结果中有效
      */
     phy_memDesriptor*submaptable;

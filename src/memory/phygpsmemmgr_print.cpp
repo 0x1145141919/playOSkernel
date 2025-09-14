@@ -1,7 +1,7 @@
 #include "phygpsmemmgr.h"
 #include "VideoDriver.h"
 
-void PgsMemMgr::PrintPgsMemMgrStructure()
+void KernelSpacePgsMemMgr::PrintPgsMemMgrStructure()
 {
     kputsSecure("=== Page Table Structure ===\n");
     
@@ -11,9 +11,7 @@ void PgsMemMgr::PrintPgsMemMgrStructure()
     kpnumSecure(&cpu_pglv, UNHEX, 1);
     kputsSecure(")\n");
     
-    kputsSecure("Kernel Space CR3: ");
-    kpnumSecure(&kernel_space_cr3, UNHEX, 8);
-    kputsSecure("\n");
+
     
 
     
@@ -55,7 +53,7 @@ void PgsMemMgr::PrintPgsMemMgrStructure()
 }
 
 // 辅助函数：打印四级表
-void PgsMemMgr::PrintLevel4Table(lowerlv_PgCBtb* table, int parentIndex)
+void KernelSpacePgsMemMgr::PrintLevel4Table(lowerlv_PgCBtb* table, int parentIndex)
 {
     for (int i = 0; i < 512; i++)
     {
@@ -79,7 +77,7 @@ void PgsMemMgr::PrintLevel4Table(lowerlv_PgCBtb* table, int parentIndex)
 }
 
 // 辅助函数：打印三级表
-void PgsMemMgr::PrintLevel3Table(lowerlv_PgCBtb* table, int grandParentIndex, int parentIndex)
+void KernelSpacePgsMemMgr::PrintLevel3Table(lowerlv_PgCBtb* table, int grandParentIndex, int parentIndex)
 {
     for (int i = 0; i < 512; i++)
     {
@@ -102,7 +100,7 @@ void PgsMemMgr::PrintLevel3Table(lowerlv_PgCBtb* table, int grandParentIndex, in
 }
 
 // 辅助函数：打印二级表
-void PgsMemMgr::PrintLevel2Table(lowerlv_PgCBtb* table, int greatGrandParentIndex, int grandParentIndex, int parentIndex)
+void KernelSpacePgsMemMgr::PrintLevel2Table(lowerlv_PgCBtb* table, int greatGrandParentIndex, int grandParentIndex, int parentIndex)
 {
     for (int i = 0; i < 512; i++)
     {
@@ -125,7 +123,7 @@ void PgsMemMgr::PrintLevel2Table(lowerlv_PgCBtb* table, int greatGrandParentInde
 }
 
 // 辅助函数：打印一级表
-void PgsMemMgr::PrintLevel1Table(lowerlv_PgCBtb* table, int greatGreatGrandParentIndex, int greatGrandParentIndex, int grandParentIndex, int parentIndex)
+void KernelSpacePgsMemMgr::PrintLevel1Table(lowerlv_PgCBtb* table, int greatGreatGrandParentIndex, int greatGrandParentIndex, int grandParentIndex, int parentIndex)
 {
     for (int i = 0; i < 512; i++)
     {
@@ -151,7 +149,7 @@ void PgsMemMgr::PrintLevel1Table(lowerlv_PgCBtb* table, int greatGreatGrandParen
 }
 
 // 辅助函数：计算物理地址
-uint64_t PgsMemMgr::CalculatePhysicalAddress(int index5, int index4, int index3, int index2, int index1, int index0)
+uint64_t KernelSpacePgsMemMgr::CalculatePhysicalAddress(int index5, int index4, int index3, int index2, int index1, int index0)
 {
     uint64_t addr = 0;
     
@@ -170,7 +168,7 @@ uint64_t PgsMemMgr::CalculatePhysicalAddress(int index5, int index4, int index3,
 }
 
 // 辅助函数：打印页表项信息
-void PgsMemMgr::PrintPageTableEntry(PgControlBlockHeader* entry, int level)
+void KernelSpacePgsMemMgr::PrintPageTableEntry(PgControlBlockHeader* entry, int level)
 {
     // 打印级别
     kputsSecure((char*)"L");
@@ -253,14 +251,6 @@ void print_pgflags(pgflags flags) {
 
 // 打印1位宽位图
 
-const char* get_phy_mem_type_str(uint8_t type) {
-    switch (type) {
-        case FREE: return "FREE";
-        case OCCUPYIED: return "OCCUPYIED";
-        case RESERVED: return "RESERVED";
-        default: return "UNKNOWN";
-    }
-}
 // 打印2位宽位图
 
 void print_PgControlBlockHeader(struct PgControlBlockHeader* header) {
