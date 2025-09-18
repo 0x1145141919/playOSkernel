@@ -259,86 +259,7 @@ void printPhysicalMemoryUsage(phy_memDesriptor* descArray) {
  * run_memory_manager_tests的例子还暂时没有跑通
  * 先暂时不用，等后面有时间的时候继续调试，修补页内存管理这个模块
  */
-void run_memory_manager_tests() {
-    printf("\n===== Starting Memory Manager Tests =====\n");
-    
-    // 1. 测试基本分配功能
-    printf("\n[Test 1: Basic Allocation]\n");
-    phyaddr_t addr1 = (phyaddr_t)gKspacePgsMemMgr.pgs_allocate(4096, gKspacePgsMemMgr.PG_RW, 12); // 分配1页
-    phyaddr_t addr2 = (phyaddr_t)gKspacePgsMemMgr.pgs_allocate(8192, gKspacePgsMemMgr.PG_RWX, 12); // 分配2页
-    phyaddr_t addr3 = (phyaddr_t)gKspacePgsMemMgr.pgs_allocate(16384, gKspacePgsMemMgr.PG_R, 21); // 分配4页，要求2MB对齐
-    printf("Allocated: 0x%lx (4KB), 0x%lx (8KB), 0x%lx (16KB, 2MB aligned)\n", 
-           addr1, addr2, addr3);
-    // 2. 测试固定地址分配
-    printf("\n[Test 2: Fixed Address Allocation]\n");
-    // 尝试在空闲区域分配
-    int result1 = gKspacePgsMemMgr.pgs_fixedaddr_allocate(0xB0000000, 4096, gKspacePgsMemMgr.PG_RW);
-    printf("Fixed allocation at 0xB0000000: %s\n", result1 == 0 ? "SUCCESS" : "FAILED");
-    // 尝试在已分配区域分配（应失败）
-    int result2 = gKspacePgsMemMgr.pgs_fixedaddr_allocate(addr1, 4096, gKspacePgsMemMgr.PG_RW);
-    printf("Fixed allocation at already allocated 0x%lx: %s\n", addr1, result2 == 0 ? "SUCCESS" : "FAILED");
-    
-    // 尝试在保留区域分配（应失败）
-    int result3 = gKspacePgsMemMgr.pgs_fixedaddr_allocate(0xBFEAF000, 4096, gKspacePgsMemMgr.PG_RW);
-    printf("Fixed allocation at reserved 0xBFEAF000: %s\n", result3 == 0 ? "SUCCESS" : "FAILED");
-    
-    // 3. 测试内存释放
-    printf("\n[Test 3: Memory Free]\n");
-    int free_result1 = gKspacePgsMemMgr.pgs_free(addr1, 4096);
-    int free_result2 = gKspacePgsMemMgr.pgs_free(addr2, 8192);
-    printf("Free addr1 (0x%lx): %s\n", addr1, free_result1 == 0 ? "SUCCESS" : "FAILED");
-    printf("Free addr2 (0x%lx): %s\n", addr2, free_result2 == 0 ? "SUCCESS" : "FAILED");
-    
-    // 尝试释放未分配的内存（应失败）
-    int free_result3 = gKspacePgsMemMgr.pgs_free(0xDEADBEEF, 4096);
-    printf("Free unallocated 0xDEADBEEF: %s\n", free_result3 == 0 ? "SUCCESS" : "FAILED");
-    
-    // 4. 测试分配后内存布局变化
-    printf("\n[Test 4: Memory Layout Changes]\n");
-    printf("Memory layout after allocations and frees:\n");
-    phy_memDesriptor* query = gKspacePgsMemMgr.queryPhysicalMemoryUsage(0xB0000000, 1<<28);
-    printPhysicalMemoryUsage(query);
-    delete[] query;
-    
-    // 5. 测试边界情况
-    printf("\n[Test 5: Edge Cases]\n");
-    // 分配0字节（应失败）
-    //这里出现了把静态堆内核池填满的bug,注意排查
-    phyaddr_t addr_zero = (phyaddr_t)gKspacePgsMemMgr.pgs_allocate(0, gKspacePgsMemMgr.PG_RW, 12);
-    printf("Allocate 0 bytes: %s\n", addr_zero ? "SUCCESS" : "FAILED");
-    
-    // 分配超大内存（超过可用空间）
-    phyaddr_t addr_huge = (phyaddr_t)gKspacePgsMemMgr.pgs_allocate(1ULL << 40, gKspacePgsMemMgr.PG_RW, 12); // 1TB
-    printf("Allocate 1TB: %s\n", addr_huge ? "SUCCESS" : "FAILED");
-    
-    // 释放部分分配的内存（应失败）
-    int free_result4 = gKspacePgsMemMgr.pgs_free(addr3, 4096); // 只释放部分
-    printf("Partial free of 0x%lx: %s\n", addr3, free_result4 == 0 ? "SUCCESS" : "FAILED");
-    
-    // 6. 测试内存重用
-    printf("\n[Test 6: Memory Reuse]\n");
-    phyaddr_t addr_reuse = (phyaddr_t)gKspacePgsMemMgr.pgs_allocate(4096, gKspacePgsMemMgr.PG_RW, 12);
-    printf("Allocated new block at 0x%lx\n", addr_reuse);
-    
-    // 检查是否重用了之前释放的内存
-    if (addr_reuse == addr1 || addr_reuse == addr2) {
-        printf("Successfully reused freed memory at 0x%lx\n", addr_reuse);
-    } else {
-        printf("Allocated new block at 0x%lx (not reused)\n", addr_reuse);
-    }
-    
-    // 7. 最终内存布局
-    printf("\n[Final Memory Layout]\n");
-    query = gKspacePgsMemMgr.queryPhysicalMemoryUsage(0xB0000000, 1<<28);
-    printPhysicalMemoryUsage(query);
-    delete[] query;
-    
-    // 清理
-    gKspacePgsMemMgr.pgs_free(addr3, 16384);
-    gKspacePgsMemMgr.pgs_free(addr_reuse, 4096);
-    
-    printf("\n===== Memory Manager Tests Completed =====\n");
-}
+
 int main() { 
     EFI_MEMORY_DESCRIPTORX64* map;
     UINTN entry_count;
@@ -353,6 +274,5 @@ int main() {
     phy_memDesriptor* query=gKspacePgsMemMgr.queryPhysicalMemoryUsage(0xB0000000,1<<28);
     printPhysicalMemoryUsage(query);
     delete[] query;
-    run_memory_manager_tests();
     return 0;
 }

@@ -69,6 +69,7 @@ private:
     
     // 关键 MSR（通过方法封装访问）
     uint64_t ia32_efer;
+    uint64_t ia32_pat;
     uint64_t ia32_fs_base, ia32_gs_base, ia32_kernel_gs_base;
     uint64_t ia32_lstar;  // SYSCALL 入口
     
@@ -127,13 +128,17 @@ public:
     /*
     其他寄存器值获取和设置函数
     */
-    uint64_t get_cr2() const;
+    uint64_t get_cr2();
     void set_cr2(uint64_t value);
     void load_cr2();
     
-    uint64_t get_cr8() const;
+    uint64_t get_cr8();
     void set_cr8(uint64_t value);
     void load_cr8();
+    
+   uint64_t get_ia32_pat();
+    void set_ia32_pat(uint64_t value);
+    void load_ia32_pat();
     /*
     一系列寄存器值获取函数
     */

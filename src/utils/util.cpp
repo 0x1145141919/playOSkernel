@@ -140,12 +140,12 @@ void linearTBSerialInsert(
     // 更新表项总数
     *TotalEntryCount += entryCount;
 }
-bool getbit_entry1bit_width(pgsbitmap_entry1bit_width* bitmap,uint16_t index)
+bool getbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs* bitmap,uint16_t index)
 {
     uint8_t* map=(uint8_t*)bitmap;
     return (map[index>>3]&masks_entry1bit_width[index&7])!=0;
 }
-void setbit_entry1bit_width(pgsbitmap_entry1bit_width*bitmap,bool value,uint16_t index)
+void setbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t index)
 {
     uint8_t* map=(uint8_t*)bitmap;
     if(value)
@@ -153,7 +153,7 @@ void setbit_entry1bit_width(pgsbitmap_entry1bit_width*bitmap,bool value,uint16_t
     else
         map[index>>3]&=~masks_entry1bit_width[index&7];
 }
-void setbits_entry1bit_width(pgsbitmap_entry1bit_width*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits)
+void setbits_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits)
 {
     int bits_left=len_in_bits;
     uint8_t * map_8bit=(uint8_t*)bitmap;

@@ -15,7 +15,52 @@ KernelSpacePgsMemMgr gKspacePgsMemMgr;
  *根据全局物理内存描述符表初始化一个类页表的数据结构，
  * 以便后面转换为真正页表
  * 为了兼容五级页表在四级页表的情况下lv4级别的表是只有一项的，也只为其分配一项
+*当然，先初始化页表子系统专用堆，才可以构建页表子系统，页表使用的大页需要的是2mb的大页，同步性要求高
+配置为写穿透
+而后根据页表专用堆子系统与类页表数据结构构建页表，使页表生效
+在新的cr3生效后才能让虚拟内存管理系统，可分配物理内存子系统上线
+
  */
+KernelSpacePgsMemMgr::pgtb_heap_mgr_t::pgtb_heap_mgr_t()
+{
+    
+    if(gBaseMemMgr.FixedPhyaddPgallocate(0x200000,0x400000,OS_KERNEL_DATA)!=OS_SUCCESS)
+    {
+        kputsSecure("KernelSpacePgsMemMgr::pgtb_heap_mgr_t: fail to initialize\n");
+        heap_base=0;
+        return;
+    }heap_base=0x200000;
+    setmem(maps,num_of_2mbpgs*sizeof(_2mb_pg_bitmapof_4kbpgs),0);
+    root_index=0;
+}
+void KernelSpacePgsMemMgr::pgtb_heap_mgr_t::all_entries_clear()
+{
+    setmem(maps,num_of_2mbpgs*sizeof(_2mb_pg_bitmapof_4kbpgs),0);
+}
+void *KernelSpacePgsMemMgr::pgtb_heap_mgr_t::pgalloc()
+{
+    for(int i=0;i<num_of_2mbpgs;i++)
+    {
+        for(int j=0;j<512;j++)
+        {
+            bool var= getbit_entry1bit_width(&maps[i],j);
+            if(var==false){
+                setbit_entry1bit_width(maps+i,true,j);
+                return (void*)(heap_base+(i<<21)+(j<<12));
+            }
+        }
+    }
+    return nullptr;
+}
+void KernelSpacePgsMemMgr::pgtb_heap_mgr_t::free(phyaddr_t addr)
+{
+    if(addr&PAGE_OFFSET_MASK[0]){
+        kputsSecure("KernelSpacePgsMemMgr::pgtb_heap_mgr_t::free:not aligned addr");
+    }
+    uint64_t index=(addr-heap_base)>>12;
+    if((index>>9)>255)kputsSecure("KernelSpacePgsMemMgr::pgtb_heap_mgr_t::free:out_of_range");
+    setbit_entry1bit_width(&maps[index>>9],false,index&511ULL);
+}
 void KernelSpacePgsMemMgr::Init()
 {
     uint64_t cr4_tmp;
@@ -41,10 +86,10 @@ PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
      if(cpu_pglv==5)
      rootlv4PgCBtb=new PgControlBlockHeader[512];
      else rootlv4PgCBtb=new PgControlBlockHeader;
+     pgtb_heap_ptr=new pgtb_heap_mgr_t;
      phy_memDesriptor* phy_memDesTb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
      uint64_t entryCount=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    RootAddr_ofpgtb_inlv4=nullptr;
-    RootAddr_ofpgtb_inlv5=nullptr;
+    cache_strategy_table.value=0x407050600070106;
     kernel_sapce_PCID=0;
      for(int i=0;i<entryCount;i++)
      {
@@ -56,13 +101,10 @@ PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
         }   
      }
 }
-KernelSpacePgsMemMgr::allocatable_mem_segs_manager::allocatable_mem_segs_manager()
-{
+KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
+{//从第1mb开始，低1mb内存的内容不能自由分配，其它子管理器进行管理
     allocatable_mem_seg_count=0;
     setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
-}
-void KernelSpacePgsMemMgr::allocatable_mem_segs_manager::append(phy_memDesriptor *p)
-{
 }
 int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags)
 {
@@ -431,7 +473,7 @@ flags.is_executable = (type == EFI_LOADER_CODE ||
 if(type==EFI_RUNTIME_SERVICES_CODE||type==EFI_RUNTIME_SERVICES_DATA)
 flags.cache_strateggy=cache_strategy_t::WT;
 // 特殊处理ACPI内存
-if (type == EFI_ACPI_RECLAIM_MEMORY) {
+if (type == EFI_ACPI_RECLAIM_MEMORY||type==OS_PGTB_SEGS) {
     // ACPI回收内存：可读写但不可执行
     flags.is_writable = 1;
     flags.is_executable = 0;

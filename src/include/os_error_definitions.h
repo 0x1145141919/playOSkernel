@@ -19,3 +19,4 @@
 #define OS_NOT_EXIST (OS_ERROR_BASE + 17)
 #define OS_BAD_FUNCTION (OS_ERROR_BASE + 18)
 #define OS_MEMRY_ALLOCATE_FALT (OS_ERROR_BASE + 19)
+#define OS_EARLY_RETURN 100 //返回这个不一定是错误，具体看函数定义

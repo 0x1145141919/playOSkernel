@@ -30,7 +30,8 @@ LocalCPU::LocalCPU()
         asm volatile("mov %%cr8, %0" : "=r"(cr8));
         
         // 读取 RFLAGS
-        asm volatile("pushfq; pop %0" : "=r"(rflags));
+       
+        asm volatile("pushfq;  pop %0 " : "=r"(rflags));
         
         // 读取 IDTR 和 GDTR
         struct {
@@ -45,7 +46,15 @@ LocalCPU::LocalCPU()
         idtr.limit = idtr_temp.limit;
         gdtr.base = gdtr_temp.base;
         gdtr.limit = gdtr_temp.limit;
-        
+        uint32_t ia32_pat_high=0;
+        uint32_t ia32_pat_low=0;
+        asm volatile (
+        "rdmsr"
+        : "=a" (ia32_pat_low), "=d" (ia32_pat_high) // "=a" 输出到 low (eax), "=d" 输出到 high (edx)
+        : "c" (0x277)             // "c" 表示将 0x277 放入 ecx
+        : // 显式声明可能被修改的寄存器（此处 ecx 已通过输入约束告知编译器，通常无需额外声明）
+    );
+        ia32_pat = ia32_pat_low | (static_cast<uint64_t>(ia32_pat_high) << 32);
         // 其他寄存器初始化为0（暂时不初始化）
         tr = 0;
         dr0 = dr1 = dr2 = dr3 = dr6 = dr7 = 0;
@@ -211,7 +220,7 @@ void LocalCPU::load_cr3() {
 
 
 // CR2 相关接口实现
-uint64_t LocalCPU::get_cr2() const {
+uint64_t LocalCPU::get_cr2()  {
     return cr2;
 }
 
@@ -231,7 +240,7 @@ void LocalCPU::load_cr2() {
 }
 
 // CR8 相关接口实现
-uint64_t LocalCPU::get_cr8() const {
+uint64_t LocalCPU::get_cr8()  {
     return cr8;
 }
 
@@ -247,5 +256,34 @@ void LocalCPU::load_cr8() {
         : // 无输出
         : "r" (cr8)
         : "memory"
+    );
+}
+
+uint64_t LocalCPU::get_ia32_pat() 
+{
+    uint32_t ia32_pat_high=0;
+        uint32_t ia32_pat_low=0;
+        asm volatile (
+        "rdmsr"
+        : "=a" (ia32_pat_low), "=d" (ia32_pat_high) // "=a" 输出到 low (eax), "=d" 输出到 high (edx)
+        : "c" (0x277)             // "c" 表示将 0x277 放入 ecx
+        : // 显式声明可能被修改的寄存器（此处 ecx 已通过输入约束告知编译器，通常无需额外声明）
+       );
+        ia32_pat = ia32_pat_low | (static_cast<uint64_t>(ia32_pat_high) << 32);
+        return ia32_pat;
+}
+
+void LocalCPU::set_ia32_pat(uint64_t value)
+{
+    ia32_pat=value;
+}
+
+void LocalCPU::load_ia32_pat()
+{
+    asm volatile (
+        "wrmsr"
+        : // 输出部分（此处没有输出）
+        : "a" (ia32_pat & 0xFFFFFFFF), "d" (ia32_pat >> 32), "c" (0x277) // "a" 输入到 low (eax), "d" 输入到 high (edx)
+        : // 显式声明可能被修改的寄存器（此处 ecx 已通过输入约束告知编译器，通常无需额外声明）
     );
 }

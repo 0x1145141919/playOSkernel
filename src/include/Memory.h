@@ -2,7 +2,7 @@
 #include  <stdint.h>
 #include  <efi.h>
 #include  "pgtable45.h"
-typedef enum {
+typedef enum :uint64_t{
     EFI_RESERVED_MEMORY_TYPE,
     EFI_LOADER_CODE,
     EFI_LOADER_DATA,
@@ -26,6 +26,7 @@ typedef enum {
     ERROR_FAIL_TO_FIND,
     OS_ALLOCATABLE_MEMORY,
     OS_RESERVED_MEMORY,
+    OS_PGTB_SEGS,
     MEMORY_TYPE_OEM_RESERVED_MIN = 0x70000000,
   MEMORY_TYPE_OEM_RESERVED_MAX = 0x7FFFFFFF,
   MEMORY_TYPE_OS_RESERVED_MIN  = 0x80000000,

@@ -2,18 +2,26 @@
 #include "stdint.h"
 #include "Memory.h"
 typedef  uint64_t phyaddr_t;
-typedef uint8_t pgsbitmap_entry1bit_width[64];
+typedef uint8_t _2mb_pg_bitmapof_4kbpgs[64];
 typedef uint8_t pgsbitmap_entry2bits_width[128];
 
 enum cache_strategy_t:uint8_t
 {
-    None,
-    WB,//写回
-    WT,
-   UC,
-    UC_minus,
-    WC
+    UC=0,
+    WC=1,
+    WT=4,
+    WP=5,
+    WB=6,
+    UC_minus=7
 };
+union ia32_pat_t
+{
+   uint64_t value;
+   cache_strategy_t  mapped_entry[8];
+};
+
+
+
 struct pgflags
 {
     uint64_t physical_or_virtual_pg:1;//0表示物理页，1表示虚拟页
@@ -53,9 +61,10 @@ struct  PgControlBlockHeader
     union 
     {
         lowerlv_PgCBtb* lowerlvPgCBtb;
+        phyaddr_t base_phyaddr;
     }base;
-    
-   
+        
+      
 };
 constexpr PgControlBlockHeader NullPgControlBlockHeader={0};
 struct lowerlv_PgCBtb
@@ -88,13 +97,25 @@ struct phymem_pgs_queue//这是在物理内存描述符表转换为类页表结�
     uint8_t entry_count=0;
     pgs_queue_entry_t entry[10]={0};//最极端的情况是4kb,2mb,1gb,512gb,256tb,512gb,1gb,2mb,4kb
 };
-
+ia32_pat_t cache_strategy_table;
 uint8_t cpu_pglv;//存着cpu处于几级分页模式/四级还是五级
 //四级分页最大支持128TB内存，五级分页最大支持64PB内存，留一半映射到高位内存空间作为高位内核空间
 uint16_t kernel_sapce_PCID;
-uint64_t*RootAddr_ofpgtb_inlv5;
-uint64_t*RootAddr_ofpgtb_inlv4;
-
+class pgtb_heap_mgr_t{
+    
+    static const uint8_t num_of_2mbpgs=2;
+    _2mb_pg_bitmapof_4kbpgs maps[num_of_2mbpgs];
+    public:
+    phyaddr_t heap_base;
+    uint64_t* pgtb_root_phyaddr;
+    uint16_t root_index;
+    pgtb_heap_mgr_t();
+    void all_entries_clear();//清空所有位图中的位,代表释放堆里面所有的页
+    //只有创建页表项失败的时候才会调用这个函数
+    void*pgalloc();
+    void free(phyaddr_t addr);
+};
+pgtb_heap_mgr_t*pgtb_heap_ptr;
 psmemmgr_flags_t flags;
 struct pgaccess
 {
@@ -102,6 +123,9 @@ struct pgaccess
     uint8_t is_writeable:1;
     uint8_t is_readable:1;
     uint8_t is_executable:1;
+    uint8_t is_global:1;
+    uint8_t is_occupyied;
+    cache_strategy_t cache_strategy;
 };
 PgControlBlockHeader*rootlv4PgCBtb=nullptr;
 // 辅助函数：打印四级表
@@ -116,7 +140,9 @@ void PrintLevel1Table(lowerlv_PgCBtb* table, int greatGreatGrandParentIndex, int
 uint64_t CalculatePhysicalAddress(int index5, int index4, int index3, int index2, int index1, int index0);
 // 辅助函数：打印页表项信息
 void PrintPageTableEntry(PgControlBlockHeader* entry, int level);
-
+int pgtb_entry_convert(uint64_t&pgtb_entry,
+    PgControlBlockHeader PgCB,
+    phyaddr_t alloced_loweraddr );
 /**
  * 根据物理地址通过PML5_INDEX_MASK_lv4提取引索
  * 而后根据其原有项是否存在再说是否为其创建子表，
@@ -168,22 +194,27 @@ PgControlBlockHeader&(KernelSpacePgsMemMgr::*PgCBtb_query_func[5])(phyaddr_t)=
  */
 
 phymem_pgs_queue*seg_to_queue(phyaddr_t base,uint64_t size_in_bytes);
-int pgtb_construct_4lvpg();
-int pgtb_construct_5lvpg();
+int construct_pde_level(uint64_t *pd_base, lowerlv_PgCBtb *pd_PgCBtb, uint64_t pml4_index, uint64_t pdpt_index);
+int construct_pdpte_level(uint64_t *pdpt_base, lowerlv_PgCBtb *pdpt_PgCBtb, uint64_t pml4_index);
+int construct_pml4e_level(uint64_t *rootPgtb, lowerlv_PgCBtb *root_PgCBtb);
+int pgtb_lowaddr_equalmap_construct_4lvpg();
+int pgtb_lowaddr_equalmap_construct_5lvpg();
 /**
  * 为了动态虚拟内存管理需要定义的数据结构有
  * 1.虚拟内存对象表数组
  * 2.可分配物理内存段表数组
  */
+
+
 struct minimal_phymem_seg_t
 {
     phyaddr_t base;
-    //一个64bit数据结构但是包含是否占用的信息，多少4kb页信息
+    uint64_t num_of_4kbpgs:50;
+
 };
 struct vaddr_seg_subtb_t
 {
     phyaddr_t phybase;
-    vaddr_t vbase;
     uint64_t num_of_4kbpgs;
 };
 
@@ -193,37 +224,67 @@ struct allocatable_mem_seg_t
     uint64_t size_in_numof4kbpgs;
     uint32_t max_num_of_subtb_entries;
     uint32_t num_of_subtb_entries;
-    minimal_phymem_seg_t*subtb;
+    minimal_phymem_seg_t*subtb;//子表里面只会存放占用的物理内存段
+    //没有被描述到的物理内存段就是没有占用
 };
-class allocatable_mem_segs_manager{
+/*这个嵌套类是物理内存占用管理的子系统
+专门管理各个可分配内存段的物理内存分配
+*/
+class phymemSegsSubMgr_t{
     public:
       static constexpr uint8_t max_entry_count=64;
-      allocatable_mem_segs_manager();
-      void append(phy_memDesriptor*p);
+/*
+这个子类的构造函数只会在KernelSpacePgsMemMgr的Init函数中运行，
+也就是说在内存子系统初始化的时候只会运行一次
+原理是扫描rootPhyMemDscptTbBsPtr表按照物理基地址从小到大提取空闲内存段，
+按照引索从小到大转换成allocatable_mem_seg_t的数据结构
+*/
+
+      phymemSegsSubMgr_t();
+/*
+根据可分配内存段表使用分段查找技术查询有没有空闲内存，顺序为低地址向高地址扫描
+*/
+    void *alloc(uint64_t num_of_4kbpgs);
+/*
+固定地址分配函数，这个函数会先检测固定地址的物理内存段是否存在被占用段，
+根据传入的物理地址和长度进行物理内存分配，会在allocatable_mem_seg
+某一项的子表之下生成一个表项，子表项保持物理基址随引索增大而增大的顺序
+*/
+    int fixedaddr_allocate(IN phyaddr_t base, IN size_t num_of_4kbpgs);
+/*
+根据物理基址查询相应的表项，由于不存在合并，拆分，直接把相应子表项使用线性表删除即可
+*/    
+    int free(phyaddr_t base);    
       private:
      allocatable_mem_seg_t allocatable_mem_seg[max_entry_count];
      uint8_t allocatable_mem_seg_count;
 };
-
+phymemSegsSubMgr_t phymemSubMgr;
 struct vaddr_seg_t
 {
     vaddr_t base;
+    pgflags flags;
     uint64_t size_in_numof4kbpgs;
     uint32_t max_num_of_subtb_entries;
     uint32_t num_of_subtb_entries;
     vaddr_seg_subtb_t*subtb;
 };
-class vaddr_segs_manager{
-    public:
-      static constexpr uint8_t max_entry_count=64;
-      vaddr_segs_manager();
 
-      private:
-     allocatable_mem_seg_t allocatable_mem_seg[max_entry_count];
-     uint8_t allocatable_mem_seg_count;
-};
-vaddr_seg_t vaddr_seg[4096];
-phyaddr_t Inner_fixed_addr_manage(phyaddr_t base, phymem_pgs_queue queue,bool alloc_or_free,pgaccess access);
+uint16_t vaddrobj_count=0;
+vaddr_seg_t vaddr_objs[4096];
+void enable_new_cr3();
+int construct_pte_level(uint64_t *pt_base, lowerlv_PgCBtb *pt_PgCBtb, uint64_t pml4_index, uint64_t pdpt_index, uint64_t pd_index);
+phyaddr_t Inner_fixed_addr_manage(phyaddr_t base,
+                                  phymem_pgs_queue queue,
+                                  pgaccess access,
+                                  bool modify_pgtb = false);
+int process_pte_level(uint64_t *pt_base, lowerlv_PgCBtb *pt_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t pml4_index, uint64_t pdpt_index, uint64_t pd_index, uint64_t start_pt_index);
+int process_pde_level(uint64_t *pd_base, lowerlv_PgCBtb *pd_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t pml4_index, uint64_t pdpt_index, uint64_t start_pd_index);
+int process_pdpte_level(uint64_t *pdpt_base, lowerlv_PgCBtb *pdpt_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t pml4_index, uint64_t start_pdpt_index);
+int process_pml4e_level(uint64_t *rootPgtb, lowerlv_PgCBtb *root_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t start_pml4_index);
+int process_pml5e_level(uint64_t *rootPgtb, lowerlv_PgCBtb *root_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t start_pml5_index);
+int modify_pgtb_in_4lv(uint64_t base, uint64_t endaddr);
+int modify_pgtb_in_5lv(phyaddr_t base,uint64_t endaddr);
 public:
 
 const pgaccess PG_RW={1,1,1,0};
@@ -242,7 +303,7 @@ void* pgs_fixedaddr_allocate_remapped(IN phyaddr_t addr, IN size_t size_in_byte,
      */
     void Init();
     void PrintPgsMemMgrStructure();
-    void enable_new_cr3();
+    
 };
 extern KernelSpacePgsMemMgr gKspacePgsMemMgr;
 void print_PgControlBlockHeader(struct PgControlBlockHeader* header);
