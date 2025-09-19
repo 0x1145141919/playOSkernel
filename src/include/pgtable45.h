@@ -36,14 +36,6 @@ using uint64 = uint64_t;
 // 物理地址宽度（假设为52位）
 constexpr uint64 PHYS_ADDR_WIDTH = 52;
 constexpr uint64 PHYS_ADDR_MASK = (1ULL << PHYS_ADDR_WIDTH) - 1;
-
-namespace lineaddr_index_filters{
-    constexpr uint64 PT_INDEX_MASK_lv0=0x00000000000001FF<<12;
-    constexpr uint64 PD_INDEX_MASK_lv1=lineaddr_index_filters::PT_INDEX_MASK_lv0<<9;
-    constexpr uint64 PDPT_INDEX_MASK_lv2=lineaddr_index_filters::PD_INDEX_MASK_lv1<<9;
-    constexpr uint64 PML4_INDEX_MASK_lv3=lineaddr_index_filters::PDPT_INDEX_MASK_lv2<<9;
-    constexpr uint64 PML5_INDEX_MASK_lv4=lineaddr_index_filters::PML4_INDEX_MASK_lv3<<9;
-}
 // 通用页表项位字段偏移和掩码（适用于所有级别的页表项）
 namespace PageTableEntry {
     constexpr uint64 P_BIT    = 0;   // Present 位偏移

@@ -105,37 +105,16 @@ int KernelSpacePgsMemMgr::pgtb_entry_convert(uint64_t&pgtb_entry,
             break;
         default:return OS_INVALID_PARAMETER;
         }
-    }
-
-void KernelSpacePgsMemMgr::enable_new_cr3()
-{
-   switch (cpu_pglv)
-   {
-   case 4:
-    pgtb_lowaddr_equalmap_construct_4lvpg();
-    break;
-   
-   case 5:
-
-   break;
-    default:return;
-   }
-    
+    return OS_SUCCESS;
 }
-/**
- * 构建PTE级别（最后一级）的页表
- */
-int KernelSpacePgsMemMgr::construct_pte_level(
-    uint64_t* pt_base, 
-    lowerlv_PgCBtb* pt_PgCBtb, 
-    uint64_t pml4_index, 
-    uint64_t pdpt_index, 
-    uint64_t pd_index
-) {
+// 处理PTE级别（最后一级）页表的函数
+int KernelSpacePgsMemMgr::process_pte_level(lowerlv_PgCBtb* pt_PgCBtb, uint64_t* pt_base, uint64_t base_vaddr) {
+    pgflags tmp_flags;
     for (int l = 0; l < 512; l++) {
-        pgflags tmp_flags = pt_PgCBtb->entries[l].flags;
+        tmp_flags = pt_PgCBtb->entries[l].flags;
         if (tmp_flags.is_exist) {
-            phyaddr_t page_base = (pml4_index << 39) + (pdpt_index << 30) + (pd_index << 21) + (l << 12);
+            // 处理4KB页
+            phyaddr_t page_base = base_vaddr + (l << 12);
             int result = pgtb_entry_convert(pt_base[l], pt_PgCBtb->entries[l], page_base);
             if (result != OS_SUCCESS) {
                 return result;
@@ -145,33 +124,28 @@ int KernelSpacePgsMemMgr::construct_pte_level(
     return OS_SUCCESS;
 }
 
-/**
- * 构建PDE级别（第三级）的页表
- */
-int KernelSpacePgsMemMgr::construct_pde_level(
-    uint64_t* pd_base, 
-    lowerlv_PgCBtb* pd_PgCBtb, 
-    uint64_t pml4_index, 
-    uint64_t pdpt_index
-) {
+// 处理PD级别页表的函数
+int KernelSpacePgsMemMgr::process_pd_level(lowerlv_PgCBtb* pd_PgCBtb, uint64_t* pd_base, uint64_t base_vaddr, bool is_5level) {
+    pgflags tmp_flags;
     for (int k = 0; k < 512; k++) {
-        pgflags tmp_flags = pd_PgCBtb->entries[k].flags;
+        tmp_flags = pd_PgCBtb->entries[k].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
                 // 处理2MB大页
-                phyaddr_t huge_2mb_base = (pml4_index << 39) + (pdpt_index << 30) + (k << 21);
+                phyaddr_t huge_2mb_base = base_vaddr + (k << 21);
                 int result = pgtb_entry_convert(pd_base[k], pd_PgCBtb->entries[k], huge_2mb_base);
                 if (result != OS_SUCCESS) {
                     return result;
                 }
             } else {
-                // 处理指向PT的普通PDE
+                // 分配PT表
                 uint64_t* pt_base = (uint64_t*)pgtb_heap_ptr->pgalloc();
                 if (pt_base == nullptr) {
-                    kputsSecure("construct_pde_level:pgalloc failed for pt_base\n");
+                    kputsSecure("pgalloc failed for pt_base\n");
                     return OS_OUT_OF_MEMORY;
                 }
                 
+                // 转换PDE条目
                 int result = pgtb_entry_convert(pd_base[k], pd_PgCBtb->entries[k], (phyaddr_t)pt_base);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pt_base);
@@ -179,9 +153,8 @@ int KernelSpacePgsMemMgr::construct_pde_level(
                 }
                 
                 lowerlv_PgCBtb* pt_PgCBtb = pd_PgCBtb->entries[k].base.lowerlvPgCBtb;
-                
-                // 构建PTE级别
-                result = construct_pte_level(pt_base, pt_PgCBtb, pml4_index, pdpt_index, k);
+                uint64_t next_base_vaddr = base_vaddr + (k << 21);
+                result = process_pte_level(pt_PgCBtb, pt_base, next_base_vaddr);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pt_base);
                     return result;
@@ -192,32 +165,28 @@ int KernelSpacePgsMemMgr::construct_pde_level(
     return OS_SUCCESS;
 }
 
-/**
- * 构建PDPTE级别（第二级）的页表
- */
-int KernelSpacePgsMemMgr::construct_pdpte_level(
-    uint64_t* pdpt_base, 
-    lowerlv_PgCBtb* pdpt_PgCBtb, 
-    uint64_t pml4_index
-) {
+// 处理PDPT级别页表的函数
+int KernelSpacePgsMemMgr::process_pdpt_level(lowerlv_PgCBtb* pdpt_PgCBtb, uint64_t* pdpt_base, uint64_t base_vaddr, bool is_5level) {
+    pgflags tmp_flags;
     for (int j = 0; j < 512; j++) {
-        pgflags tmp_flags = pdpt_PgCBtb->entries[j].flags;
+        tmp_flags = pdpt_PgCBtb->entries[j].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
                 // 处理1GB大页
-                phyaddr_t huge_1gb_base = (pml4_index << 39) + (j << 30);
+                phyaddr_t huge_1gb_base = base_vaddr + (j << 30);
                 int result = pgtb_entry_convert(pdpt_base[j], pdpt_PgCBtb->entries[j], huge_1gb_base);
                 if (result != OS_SUCCESS) {
                     return result;
                 }
             } else {
-                // 处理指向PD的普通PDPTE
+                // 分配PD表
                 uint64_t* pd_base = (uint64_t*)pgtb_heap_ptr->pgalloc();
                 if (pd_base == nullptr) {
-                    kputsSecure("construct_pdpte_level:pgalloc failed for pd_base\n");
+                    kputsSecure("pgalloc failed for pd_base\n");
                     return OS_OUT_OF_MEMORY;
                 }
                 
+                // 转换PDPTE条目
                 int result = pgtb_entry_convert(pdpt_base[j], pdpt_PgCBtb->entries[j], (phyaddr_t)pd_base);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pd_base);
@@ -225,9 +194,8 @@ int KernelSpacePgsMemMgr::construct_pdpte_level(
                 }
                 
                 lowerlv_PgCBtb* pd_PgCBtb = pdpt_PgCBtb->entries[j].base.lowerlvPgCBtb;
-                
-                // 构建PDE级别
-                result = construct_pde_level(pd_base, pd_PgCBtb, pml4_index, j);
+                uint64_t next_base_vaddr = base_vaddr + (j << 30);
+                result = process_pd_level(pd_PgCBtb, pd_base, next_base_vaddr, is_5level);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pd_base);
                     return result;
@@ -238,36 +206,33 @@ int KernelSpacePgsMemMgr::construct_pdpte_level(
     return OS_SUCCESS;
 }
 
-/**
- * 构建PML4E级别（第一级）的页表
- */
-int KernelSpacePgsMemMgr::construct_pml4e_level(
-    uint64_t* rootPgtb, 
-    lowerlv_PgCBtb* root_PgCBtb
-) {
-    for (uint16_t i = 0; i < 512; i++) {
-        pgflags tmp_flags = root_PgCBtb->entries[i].flags;
+// 处理PML4级别页表的函数
+int KernelSpacePgsMemMgr::process_pml4_level(lowerlv_PgCBtb* pml4_PgCBtb, uint64_t* pml4_base, uint64_t base_vaddr, bool is_5level) {
+    pgflags tmp_flags;
+    for (int i = 0; i < 512; i++) {
+        tmp_flags = pml4_PgCBtb->entries[i].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
-                kputsSecure("construct_pml4e_level:atom entry in Pml4 not support\n");
+                kputsSecure("atom entry in Pml4 not support\n");
                 return OS_BAD_FUNCTION;
             } else {
+                // 分配PDPT表
                 uint64_t* pdpt_base = (uint64_t*)pgtb_heap_ptr->pgalloc();
                 if (pdpt_base == nullptr) {
-                    kputsSecure("construct_pml4e_level:pgalloc failed for pdpt_base\n");
+                    kputsSecure("pgalloc failed for pdpt_base\n");
                     return OS_OUT_OF_MEMORY;
                 }
                 
-                int result = pgtb_entry_convert(rootPgtb[i], root_PgCBtb->entries[i], (phyaddr_t)pdpt_base);
+                // 转换PML4E条目
+                int result = pgtb_entry_convert(pml4_base[i], pml4_PgCBtb->entries[i], (phyaddr_t)pdpt_base);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pdpt_base);
                     return result;
                 }
                 
-                lowerlv_PgCBtb* pdpt_PgCBtb = root_PgCBtb->entries[i].base.lowerlvPgCBtb;
-                
-                // 构建PDPTE级别
-                result = construct_pdpte_level(pdpt_base, pdpt_PgCBtb, i);
+                lowerlv_PgCBtb* pdpt_PgCBtb = pml4_PgCBtb->entries[i].base.lowerlvPgCBtb;
+                uint64_t next_base_vaddr = base_vaddr + (i << (is_5level ? 39 : 30));
+                result = process_pdpt_level(pdpt_PgCBtb, pdpt_base, next_base_vaddr, is_5level);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pdpt_base);
                     return result;
@@ -278,12 +243,47 @@ int KernelSpacePgsMemMgr::construct_pml4e_level(
     return OS_SUCCESS;
 }
 
-/**
- * 构建四级页表的低地址恒等映射
- * 这个函数现在通过调用分层构建函数来实现
- */
+// 处理PML5级别页表的函数
+int KernelSpacePgsMemMgr::process_pml5_level(PgControlBlockHeader* pml5_PgCBtb, uint64_t* pml5_base, bool is_5level) {
+    pgflags tmp_flags;
+    for (int i = 0; i < 512; i++) {
+        tmp_flags = pml5_PgCBtb[i].flags;
+        if (tmp_flags.is_exist) {
+            if (tmp_flags.is_atom) {
+                kputsSecure("atom entry in Pml5 not support\n");
+                return OS_BAD_FUNCTION;
+            } else {
+                // 分配PML4表
+                uint64_t* pml4_base = (uint64_t*)pgtb_heap_ptr->pgalloc();
+                if (pml4_base == nullptr) {
+                    kputsSecure("pgalloc failed for pml4_base\n");
+                    return OS_OUT_OF_MEMORY;
+                }
+                
+                // 转换PML5E条目
+                int result = pgtb_entry_convert(pml5_base[i], pml5_PgCBtb[i], (phyaddr_t)pml4_base);
+                if (result != OS_SUCCESS) {
+                    pgtb_heap_ptr->free((phyaddr_t)pml4_base);
+                    return result;
+                }
+                
+                lowerlv_PgCBtb* pml4_PgCBtb = pml5_PgCBtb[i].base.lowerlvPgCBtb;
+                uint64_t next_base_vaddr = static_cast<uint64_t>(i) << 48;
+                result = process_pml4_level(pml4_PgCBtb, pml4_base, next_base_vaddr, is_5level);
+                if (result != OS_SUCCESS) {
+                    pgtb_heap_ptr->free((phyaddr_t)pml4_base);
+                    return result;
+                }
+            }
+        }
+    }
+    return OS_SUCCESS;
+}
+
+// 重构后的4级页表构建函数
 int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_4lvpg() {
-    lowerlv_PgCBtb* root_PgCBtb = rootlv4PgCBtb->base.lowerlvPgCBtb;
+    // 获取PML4级别的控制块表
+    lowerlv_PgCBtb *root_PgCBtb = rootlv4PgCBtb->base.lowerlvPgCBtb;
     uint64_t* rootPgtb = (uint64_t*)pgtb_heap_ptr->pgalloc();
     
     if (rootPgtb == nullptr) {
@@ -291,11 +291,9 @@ int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_4lvpg() {
         return OS_OUT_OF_MEMORY;
     }
     
-    // 从PML4级别开始构建
-    int result = construct_pml4e_level(rootPgtb, root_PgCBtb);
-    
+    // 处理PML4级别
+    int result = process_pml4_level(root_PgCBtb, rootPgtb, 0, false);
     if (result != OS_SUCCESS) {
-        // 如果构建失败，释放根页表
         pgtb_heap_ptr->free((phyaddr_t)rootPgtb);
         return result;
     }
@@ -306,7 +304,41 @@ int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_4lvpg() {
     
     return OS_SUCCESS;
 }
-int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_5lvpg()
-{
-    return 0;
+
+// 重构后的5级页表构建函数
+int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_5lvpg() {
+    // 获取PML5级别的控制块表
+    PgControlBlockHeader* root_PgCBtb = rootlv4PgCBtb;
+    uint64_t* rootPgtb = (uint64_t*)pgtb_heap_ptr->pgalloc();
+    
+    if (rootPgtb == nullptr) {
+        kputsSecure("pgtb_lowaddr_equalmap_construct_5lvpg:pgalloc failed for rootPgtb\n");
+        return OS_OUT_OF_MEMORY;
+    }
+    
+    // 处理PML5级别
+    int result = process_pml5_level(root_PgCBtb, rootPgtb, true);
+    if (result != OS_SUCCESS) {
+        pgtb_heap_ptr->free((phyaddr_t)rootPgtb);
+        return result;
+    }
+    
+    // 设置PAT寄存器
+    LocalCPU localcpu;
+    localcpu.set_ia32_pat(cache_strategy_table.value);
+    
+    return OS_SUCCESS;
+}
+
+void KernelSpacePgsMemMgr::enable_new_cr3() {
+    switch (cpu_pglv) {
+        case 4:
+            pgtb_lowaddr_equalmap_construct_4lvpg();
+            break;
+        case 5:
+            pgtb_lowaddr_equalmap_construct_5lvpg();
+            break;
+        default:
+            return;
+    }
 }

@@ -62,9 +62,7 @@ struct  PgControlBlockHeader
     {
         lowerlv_PgCBtb* lowerlvPgCBtb;
         phyaddr_t base_phyaddr;
-    }base;
-        
-      
+    }base;     
 };
 constexpr PgControlBlockHeader NullPgControlBlockHeader={0};
 struct lowerlv_PgCBtb
@@ -143,6 +141,8 @@ void PrintPageTableEntry(PgControlBlockHeader* entry, int level);
 int pgtb_entry_convert(uint64_t&pgtb_entry,
     PgControlBlockHeader PgCB,
     phyaddr_t alloced_loweraddr );
+int process_pte_level(lowerlv_PgCBtb *pt_PgCBtb, uint64_t *pt_base, uint64_t base_vaddr);
+int process_pd_level(lowerlv_PgCBtb *pd_PgCBtb, uint64_t *pd_base, uint64_t base_vaddr, bool is_5level);
 /**
  * 根据物理地址通过PML5_INDEX_MASK_lv4提取引索
  * 而后根据其原有项是否存在再说是否为其创建子表，
@@ -197,6 +197,9 @@ phymem_pgs_queue*seg_to_queue(phyaddr_t base,uint64_t size_in_bytes);
 int construct_pde_level(uint64_t *pd_base, lowerlv_PgCBtb *pd_PgCBtb, uint64_t pml4_index, uint64_t pdpt_index);
 int construct_pdpte_level(uint64_t *pdpt_base, lowerlv_PgCBtb *pdpt_PgCBtb, uint64_t pml4_index);
 int construct_pml4e_level(uint64_t *rootPgtb, lowerlv_PgCBtb *root_PgCBtb);
+int process_pdpt_level(lowerlv_PgCBtb *pdpt_PgCBtb, uint64_t *pdpt_base, uint64_t base_vaddr, bool is_5level);
+int process_pml4_level(lowerlv_PgCBtb *pml4_PgCBtb, uint64_t *pml4_base, uint64_t base_vaddr, bool is_5level);
+int process_pml5_level(PgControlBlockHeader *pml5_PgCBtb, uint64_t *pml5_base, bool is_5level);
 int pgtb_lowaddr_equalmap_construct_4lvpg();
 int pgtb_lowaddr_equalmap_construct_5lvpg();
 /**
@@ -294,7 +297,8 @@ const pgaccess PG_R ={1,0,1,0};
 void*pgs_allocate_remapped(size_t size_in_byte,pgaccess access,uint8_t align_require=12);
 void*pgs_allocate(size_t size_in_byte,uint8_t align_require=12);//此接口分配的内存返回的是物理地址，不支持权限配置，只能配置为读写权限
 int pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte  );
-void* pgs_fixedaddr_allocate_remapped(IN phyaddr_t addr, IN size_t size_in_byte,IN pgaccess access);//此接口分配的内存基于物理地址，不支持权限配置，只能配置为读写权限
+void* pgs_fixedaddr_allocate_remapped(IN phyaddr_t addr, IN size_t size_in_byte,IN pgaccess access);
+//此接口分配的内存基于物理地址，不支持权限配置，只能配置为读写权限
     int pgs_free(phyaddr_t addr );//不用
     phy_memDesriptor* queryPhysicalMemoryUsage(phyaddr_t base,uint64_t len_in_bytes);
     phy_memDesriptor* getPhyMemoryspace();

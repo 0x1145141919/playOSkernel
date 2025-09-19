@@ -715,6 +715,54 @@ void kpoolmemmgr_t::print_all_hcb_status() {
     kpnumSecure(&index, UNDEC, 0);
     kputsSecure("\n");
 }
+void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size)
+{
+    if (size==0)
+    {
+        kputsSecure("realloc: size can't be 0\n");
+        return nullptr;
+    }
+    if(ptr==nullptr)return nullptr;
+    if(kpoolmemmgr_flags.ableto_Expand == 0)
+    {
+        int index=addr_to_HCB_MetaInfotb_Index(first_static_heap,(uint8_t*)ptr);
+        if(index==OS_NOT_EXIST)return nullptr;
+        HeapObjectMetav2* orient_obj = &first_static_heap.heap.metaInfo.objMetaTable[index];
+        HeapObjectMetav2* nextboj = &first_static_heap.heap.metaInfo.objMetaTable[index+1];
+        int diff=orient_obj->size-size;
+        if(diff>=0)
+        {
+            orient_obj->size=size;
+            if(nextboj->type==OBJ_TYPE_FREE)nextboj->size+=diff;
+            else{
+                HeapObjectMetav2 new_obj;
+                new_obj.offset_in_heap=nextboj->offset_in_heap-diff;
+                new_obj.size=diff;
+                new_obj.type=OBJ_TYPE_FREE;
+               linearTBSerialInsert(&first_static_heap.heap.metaInfo.header.objMetaCount,
+                index+1,
+                &new_obj,
+                first_static_heap.heap.metaInfo.objMetaTable,
+                sizeof(HeapObjectMetav2)
+            );
+            }
+        }else{
+            if (nextboj->type==OBJ_TYPE_FREE)
+            {
+                if (nextboj->size>=diff*-1)
+                {
+                    orient_obj->size=size;
+                    nextboj->size+=diff;
+                }
+                
+            }else{
+                return nullptr;
+            }
+            
+        }
+    }
+    return nullptr;
+}
 // 高效的内存设置函数
 
 static inline int find_object_by_offset(HeapMetaInfoArray* metaInfo, uint32_t target_offset) {

@@ -4,6 +4,7 @@
 #include "VideoDriver.h"
 #include "os_error_definitions.h"
 #include "OS_utils.h"
+#include "pgtable45.h"
 KernelSpacePgsMemMgr gKspacePgsMemMgr;
 
 
@@ -109,7 +110,7 @@ KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
 int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags)
 {
     int status=0;
-    uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
+    uint64_t lv4_index=(addr&lineaddr_index_filters::PML5_INDEX_MASK_lv4)>>48;
     lv4_index=cpu_pglv==5?lv4_index:0;
     flags.pg_lv=4;
     rootlv4PgCBtb[lv4_index].flags = flags;
@@ -132,8 +133,8 @@ int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags fla
 int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags flags)
 {
 
-    uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
-    uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
+    uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
+    uint64_t lv4_index=(addr&lineaddr_index_filters:: PML5_INDEX_MASK_lv4)>>48;
     PgCBlv4header* lv4_PgCBHeader = cpu_pglv == 5 ? &rootlv4PgCBtb[lv4_index] : rootlv4PgCBtb;
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist=1;
@@ -175,9 +176,9 @@ int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags fla
 int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
 {
 
-    uint16_t lv2_index=(addr&PDPT_INDEX_MASK_lv2)>>30;
-    uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
-    uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
+    uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
+    uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
+    uint64_t lv4_index=(addr&lineaddr_index_filters:: PML5_INDEX_MASK_lv4)>>48;
     int status=0;
     PgCBlv4header* lv4_PgCBHeader = cpu_pglv == 5 ? &rootlv4PgCBtb[lv4_index] : rootlv4PgCBtb;
     pgflags higher_uninitialized_entry_flags;
@@ -237,10 +238,10 @@ int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags fla
 int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
 {
 
-    uint16_t lv1_index=(addr&PD_INDEX_MASK_lv1)>>21;
-    uint16_t lv2_index=(addr&PDPT_INDEX_MASK_lv2)>>30;
-    uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
-    uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
+    uint16_t lv1_index=(addr&lineaddr_index_filters:: PD_INDEX_MASK_lv1)>>21;
+    uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
+    uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
+    uint64_t lv4_index=(addr&lineaddr_index_filters:: PML5_INDEX_MASK_lv4)>>48;
     int status=0;
     PgCBlv4header* lv4_PgCBHeader = cpu_pglv == 5 ? &rootlv4PgCBtb[lv4_index] : rootlv4PgCBtb;
     pgflags higher_uninitialized_entry_flags;
@@ -322,11 +323,11 @@ int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags fla
 int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags)
 {
     int status=0;
-    uint16_t lv0_index=(addr&PT_INDEX_MASK_lv0)>>12;
-    uint16_t lv1_index=(addr&PD_INDEX_MASK_lv1)>>21;
-    uint16_t lv2_index=(addr&PDPT_INDEX_MASK_lv2)>>30;
-    uint16_t lv3_index=(addr&PML4_INDEX_MASK_lv3)>>39;
-    uint64_t lv4_index=(addr&PML5_INDEX_MASK_lv4)>>48;
+    uint16_t lv0_index=(addr&lineaddr_index_filters:: PT_INDEX_MASK_lv0)>>12;
+    uint16_t lv1_index=(addr&lineaddr_index_filters:: PD_INDEX_MASK_lv1)>>21;
+    uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
+    uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
+    uint64_t lv4_index=(addr&lineaddr_index_filters:: PML5_INDEX_MASK_lv4)>>48;
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist=1;
     higher_uninitialized_entry_flags.is_atom=0;

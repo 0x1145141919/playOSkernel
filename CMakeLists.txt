@@ -45,6 +45,7 @@ set(SRC_COMMON
 add_executable(kernel.elf
     ${CMAKE_SOURCE_DIR}/src/kinit.cpp
         src/utils/kcirclebufflogMgr.cpp
+        src/memory/phygpsmemmgr_new_cr3.cpp
         src/Processor/processor_self_manage.cpp
     ${SRC_COMMON}
 )

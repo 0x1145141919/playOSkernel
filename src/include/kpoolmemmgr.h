@@ -128,6 +128,8 @@ public:
    void print_meta_table(HCB_chainlist_node* node); // 打印HCB的元信息表
    void print_all_hcb_status();                     // 打印所有HCB状态
    void*kalloc(uint64_t size,bool vaddraquire=false,uint8_t alignment=3);
+   void*realloc(void*ptr,uint64_t size);//根据表在基地址不变的情况下尝试修改堆对象大小
+   //向上增加地址可能失败
    void clear(void*ptr);// 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
    //别用这个清理new之后的对象
    void Init();
