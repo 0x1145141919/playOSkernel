@@ -101,6 +101,7 @@ PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
             return ;
         }   
      }
+     enable_new_cr3();
 }
 KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
 {//从第1mb开始，低1mb内存的内容不能自由分配，其它子管理器进行管理
@@ -174,7 +175,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags fla
     return OS_SUCCESS;
 }
 int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
-{
+{//有无限递归风险
 
     uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
     uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
@@ -236,7 +237,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags fla
 }
 
 int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
-{
+{//有无限递归风险
 
     uint16_t lv1_index=(addr&lineaddr_index_filters:: PD_INDEX_MASK_lv1)>>21;
     uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;

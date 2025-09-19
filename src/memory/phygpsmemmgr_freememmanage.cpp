@@ -42,7 +42,18 @@ bool modify_pgtb
     }
     if (modify_pgtb)
     {
+       switch (cpu_pglv)
+       {
+       case 4:
+       modify_pgtb_in_4lv(base,scan_addr);
         /* code */
+        break;
+       case 5:
+       modify_pgtb_in_5lv(base,scan_addr);
+        break;
+       default:
+        return OS_INVALID_PARAMETER ;
+       }
     }
     
     return scan_addr;
@@ -335,23 +346,123 @@ int KernelSpacePgsMemMgr::modify_pgtb_in_5lv(phyaddr_t base, uint64_t endaddr)
     // 从PML5级别开始处理
     return process_pml5e_level(rootPgtb, rootlv4PgCBtb, scan_addr, endaddr, start_pml5_index);
 }
-void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, uint8_t align_require)
-{
 
+void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t align_require)
+{
+    if(size_in_byte==0)return nullptr;
+    phyaddr_t scan_addr = 0x100000;
+    size_in_byte += PAGE_OFFSET_MASK[0];
+    size_in_byte &= ~PAGE_OFFSET_MASK[0];
+    uint64_t align_require_mask = (1ULL << align_require) - 1;
+    phy_memDesriptor*usage_query_result=nullptr;
+    while(true){
+    usage_query_result = queryPhysicalMemoryUsage(scan_addr,size_in_byte);
+    if(usage_query_result==(phy_memDesriptor*)OS_OUT_OF_MEMORY)
+    return (void*)OS_OUT_OF_MEMORY;    
+    if(usage_query_result==nullptr)return nullptr;
+    if(usage_query_result[0].Type==OS_ALLOCATABLE_MEMORY&&
+    (usage_query_result[0].Attribute&1)==0&&
+    usage_query_result[0].NumberOfPages*PAGE_SIZE_IN_LV[0]>=size_in_byte)
+    {
+        delete usage_query_result;
+        break;
+    }
+
+    else {
+        scan_addr+=PAGE_SIZE_IN_LV[0]*usage_query_result[0].NumberOfPages;
+        scan_addr+=align_require_mask;
+    scan_addr&=~align_require_mask;
+    delete usage_query_result;
+    continue;
+    }
+    int i = 0;
+        for (; usage_query_result[i].Type!=EfiReservedMemoryType; i++)
+        {
+        }
+        scan_addr=usage_query_result[i-1].PhysicalStart;
+    scan_addr+=align_require_mask;
+    scan_addr&=~align_require_mask;
+
+    delete usage_query_result;
+    }
+    
+    phymem_pgs_queue*queue=seg_to_queue(scan_addr,size_in_byte);
+    phyaddr_t alloced_addr= Inner_fixed_addr_manage(scan_addr,*queue,access);
+    if (alloced_addr!=scan_addr+size_in_byte)
+    {
+        delete queue;
     return nullptr;
+    }
+    delete usage_query_result;
+    delete queue;
+    return (void*)scan_addr;
 }
 
-int KernelSpacePgsMemMgr::pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte)
+int KernelSpacePgsMemMgr::pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte, pgaccess access)
 {
-
+    if(addr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
+    size_in_byte += PAGE_OFFSET_MASK[0];
+    size_in_byte &= ~PAGE_OFFSET_MASK[0];
+    phy_memDesriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
+    if(usage_query_result[1].Type!=EfiReservedMemoryType)
+    {
+            delete usage_query_result;
+            return OS_MEMRY_ALLOCATE_FALT;
+     }
+    //这个判定是因为如果确认是空闲内存，那么返回的结果必然只有一项，第二项必然是空不是一项可以返回不可分配
+    if(usage_query_result[0].Type!=OS_ALLOCATABLE_MEMORY&&
+    usage_query_result[0].Attribute&1!=0)
+    {
+        delete usage_query_result;
+        return OS_MEMRY_ALLOCATE_FALT;
+    }
+    //确定这一项是100%可分配内存，完全空闲
+    delete usage_query_result;
+    phymem_pgs_queue*queue=seg_to_queue(addr,size_in_byte);
+    phyaddr_t alloced_addr= Inner_fixed_addr_manage(addr,*queue,access);
+    if (alloced_addr!=addr+size_in_byte)
+    {
+        return OS_MEMRY_ALLOCATE_FALT;
+    }
+    delete queue;
     return OS_SUCCESS;
 }
 
-
-int KernelSpacePgsMemMgr::pgs_free(phyaddr_t addr )
+int KernelSpacePgsMemMgr::pgs_free(phyaddr_t addr, size_t size_in_byte)
 {   
+    
+        if(addr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
+    size_in_byte += PAGE_OFFSET_MASK[0];
+    size_in_byte &= ~PAGE_OFFSET_MASK[0];
+    phy_memDesriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
+    for(;usage_query_result->Type!=EfiReservedMemoryType;usage_query_result++)
+    {
+        if(usage_query_result->Type!=OS_ALLOCATABLE_MEMORY)
+        {
+            kputsSecure("PgsMemMgr::pgs_free:invalid memtype when analyse result from queryPhysicalMemoryUsage\n");    
+            return OS_MEMRY_ALLOCATE_FALT;
+        }
+        if(usage_query_result->Attribute&1!=1)
+        {
+            kputsSecure("PgsMemMgr::pgs_free:try to free freed memory\n");
+        }
+    }
+    delete usage_query_result;
+    phymem_pgs_queue*queue=seg_to_queue(addr,size_in_byte);
+    pgaccess access={0};
+    access.is_kernel=true;
+    access.is_writeable=true;
+    access.is_readable=true;
+    access.is_executable=false;
+    phyaddr_t alloced_addr= Inner_fixed_addr_manage(addr,*queue,access);
+    if (alloced_addr!=addr+size_in_byte)return OS_MEMRY_ALLOCATE_FALT;
+   
+    delete queue;
     return OS_SUCCESS;
-}
+ }
+
+
+
 
  KernelSpacePgsMemMgr::phymem_pgs_queue *KernelSpacePgsMemMgr::seg_to_queue(phyaddr_t base,uint64_t size_in_bytes){
     uint64_t end_addr = base + size_in_bytes;

@@ -268,12 +268,14 @@ struct vaddr_seg_t
     vaddr_t base;
     pgflags flags;
     uint64_t size_in_numof4kbpgs;
-    uint32_t max_num_of_subtb_entries;
-    uint32_t num_of_subtb_entries;
+    uint16_t max_num_of_subtb_entries;
+    uint16_t num_of_subtb_entries;
+    PHY_MEM_TYPE type;
     vaddr_seg_subtb_t*subtb;
 };
 
-uint16_t vaddrobj_count=0;
+uint16_t vaddrobj_count=0;//占用了物理内存的虚拟内存对象数量
+uint16_t valid_vaddrobj_count=0;    //有效虚拟内存对象数量(包括空闲的)
 vaddr_seg_t vaddr_objs[4096];
 void enable_new_cr3();
 int construct_pte_level(uint64_t *pt_base, lowerlv_PgCBtb *pt_PgCBtb, uint64_t pml4_index, uint64_t pdpt_index, uint64_t pd_index);
@@ -288,8 +290,11 @@ int process_pml4e_level(uint64_t *rootPgtb, lowerlv_PgCBtb *root_PgCBtb, uint64_
 int process_pml5e_level(uint64_t *rootPgtb, lowerlv_PgCBtb *root_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t start_pml5_index);
 int modify_pgtb_in_4lv(uint64_t base, uint64_t endaddr);
 int modify_pgtb_in_5lv(phyaddr_t base,uint64_t endaddr);
-public:
+void *pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t align_require);
+int pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte, pgaccess access);
+int pgs_free(phyaddr_t addr, size_t size_in_byte);
 
+public:
 const pgaccess PG_RW={1,1,1,0};
 const pgaccess PG_RWX ={1,1,1,1};
 const pgaccess PG_R ={1,0,1,0};
