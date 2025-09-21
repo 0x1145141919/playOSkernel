@@ -114,7 +114,7 @@ KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
     allocatable_mem_seg_count=0;
     setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
 }
-int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
 {
     int status=0;
     uint64_t lv4_index=(addr&lineaddr_index_filters::PML5_INDEX_MASK_lv4)>>48;
@@ -137,7 +137,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags fla
     return OS_SUCCESS;
 }
 
-int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
 {
 
     uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
@@ -178,7 +178,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags fla
     
     return OS_SUCCESS;
 }
-int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
 {//有无限递归风险
 
     uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
@@ -229,12 +229,18 @@ int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags fla
         
         gKpoolmemmgr.clear(lv2_PgCBHeader->base.lowerlvPgCBtb);
 
+    }else
+    {
+        if(lv2_PgCBHeader->flags.physical_or_virtual_pg==VIR_ATOM_PAGE)
+        {
+            lv2_PgCBHeader->base.base_phyaddr=mapped_phyaddr;
+        }
     }
     
     return OS_SUCCESS;
 }
 
-int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
 {//有无限递归风险
 
     uint16_t lv1_index=(addr&lineaddr_index_filters:: PD_INDEX_MASK_lv1)>>21;
@@ -301,6 +307,10 @@ int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags fla
         }
         
         gKpoolmemmgr.clear(lv1_PgCBHeader->base.lowerlvPgCBtb);
+    }else
+    {
+        if(lv1_PgCBHeader->flags.physical_or_virtual_pg==VIR_ATOM_PAGE)
+        lv1_PgCBHeader->base.base_phyaddr=mapped_phyaddr;
     }
     
     
@@ -309,7 +319,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags fla
 }
 
 
-int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags)
+int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
 {
     int status=0;
     uint16_t lv0_index=(addr&lineaddr_index_filters:: PT_INDEX_MASK_lv0)>>12;
@@ -397,6 +407,10 @@ int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags fla
     }
     PgCBlv0header*lv0_PgCBHeader=&lv1_PgCBHeader->base.lowerlvPgCBtb->entries[lv0_index];
     lv0_PgCBHeader->flags=flags;
+    if(lv0_PgCBHeader->flags.physical_or_virtual_pg==VIR_ATOM_PAGE)
+    {
+        lv0_PgCBHeader->base.base_phyaddr=mapped_phyaddr;
+    }
     return OS_SUCCESS;
 }
 int KernelSpacePgsMemMgr::construct_pgsbasedon_phy_memDescriptor(phy_memDesriptor memDescriptor)
@@ -519,7 +533,7 @@ if (type == OS_KERNEL_CODE) {
   // 使用函数指针数组调用对应的构造函数
             if (queue->entry[i].pgs_lv >= 0 && queue->entry[i].pgs_lv <= 4)
             {
-                status = (this->*PgCBtb_construct_func[queue->entry[i].pgs_lv])(scan_addr, flags);
+                status = (this->*PgCBtb_construct_func[queue->entry[i].pgs_lv])(scan_addr, flags,0);
             }
             else
             {

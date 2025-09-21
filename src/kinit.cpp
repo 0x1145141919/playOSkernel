@@ -91,5 +91,6 @@ extern "C" int _kernel_Init(void* TransferPage,
     
     gBaseMemMgr.printPhyMemDesTb();
     gKspacePgsMemMgr.Init();
+    //中断接管工作
     asm volatile("hlt");    
 }

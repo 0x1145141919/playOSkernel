@@ -13,15 +13,33 @@
  */
 
 phyaddr_t KernelSpacePgsMemMgr::Inner_fixed_addr_manage(
-phyaddr_t base, 
+uint64_t linear_base, 
 phymem_pgs_queue queue, 
 pgaccess access,
+phyaddr_t mapped_phybase,
 bool modify_pgtb
 )
 {
-    phyaddr_t scan_addr=base;
+    phyaddr_t scan_addr=linear_base;
     pgflags flag_of_pg={0 };
-    flag_of_pg.physical_or_virtual_pg=0;
+    if(cpu_pglv==4)
+    {
+        if (linear_base>=0xffff800000000000)
+        {
+            flag_of_pg.physical_or_virtual_pg=VIR_ATOM_PAGE;
+        }else{
+            flag_of_pg.physical_or_virtual_pg=PHY_ATOM_PAGE;
+        }
+        
+    }else{
+        if(linear_base>=0xff00000000000000)
+        {
+            flag_of_pg.physical_or_virtual_pg=VIR_ATOM_PAGE;
+        }else{
+            flag_of_pg.physical_or_virtual_pg=PHY_ATOM_PAGE;
+        }
+        
+    }
     flag_of_pg.is_occupied=access.is_occupyied;
     flag_of_pg.is_atom=1;
     flag_of_pg.is_exist=1;
@@ -35,7 +53,7 @@ bool modify_pgtb
         flag_of_pg.pg_lv=lv;
         for(int j=0;j<queue.entry[i].pgs_count;j++)
         {
-            if((this->*PgCBtb_construct_func[lv])(scan_addr,flag_of_pg)!=OS_SUCCESS)
+            if((this->*PgCBtb_construct_func[lv])(scan_addr,flag_of_pg,mapped_phybase+(scan_addr-linear_base))!=OS_SUCCESS)
             return scan_addr;
             scan_addr+=PAGE_SIZE_IN_LV[lv];
         }
@@ -45,11 +63,11 @@ bool modify_pgtb
        switch (cpu_pglv)
        {
        case 4:
-       modify_pgtb_in_4lv(base,scan_addr);
+       modify_pgtb_in_4lv(linear_base,scan_addr);
         /* code */
         break;
        case 5:
-       modify_pgtb_in_5lv(base,scan_addr);
+       modify_pgtb_in_5lv(linear_base,scan_addr);
         break;
        default:
         return OS_INVALID_PARAMETER ;
@@ -76,13 +94,16 @@ int KernelSpacePgsMemMgr::process_pte_level(
 ) {
     for (int l = start_pt_index; l < 512; l++) {
         pgflags tmp_flags = pt_PgCBtb->entries[l].flags;
-        if (tmp_flags.is_exist) {
+         int result; if (tmp_flags.is_exist) {
+            if(tmp_flags.physical_or_virtual_pg==PHY_ATOM_PAGE){
             phyaddr_t page_base = (pml4_index << 39) + (pdpt_index << 30) + (pd_index << 21) + (l << 12);
-            int result = pgtb_entry_convert(pt_base[l], pt_PgCBtb->entries[l], page_base);
-            if (result != OS_SUCCESS) {
+           result= pgtb_entry_convert(pt_base[l], pt_PgCBtb->entries[l], page_base);
+            
+            }else{
+               result = pgtb_entry_convert(pt_base[l], pt_PgCBtb->entries[l], pt_PgCBtb->entries[l].base.base_phyaddr);
+            }if (result != OS_SUCCESS) {
                 return result;
             }
-            
             scan_addr += PAGE_SIZE_IN_LV[0];
             if (scan_addr >= endaddr) {
                 return OS_EARLY_RETURN;
@@ -109,12 +130,17 @@ int KernelSpacePgsMemMgr::process_pde_level(
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
                 // 处理2MB大页
+                 int result;
+                if(tmp_flags.physical_or_virtual_pg==PHY_ATOM_PAGE){
                 phyaddr_t huge_2mb_base = (pml4_index << 39) + (pdpt_index << 30) + (k << 21);
-                int result = pgtb_entry_convert(pd_base[k], pd_PgCBtb->entries[k], huge_2mb_base);
+                result = pgtb_entry_convert(pd_base[k], pd_PgCBtb->entries[k], huge_2mb_base);
+                
+                }else{
+                result = pgtb_entry_convert(pd_base[k], pd_PgCBtb->entries[k], pd_PgCBtb->entries[k].base.base_phyaddr);
+                }
                 if (result != OS_SUCCESS) {
                     return result;
                 }
-                
                 scan_addr += PAGE_SIZE_IN_LV[1];
                 if (scan_addr >= endaddr) {
                     return OS_EARLY_RETURN;
@@ -172,12 +198,17 @@ int KernelSpacePgsMemMgr::process_pdpte_level(
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
                 // 处理1GB大页
+                int result;
+                if(tmp_flags.physical_or_virtual_pg==PHY_ATOM_PAGE){
                 phyaddr_t huge_1gb_base = (pml4_index << 39) + (j << 30);
-                int result = pgtb_entry_convert(pdpt_base[j], pdpt_PgCBtb->entries[j], huge_1gb_base);
+                result = pgtb_entry_convert(pdpt_base[j], pdpt_PgCBtb->entries[j], huge_1gb_base);
+                
+                }else{
+                    result = pgtb_entry_convert(pdpt_base[j], pdpt_PgCBtb->entries[j], pdpt_PgCBtb->entries[j].base.base_phyaddr);
+                }
                 if (result != OS_SUCCESS) {
                     return result;
                 }
-                
                 scan_addr += PAGE_SIZE_IN_LV[2];
                 if (scan_addr >= endaddr) {
                     return OS_EARLY_RETURN;

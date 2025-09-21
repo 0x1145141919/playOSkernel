@@ -20,7 +20,8 @@ union ia32_pat_t
    cache_strategy_t  mapped_entry[8];
 };
 
-
+#define PHY_ATOM_PAGE 0
+#define VIR_ATOM_PAGE 1
 
 struct pgflags
 {
@@ -149,12 +150,12 @@ int process_pd_level(lowerlv_PgCBtb *pd_PgCBtb, uint64_t *pd_base, uint64_t base
  * 而后根据其原有项是否存在再说是否为其创建子表，
  * 下面还有几个级别的也是如此
  */
-int PgCBtb_lv4_entry_construct(phyaddr_t addr,pgflags flags);
-int PgCBtb_lv3_entry_construct(phyaddr_t addr,pgflags flags);
-int PgCBtb_lv2_entry_construct(phyaddr_t addr,pgflags flags);
-int PgCBtb_lv1_entry_construct(phyaddr_t addr,pgflags flags);
-int PgCBtb_lv0_entry_construct(phyaddr_t addr,pgflags flags);
-int (KernelSpacePgsMemMgr::*PgCBtb_construct_func[5])(phyaddr_t,pgflags)=
+int PgCBtb_lv4_entry_construct(uint64_t addr,pgflags flags,phyaddr_t mapped_phyaddr=0);
+int PgCBtb_lv3_entry_construct(uint64_t addr,pgflags flags,phyaddr_t mapped_phyaddr=0);
+int PgCBtb_lv2_entry_construct(uint64_t addr,pgflags flags,phyaddr_t mapped_phyaddr=0);
+int PgCBtb_lv1_entry_construct(uint64_t addr,pgflags flags,phyaddr_t mapped_phyaddr=0);
+int PgCBtb_lv0_entry_construct(uint64_t addr,pgflags flags,phyaddr_t mapped_phyaddr=0);
+int (KernelSpacePgsMemMgr::*PgCBtb_construct_func[5])(uint64_t,pgflags,phyaddr_t)=
 {
     &KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct,
     &KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct,
@@ -280,9 +281,10 @@ uint16_t valid_vaddrobj_count=0;    //有效虚拟内存对象数量(包括空�
 vaddr_seg_t vaddr_objs[4096];
 void enable_new_cr3();
 int construct_pte_level(uint64_t *pt_base, lowerlv_PgCBtb *pt_PgCBtb, uint64_t pml4_index, uint64_t pdpt_index, uint64_t pd_index);
-phyaddr_t Inner_fixed_addr_manage(phyaddr_t base,
+phyaddr_t Inner_fixed_addr_manage(phyaddr_t linear_base,
                                   phymem_pgs_queue queue,
                                   pgaccess access,
+                                  phyaddr_t mapped_phybase=0,
                                   bool modify_pgtb = false);
 int process_pte_level(uint64_t *pt_base, lowerlv_PgCBtb *pt_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t pml4_index, uint64_t pdpt_index, uint64_t pd_index, uint64_t start_pt_index);
 int process_pde_level(uint64_t *pd_base, lowerlv_PgCBtb *pd_PgCBtb, uint64_t &scan_addr, uint64_t endaddr, uint64_t pml4_index, uint64_t pdpt_index, uint64_t start_pd_index);

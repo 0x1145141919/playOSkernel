@@ -70,7 +70,9 @@ int KernelSpacePgsMemMgr::pgtb_entry_convert(uint64_t&pgtb_entry,
             pgtb_entry|=alloced_loweraddr;
             bitset64bits_write(pgtb_entry,PDE::PAT_BIT,cache_strategy_index&4);
         }else
-        { 
+        {
+            bitset64bits_clear(pgtb_entry,PageTableEntry::XD_BIT);
+            bitset64bits_set(pgtb_entry,PageTableEntry::RW_BIT); 
             pgtb_entry&=~PDE::ADDR_PT_MASK;
             if(alloced_loweraddr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
             pgtb_entry|=alloced_loweraddr;
@@ -89,6 +91,8 @@ int KernelSpacePgsMemMgr::pgtb_entry_convert(uint64_t&pgtb_entry,
             bitset64bits_write(pgtb_entry,PDPTE::PAT_BIT,cache_strategy_index&4);
         }else
         { 
+            bitset64bits_clear(pgtb_entry,PageTableEntry::XD_BIT);
+            bitset64bits_set(pgtb_entry,PageTableEntry::RW_BIT); 
             pgtb_entry&=~PDPTE::ADDR_PD_MASK;
             if(alloced_loweraddr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
             pgtb_entry|=alloced_loweraddr;
@@ -96,11 +100,15 @@ int KernelSpacePgsMemMgr::pgtb_entry_convert(uint64_t&pgtb_entry,
         
         break;
         case 3:
+        bitset64bits_clear(pgtb_entry,PageTableEntry::XD_BIT);
+            bitset64bits_set(pgtb_entry,PageTableEntry::RW_BIT); 
         pgtb_entry&=~PML4E::ADDR_MASK;
             if(alloced_loweraddr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
             pgtb_entry|=alloced_loweraddr;
             break;
         case 4:
+        bitset64bits_clear(pgtb_entry,PageTableEntry::XD_BIT);
+            bitset64bits_set(pgtb_entry,PageTableEntry::RW_BIT); 
              pgtb_entry&=~PML5E::ADDR_MASK;
             if(alloced_loweraddr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
             pgtb_entry|=alloced_loweraddr;;
@@ -348,12 +356,12 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
         default:
             return;
     }
-    /*phy_memDesriptor*global_tb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDesriptor*global_tb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
     uint64_t count=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
     vaddr_t valloc_base=(cpu_pglv==4?0xffff800000000000:0xff<<56ULL);
     vaddr_t scan_addr=valloc_base;
     
-    
+    gBaseMemMgr.printPhyMemDesTb();
     for(uint64_t i=0;i<count;i++)
     {   
         pgflags tmp_flags={0};
@@ -392,26 +400,19 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
                 delete pgs_pacage;
                 return;
             }
-             Inner_fixed_addr_manage(scan_addr,*pgs_pacage,tmp_access,true);
+             Inner_fixed_addr_manage(scan_addr,*pgs_pacage,tmp_access,global_tb[i].PhysicalStart,true);
+             scan_addr+=(global_tb[i].NumberOfPages<<12);
              valid_vaddrobj_count++;
              delete pgs_pacage;
              break;            
         }
-    }*/
+    }
     LocalCPU localcpu;
     uint64_t new_cr3=0;
     new_cr3=(uint64_t)pgtb_heap_ptr->pgtb_root_phyaddr;
     new_cr3|=kernel_sapce_PCID;
     localcpu.set_cr3(new_cr3);
     localcpu.load_cr3();
-    asm volatile (
-    "push %0\n\t"
-    "pop %0\n\t"
-    "mov %0, -8(%%rsp)"
-    : 
-    : "r" (new_cr3)
-    : "memory"
-);
     kputsSecure("new_cr3 enabled:");
     kpnumSecure(&new_cr3,UNHEX,8);
     localcpu.set_ia32_pat(cache_strategy_table.value);
