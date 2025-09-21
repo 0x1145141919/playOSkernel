@@ -36,14 +36,7 @@ extern "C" int _kernel_Init(void* TransferPage,
     asm volatile("cli   ");
     int  Status=0;
     
-    /* uint32_t low, high;
-   
-    // 内联汇编读取 IA32_PAT (MSR 0x277)
-    asm volatile (
-        "rdmsr"                     // 执行 RDMSR 指令
-        : "=a"(low), "=d"(high)     // 输出：EAX → low, EDX → high
-        : "c"(0x277)                // 输入：ECX = MSR 地址 (0x277)
-    );*/
+    
     GlobalBasicGraphicInfoType* TFG=(GlobalBasicGraphicInfoType*)TransferPage;
     Status = InitialGlobalBasicGraphicInfo(
         TFG->horizentalResolution,

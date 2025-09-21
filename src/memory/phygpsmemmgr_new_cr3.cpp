@@ -9,11 +9,11 @@
 
 static inline void bitset64bits_set(uint64_t&bitset,uint64_t bitpos)
 {
-    bitset|=1<<bitpos;
+    bitset|=1ULL<<bitpos;
 }
 static inline void bitset64bits_clear(uint64_t&bitset,uint64_t bitpos)
 {
-    bitset&=~(1<<bitpos);
+    bitset&=~(1ULL<<bitpos);
 }
 static inline void bitset64bits_write(uint64_t&bitset,uint64_t bitpos,bool value){
     if (value)
@@ -27,16 +27,18 @@ static inline void bitset64bits_write(uint64_t&bitset,uint64_t bitpos,bool value
 int KernelSpacePgsMemMgr::pgtb_entry_convert(uint64_t&pgtb_entry,
     PgControlBlockHeader PgCB,
     phyaddr_t alloced_loweraddr )
-{
+{   
     uint8_t cache_strategy_index;
     if(PgCB.flags.is_exist==0)
     {
-        bitset64bits_clear(pgtb_entry,PageTableEntry::P_BIT);
+        bitset64bits_write(pgtb_entry,PageTableEntry::P_BIT,false);
         return OS_SUCCESS;
     }else{
+        bitset64bits_write(pgtb_entry,PageTableEntry::P_BIT,true);
         bitset64bits_write(pgtb_entry,PageTableEntry::RW_BIT,PgCB.flags.is_writable);
         bitset64bits_write(pgtb_entry,PageTableEntry::US_BIT,!PgCB.flags.is_kernel);
         bitset64bits_write(pgtb_entry,PageTableEntry::XD_BIT,!PgCB.flags.is_executable);
+        //bitset64bits_write(pgtb_entry,PageTableEntry::XD_BIT,false);
         
         for(int i=0;i<8;i++)
         {
@@ -110,11 +112,12 @@ int KernelSpacePgsMemMgr::pgtb_entry_convert(uint64_t&pgtb_entry,
 // 处理PTE级别（最后一级）页表的函数
 int KernelSpacePgsMemMgr::process_pte_level(lowerlv_PgCBtb* pt_PgCBtb, uint64_t* pt_base, uint64_t base_vaddr) {
     pgflags tmp_flags;
-    for (int l = 0; l < 512; l++) {
+    for (uint64_t l = 0; l < 512; l++) {
         tmp_flags = pt_PgCBtb->entries[l].flags;
         if (tmp_flags.is_exist) {
             // 处理4KB页
             phyaddr_t page_base = base_vaddr + (l << 12);
+            pt_base[l]=0;
             int result = pgtb_entry_convert(pt_base[l], pt_PgCBtb->entries[l], page_base);
             if (result != OS_SUCCESS) {
                 return result;
@@ -127,7 +130,7 @@ int KernelSpacePgsMemMgr::process_pte_level(lowerlv_PgCBtb* pt_PgCBtb, uint64_t*
 // 处理PD级别页表的函数
 int KernelSpacePgsMemMgr::process_pd_level(lowerlv_PgCBtb* pd_PgCBtb, uint64_t* pd_base, uint64_t base_vaddr, bool is_5level) {
     pgflags tmp_flags;
-    for (int k = 0; k < 512; k++) {
+    for (uint64_t k = 0; k < 512; k++) {
         tmp_flags = pd_PgCBtb->entries[k].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
@@ -144,8 +147,11 @@ int KernelSpacePgsMemMgr::process_pd_level(lowerlv_PgCBtb* pd_PgCBtb, uint64_t* 
                     kputsSecure("pgalloc failed for pt_base\n");
                     return OS_OUT_OF_MEMORY;
                 }
-                
+                pgtb_heap_ptr->clear((phyaddr_t)pt_base);
                 // 转换PDE条目
+                if(pd_PgCBtb->entries[k].flags.is_atom==0){
+                    pd_PgCBtb->entries[k].flags.is_writable=1;
+                }
                 int result = pgtb_entry_convert(pd_base[k], pd_PgCBtb->entries[k], (phyaddr_t)pt_base);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pt_base);
@@ -168,7 +174,7 @@ int KernelSpacePgsMemMgr::process_pd_level(lowerlv_PgCBtb* pd_PgCBtb, uint64_t* 
 // 处理PDPT级别页表的函数
 int KernelSpacePgsMemMgr::process_pdpt_level(lowerlv_PgCBtb* pdpt_PgCBtb, uint64_t* pdpt_base, uint64_t base_vaddr, bool is_5level) {
     pgflags tmp_flags;
-    for (int j = 0; j < 512; j++) {
+    for (uint64_t j = 0; j < 512; j++) {
         tmp_flags = pdpt_PgCBtb->entries[j].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
@@ -185,8 +191,11 @@ int KernelSpacePgsMemMgr::process_pdpt_level(lowerlv_PgCBtb* pdpt_PgCBtb, uint64
                     kputsSecure("pgalloc failed for pd_base\n");
                     return OS_OUT_OF_MEMORY;
                 }
-                
+                pgtb_heap_ptr->clear((phyaddr_t)pd_base);
                 // 转换PDPTE条目
+                if(pdpt_PgCBtb->entries[j].flags.is_atom==0){
+                    pdpt_PgCBtb->entries[j].flags.is_writable=1;
+                }
                 int result = pgtb_entry_convert(pdpt_base[j], pdpt_PgCBtb->entries[j], (phyaddr_t)pd_base);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pd_base);
@@ -209,7 +218,7 @@ int KernelSpacePgsMemMgr::process_pdpt_level(lowerlv_PgCBtb* pdpt_PgCBtb, uint64
 // 处理PML4级别页表的函数
 int KernelSpacePgsMemMgr::process_pml4_level(lowerlv_PgCBtb* pml4_PgCBtb, uint64_t* pml4_base, uint64_t base_vaddr, bool is_5level) {
     pgflags tmp_flags;
-    for (int i = 0; i < 512; i++) {
+    for (uint64_t i = 0; i < 512; i++) {
         tmp_flags = pml4_PgCBtb->entries[i].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
@@ -222,8 +231,11 @@ int KernelSpacePgsMemMgr::process_pml4_level(lowerlv_PgCBtb* pml4_PgCBtb, uint64
                     kputsSecure("pgalloc failed for pdpt_base\n");
                     return OS_OUT_OF_MEMORY;
                 }
-                
+                pgtb_heap_ptr->clear((phyaddr_t)pml4_base);
                 // 转换PML4E条目
+                if(pml4_PgCBtb->entries[i].flags.is_atom==0){
+                    pml4_PgCBtb->entries[i].flags.is_writable=1;
+                }
                 int result = pgtb_entry_convert(pml4_base[i], pml4_PgCBtb->entries[i], (phyaddr_t)pdpt_base);
                 if (result != OS_SUCCESS) {
                     pgtb_heap_ptr->free((phyaddr_t)pdpt_base);
@@ -246,7 +258,7 @@ int KernelSpacePgsMemMgr::process_pml4_level(lowerlv_PgCBtb* pml4_PgCBtb, uint64
 // 处理PML5级别页表的函数
 int KernelSpacePgsMemMgr::process_pml5_level(PgControlBlockHeader* pml5_PgCBtb, uint64_t* pml5_base, bool is_5level) {
     pgflags tmp_flags;
-    for (int i = 0; i < 512; i++) {
+    for (uint64_t i = 0; i < 512; i++) {
         tmp_flags = pml5_PgCBtb[i].flags;
         if (tmp_flags.is_exist) {
             if (tmp_flags.is_atom) {
@@ -285,7 +297,7 @@ int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_4lvpg() {
     // 获取PML4级别的控制块表
     lowerlv_PgCBtb *root_PgCBtb = rootlv4PgCBtb->base.lowerlvPgCBtb;
     uint64_t* rootPgtb = (uint64_t*)pgtb_heap_ptr->pgalloc();
-    
+    pgtb_heap_ptr->pgtb_root_phyaddr =rootPgtb;
     if (rootPgtb == nullptr) {
         kputsSecure("pgtb_lowaddr_equalmap_construct_4lvpg:pgalloc failed for rootPgtb\n");
         return OS_OUT_OF_MEMORY;
@@ -298,9 +310,7 @@ int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_4lvpg() {
         return result;
     }
     
-    // 设置PAT寄存器
-    LocalCPU localcpu;
-    localcpu.set_ia32_pat(cache_strategy_table.value);
+
     
     return OS_SUCCESS;
 }
@@ -323,9 +333,6 @@ int KernelSpacePgsMemMgr::pgtb_lowaddr_equalmap_construct_5lvpg() {
         return result;
     }
     
-    // 设置PAT寄存器
-    LocalCPU localcpu;
-    localcpu.set_ia32_pat(cache_strategy_table.value);
     
     return OS_SUCCESS;
 }
@@ -341,7 +348,7 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
         default:
             return;
     }
-    phy_memDesriptor*global_tb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    /*phy_memDesriptor*global_tb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
     uint64_t count=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
     vaddr_t valloc_base=(cpu_pglv==4?0xffff800000000000:0xff<<56ULL);
     vaddr_t scan_addr=valloc_base;
@@ -357,14 +364,19 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
         switch(global_tb[i].Type)
         {
             case EFI_RUNTIME_SERVICES_CODE:
+            case OS_KERNEL_CODE:
             tmp_access.is_executable= tmp_flags.is_executable=1;
             case EFI_RUNTIME_SERVICES_DATA:
-            
+            case OS_KERNEL_DATA:
+            case OS_KERNEL_STACK:
+            case EFI_ACPI_RECLAIM_MEMORY:
+            case EFI_MEMORY_MAPPED_IO:
             tmp_access.is_global= tmp_flags.is_global=1;
-            
-             tmp_flags.physical_or_virtual_pg=1;
+            tmp_flags.physical_or_virtual_pg=1;
             tmp_access.is_occupyied= tmp_flags.is_occupied=1;
-            tmp_flags.cache_strateggy=cache_strategy_t::WB;
+            tmp_access.cache_strategy=tmp_flags.cache_strateggy=cache_strategy_t::WB;
+            if(global_tb[i].Type==EFI_MEMORY_MAPPED_IO)
+            tmp_access.cache_strategy=tmp_flags.cache_strateggy=cache_strategy_t::UC;
             vaddr_objs[valid_vaddrobj_count].base=scan_addr;
             global_tb[i].VirtualStart=scan_addr;
             vaddr_objs[valid_vaddrobj_count].type=(PHY_MEM_TYPE)global_tb[i].Type;
@@ -377,14 +389,30 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
             phymem_pgs_queue* pgs_pacage=seg_to_queue(scan_addr,global_tb[i].NumberOfPages<<12);
             if(pgs_pacage==nullptr){
                 kputsSecure("seg_to_queue failed\n");
+                delete pgs_pacage;
                 return;
             }
-            if( Inner_fixed_addr_manage(scan_addr,*pgs_pacage,tmp_access,true)!=OS_SUCCESS)
-            {
-                kputsSecure("Inner_fixed_addr_manage failed\n");
-                return;
-            }
-
+             Inner_fixed_addr_manage(scan_addr,*pgs_pacage,tmp_access,true);
+             valid_vaddrobj_count++;
+             delete pgs_pacage;
+             break;            
         }
-    }
+    }*/
+    LocalCPU localcpu;
+    uint64_t new_cr3=0;
+    new_cr3=(uint64_t)pgtb_heap_ptr->pgtb_root_phyaddr;
+    new_cr3|=kernel_sapce_PCID;
+    localcpu.set_cr3(new_cr3);
+    localcpu.load_cr3();
+    asm volatile (
+    "push %0\n\t"
+    "pop %0\n\t"
+    "mov %0, -8(%%rsp)"
+    : 
+    : "r" (new_cr3)
+    : "memory"
+);
+    kputsSecure("new_cr3 enabled:");
+    kpnumSecure(&new_cr3,UNHEX,8);
+    localcpu.set_ia32_pat(cache_strategy_table.value);
 }

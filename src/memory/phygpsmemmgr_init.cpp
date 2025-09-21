@@ -62,6 +62,12 @@ void KernelSpacePgsMemMgr::pgtb_heap_mgr_t::free(phyaddr_t addr)
     if((index>>9)>255)kputsSecure("KernelSpacePgsMemMgr::pgtb_heap_mgr_t::free:out_of_range");
     setbit_entry1bit_width(&maps[index>>9],false,index&511ULL);
 }
+
+void KernelSpacePgsMemMgr::pgtb_heap_mgr_t::clear(phyaddr_t addr)
+{
+    setmem((void*)addr,0x1000,0);
+}
+
 void KernelSpacePgsMemMgr::Init()
 {
     uint64_t cr4_tmp;
@@ -169,9 +175,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags fla
         
         
     }
-    if (lv3_PgCBHeader->base.lowerlvPgCBtb == nullptr)
-        return OS_OUT_OF_MEMORY;
-
+    
     return OS_SUCCESS;
 }
 int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags)
@@ -208,31 +212,25 @@ int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags fla
         if(lv3_PgCBHeader->flags.is_atom==1)
         {
             lv3_PgCBHeader->flags.is_atom=0;
-            status=PgCBtb_lv2_entry_construct(addr,lv3_PgCBHeader->flags);
-            pgflags lv2_flags=lv3_PgCBHeader->flags;
-            lv2_flags.is_atom=1;
-            lv2_flags.pg_lv=2;
-            for(int i = 0; i < 512; i++)
-            {
-                lv3_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv2_flags;
-            }
+            lv3_PgCBHeader->base.lowerlvPgCBtb= new lowerlv_PgCBtb;
+            gKpoolmemmgr.clear(lv3_PgCBHeader->base.lowerlvPgCBtb);
         }
     }
-
     PgCBlv2header* lv2_PgCBHeader = &lv3_PgCBHeader->base.lowerlvPgCBtb->entries[lv2_index];
-    
-    // 初始化lv2条目
     lv2_PgCBHeader->flags = flags;
-    if (flags.is_atom == 0) {
-       
-            lv2_PgCBHeader->base.lowerlvPgCBtb = new lowerlv_PgCBtb;
-            if (lv2_PgCBHeader->base.lowerlvPgCBtb == nullptr) {
-                return OS_OUT_OF_MEMORY;
-            }
-            gKpoolmemmgr.clear(lv2_PgCBHeader->base.lowerlvPgCBtb);
+    if(lv2_PgCBHeader->flags.is_atom==0)
+    {
+        lv2_PgCBHeader->base.lowerlvPgCBtb= new lowerlv_PgCBtb;
+        if (lv2_PgCBHeader->base.lowerlvPgCBtb==nullptr)
+        {
+            kputsSecure("new lowerlv_PgCBtb failed");
+            return OS_OUT_OF_MEMORY;
+        }
         
-    }
+        gKpoolmemmgr.clear(lv2_PgCBHeader->base.lowerlvPgCBtb);
 
+    }
+    
     return OS_SUCCESS;
 }
 
@@ -271,13 +269,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags fla
         {
             lv3_PgCBHeader->flags.is_atom=0;
             status=PgCBtb_lv2_entry_construct(addr,lv3_PgCBHeader->flags);
-            pgflags lv2_flags=lv3_PgCBHeader->flags;
-            lv2_flags.is_atom=1;
-            lv2_flags.pg_lv=2;
-            for(int i = 0; i < 512; i++)
-            {
-                lv3_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv2_flags;
-            }
+            
         }
     }
 
@@ -292,29 +284,25 @@ int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags fla
         if(lv2_PgCBHeader->flags.is_atom==1)
         {
             lv2_PgCBHeader->flags.is_atom=0;
-            status=PgCBtb_lv1_entry_construct(addr,lv2_PgCBHeader->flags);
-            pgflags lv1_flags=lv2_PgCBHeader->flags;
-            lv1_flags.is_atom=1;
-            lv1_flags.pg_lv=1;
-            for (int i = 0; i < 512; i++)
-            {
-                lv2_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv1_flags;
-            }        
+            lv2_PgCBHeader->base.lowerlvPgCBtb= new lowerlv_PgCBtb;
+            gKpoolmemmgr.clear(lv2_PgCBHeader->base.lowerlvPgCBtb);
         }
     }
 
     PgCBlv1header* lv1_PgCBHeader = &lv2_PgCBHeader->base.lowerlvPgCBtb->entries[lv1_index];
-    
-    // 初始化lv1条目
     lv1_PgCBHeader->flags = flags;
-    if (flags.is_atom == 0) {
-
-            lv1_PgCBHeader->base.lowerlvPgCBtb = new lowerlv_PgCBtb;
-            if (lv1_PgCBHeader->base.lowerlvPgCBtb == nullptr) {
-                return OS_OUT_OF_MEMORY;
-            }
-            gKpoolmemmgr.clear(lv1_PgCBHeader->base.lowerlvPgCBtb);
+    if(lv1_PgCBHeader->flags.is_atom==0)
+    {
+        lv1_PgCBHeader->base.lowerlvPgCBtb= new lowerlv_PgCBtb;
+        if (lv1_PgCBHeader->base.lowerlvPgCBtb==nullptr)
+        {
+            kputsSecure("new lowerlv_PgCBtb failed");
+            return OS_OUT_OF_MEMORY;
         }
+        
+        gKpoolmemmgr.clear(lv1_PgCBHeader->base.lowerlvPgCBtb);
+    }
+    
     
 
     return OS_SUCCESS;
@@ -359,12 +347,10 @@ int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags fla
         {
             lv3_PgCBHeader->flags.is_atom=0;
             status=PgCBtb_lv2_entry_construct(addr,lv3_PgCBHeader->flags);
-            pgflags lv2_flags=lv3_PgCBHeader->flags;
-            lv2_flags.is_atom=1;
-            lv2_flags.pg_lv=2;
-            for(int i = 0; i < 512; i++)
+            if(status!=OS_SUCCESS)
             {
-                lv3_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv2_flags;
+                kputsSecure("PgCBtb_lv0_entry_construct:PgCBtb_lv2_entry_construct failed");
+                return OS_INVALID_ADDRESS;
             }
         }
     }
@@ -381,13 +367,11 @@ int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags fla
         {
             lv2_PgCBHeader->flags.is_atom=0;
             status=PgCBtb_lv1_entry_construct(addr,lv2_PgCBHeader->flags);
-            pgflags lv1_flags=lv2_PgCBHeader->flags;
-            lv1_flags.is_atom=1;
-            lv1_flags.pg_lv=1;
-            for (int i = 0; i < 512; i++)
+            if(status!=OS_SUCCESS) 
             {
-                lv2_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv1_flags;
-            }        
+                kputsSecure("PgCBtb_lv0_entry_construct:PgCBtb_lv1_entry_construct failed");
+                return OS_INVALID_ADDRESS;
+            } 
         }
     }
     PgCBlv1header*lv1_PgCBHeader=&lv2_PgCBHeader->base.lowerlvPgCBtb->entries[lv1_index];
@@ -403,13 +387,12 @@ int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags fla
         {
             lv1_PgCBHeader->flags.is_atom=0;
             status=PgCBtb_lv1_entry_construct(addr,lv1_PgCBHeader->flags);
-            pgflags lv0_flags=lv1_PgCBHeader->flags;
-            lv0_flags.is_atom=1;
-            lv0_flags.pg_lv=0;
-            for (int i = 0; i < 512; i++)
+            if(status!=OS_SUCCESS)
             {
-                lv1_PgCBHeader->base.lowerlvPgCBtb->entries[i].flags=lv0_flags;
-            }        
+                kputsSecure("PgCBtb_lv0_entry_construct:PgCBtb_lv1_entry_construct failed");
+                return OS_INVALID_ADDRESS;
+            }
+            
         }
     }
     PgCBlv0header*lv0_PgCBHeader=&lv1_PgCBHeader->base.lowerlvPgCBtb->entries[lv0_index];

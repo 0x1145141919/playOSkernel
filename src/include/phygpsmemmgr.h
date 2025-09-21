@@ -112,6 +112,7 @@ class pgtb_heap_mgr_t{
     //只有创建页表项失败的时候才会调用这个函数
     void*pgalloc();
     void free(phyaddr_t addr);
+    void clear(phyaddr_t addr);
 };
 pgtb_heap_mgr_t*pgtb_heap_ptr;
 psmemmgr_flags_t flags;
