@@ -374,26 +374,30 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
             case EFI_RUNTIME_SERVICES_CODE:
             case OS_KERNEL_CODE:
             tmp_access.is_executable= tmp_flags.is_executable=1;
+            tmp_access.is_writeable= tmp_flags.is_writable=0;
+            goto set_flags;
             case EFI_RUNTIME_SERVICES_DATA:
             case OS_KERNEL_DATA:
             case OS_KERNEL_STACK:
             case EFI_ACPI_RECLAIM_MEMORY:
             case EFI_MEMORY_MAPPED_IO:
+            tmp_access.is_writeable= tmp_flags.is_writable=1;
+            set_flags:
             tmp_access.is_global= tmp_flags.is_global=1;
             tmp_flags.physical_or_virtual_pg=1;
             tmp_access.is_occupyied= tmp_flags.is_occupied=1;
             tmp_access.cache_strategy=tmp_flags.cache_strateggy=cache_strategy_t::WB;
             if(global_tb[i].Type==EFI_MEMORY_MAPPED_IO)
             tmp_access.cache_strategy=tmp_flags.cache_strateggy=cache_strategy_t::UC;
-            vaddr_objs[valid_vaddrobj_count].base=scan_addr;
+            vaddr_objs[vaddrobj_count].base=scan_addr;
             global_tb[i].VirtualStart=scan_addr;
-            vaddr_objs[valid_vaddrobj_count].type=(PHY_MEM_TYPE)global_tb[i].Type;
-            vaddr_objs[valid_vaddrobj_count].size_in_numof4kbpgs=global_tb[i].NumberOfPages;
-            vaddr_objs[valid_vaddrobj_count].flags=tmp_flags;
-            vaddr_objs[valid_vaddrobj_count].max_num_of_subtb_entries=vaddr_objs[valid_vaddrobj_count].num_of_subtb_entries=1;
-            vaddr_objs[valid_vaddrobj_count].subtb=new vaddr_seg_subtb_t;
-            vaddr_objs[valid_vaddrobj_count].subtb->phybase=global_tb[i].PhysicalStart;
-            vaddr_objs[valid_vaddrobj_count].subtb->num_of_4kbpgs=global_tb[i].NumberOfPages;
+            vaddr_objs[vaddrobj_count].type=(PHY_MEM_TYPE)global_tb[i].Type;
+            vaddr_objs[vaddrobj_count].size_in_numof4kbpgs=global_tb[i].NumberOfPages;
+            vaddr_objs[vaddrobj_count].flags=tmp_flags;
+            vaddr_objs[vaddrobj_count].max_num_of_subtb_entries=vaddr_objs[vaddrobj_count].num_of_subtb_entries=1;
+            vaddr_objs[vaddrobj_count].subtb=new vaddr_seg_subtb_t;
+            vaddr_objs[vaddrobj_count].subtb->phybase=global_tb[i].PhysicalStart;
+            vaddr_objs[vaddrobj_count].subtb->num_of_4kbpgs=global_tb[i].NumberOfPages;
             phymem_pgs_queue* pgs_pacage=seg_to_queue(scan_addr,global_tb[i].NumberOfPages<<12);
             if(pgs_pacage==nullptr){
                 kputsSecure("seg_to_queue failed\n");
@@ -402,7 +406,7 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
             }
              Inner_fixed_addr_manage(scan_addr,*pgs_pacage,tmp_access,global_tb[i].PhysicalStart,true);
              scan_addr+=(global_tb[i].NumberOfPages<<12);
-             valid_vaddrobj_count++;
+             vaddrobj_count++;
              delete pgs_pacage;
              break;            
         }

@@ -14,8 +14,8 @@ constexpr uint16_t FirstStaticHeapMaxObjCount = 4096;
 HeapObjectMetav2 objMetaTable_for_FirstStaticHeap[FirstStaticHeapMaxObjCount] = {0};
 #ifdef KERNEL_MODE
 extern "C" {
-    extern char __heap_start;
-    extern char __heap_end;
+    extern uint64_t __heap_start;
+    extern uint64_t __heap_end;
 }
 #endif
 // 简单的对数函数实现（如果标准库不可用）
@@ -369,10 +369,10 @@ void kpoolmemmgr_t::Init()
 {
 #ifdef KERNEL_MODE
     // 获取内核堆的起始地址和大小
-    first_static_heap.heap.heapStart = (phyaddr_t)&__heap_start;
-    first_static_heap.heap.heapVStart = (vaddr_t)&__heap_start;
-    first_static_heap.heap.heapSize = (uint64_t)(&__heap_end - &__heap_start);
-    first_static_heap.heap.freeSize = (uint64_t)(&__heap_end - &__heap_start);
+    first_static_heap.heap.heapStart = (phyaddr_t)__heap_start;
+    first_static_heap.heap.heapVStart = (vaddr_t)__heap_start;
+    first_static_heap.heap.heapSize = (uint64_t)(__heap_end-__heap_start);
+    first_static_heap.heap.freeSize =   first_static_heap.heap.heapSize;
 #endif    
     first_static_heap.heap.status.block_exist = 0;
     first_static_heap.heap.status.block_tb_full = 0;
@@ -538,10 +538,10 @@ kpoolmemmgr_t::kpoolmemmgr_t() {
 #ifdef KERNEL_MODE
     // 获取内核堆的起始地址和大小
     
-    first_static_heap.heap.heapStart = (phyaddr_t)&__heap_start;
-    first_static_heap.heap.heapVStart = (vaddr_t)&__heap_start;
-    first_static_heap.heap.heapSize = (uint64_t)(&__heap_end - &__heap_start);
-    first_static_heap.heap.freeSize = (uint64_t)(&__heap_end - &__heap_start);
+    first_static_heap.heap.heapStart = (phyaddr_t)__heap_start;
+    first_static_heap.heap.heapVStart = (vaddr_t)__heap_start;
+    first_static_heap.heap.heapSize = (uint64_t)(__heap_end - __heap_start);
+    first_static_heap.heap.freeSize = (uint64_t)(__heap_end - __heap_start);
 #endif    
     // 初始化status为HEAP_BLOCK_FREE状态
     first_static_heap.heap.status.block_exist = 0;
@@ -727,6 +727,12 @@ void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size)
     {
         int index=addr_to_HCB_MetaInfotb_Index(first_static_heap,(uint8_t*)ptr);
         if(index==OS_NOT_EXIST)return nullptr;
+        
+        // 边界检查，确保index+1不会越界
+        if (index + 1 >= (int)first_static_heap.heap.metaInfo.header.objMetaCount) {
+            return nullptr;
+        }
+        
         HeapObjectMetav2* orient_obj = &first_static_heap.heap.metaInfo.objMetaTable[index];
         HeapObjectMetav2* nextboj = &first_static_heap.heap.metaInfo.objMetaTable[index+1];
         int diff=orient_obj->size-size;
@@ -746,6 +752,7 @@ void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size)
                 sizeof(HeapObjectMetav2)
             );
             }
+            return ptr; // 成功调整大小，返回原指针
         }else{
             if (nextboj->type==OBJ_TYPE_FREE)
             {
@@ -753,12 +760,11 @@ void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size)
                 {
                     orient_obj->size=size;
                     nextboj->size+=diff;
+                    return ptr; // 成功调整大小，返回原指针
                 }
-                
-            }else{
-                return nullptr;
             }
-            
+            // 如果无法扩展，返回nullptr
+            return nullptr;
         }
     }
     return nullptr;

@@ -1,7 +1,7 @@
 #pragma once
 #include "stdint.h"
 typedef uint64_t size_t;
-typedef uint8_t _2mb_pg_bitmapof_4kbpgs[64];
+typedef uint8_t bitset512_t[64];
 typedef uint8_t pgsbitmap_entry2bits_width[128];
 /**
  * @brief 根据给定掩码转换值的位布局
@@ -86,10 +86,12 @@ void linearTBSerialInsert(
     uint64_t entryCount = 1
 ) ;
 int strlen(const char *s);
-bool getbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs* bitmap,uint16_t index);
-void setbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t index);
-void setbits_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits);
+bool getbit_entry1bit_width(bitset512_t* bitmap,uint16_t index);
+void setbit_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t index);
+void setbits_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits);
 uint8_t getentry_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint16_t index);
 void setentry_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t value, uint16_t index);
 void setentries_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t value, uint16_t start_index, uint16_t len_in_entries);
 void setmem(void* ptr, uint64_t size_in_byte, uint8_t value);
+extern "C" void __wrap___stack_chk_fail(void);
+uint64_t align_up(uint64_t value, uint64_t alignment);

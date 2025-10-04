@@ -40,6 +40,7 @@ bool modify_pgtb
         }
         
     }
+    flag_of_pg.cache_strateggy=access.cache_strategy;
     flag_of_pg.is_occupied=access.is_occupyied;
     flag_of_pg.is_atom=1;
     flag_of_pg.is_exist=1;
@@ -380,6 +381,7 @@ int KernelSpacePgsMemMgr::modify_pgtb_in_5lv(phyaddr_t base, uint64_t endaddr)
 
 void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t align_require)
 {
+
     if(size_in_byte==0)return nullptr;
     phyaddr_t scan_addr = 0x100000;
     size_in_byte += PAGE_OFFSET_MASK[0];
@@ -418,7 +420,7 @@ void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access,
     }
     
     phymem_pgs_queue*queue=seg_to_queue(scan_addr,size_in_byte);
-    phyaddr_t alloced_addr= Inner_fixed_addr_manage(scan_addr,*queue,access);
+    phyaddr_t alloced_addr= Inner_fixed_addr_manage(scan_addr,*queue,access,true);
     if (alloced_addr!=scan_addr+size_in_byte)
     {
         delete queue;
@@ -426,12 +428,142 @@ void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access,
     }
     delete usage_query_result;
     delete queue;
+    fixedaddr_phy_pgs_allocate(scan_addr,size_in_byte);
     return (void*)scan_addr;
 }
 
+void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, pgflags flags, vaddr_t vbase)
+{
+    // 根据物理基址addr使用phymemSubMgr子系统中物理内存段增减引用数
+    int remap_result = phymemSubMgr.remap_inc(addr);
+    
+    // 若是失败再尝试使用gBaseMemMgr的物理内存段增减引用数接口
+    if (remap_result != 0) {
+        // TODO: 尝试使用gBaseMemMgr的物理内存段增减引用数接口
+        // 暂时直接返回空指针
+        return nullptr;
+    }
+    
+    // 成功增加引用数之后用对应的查询接口得到相应物理内存段的信息
+    minimal_phymem_seg_t phy_info = phymemSubMgr.addr_query(addr);
+    uint64_t size_in_byte = phy_info.num_of_4kbpgs << 12;
+    uint64_t numof_4kbpgs = phy_info.num_of_4kbpgs;
+    
+    int target_index = vaddrobj_count; // 默认在末尾添加
+    
+    // 如果vbase参数非0先检查是不是有效的虚拟地址（4/5级分页下的高一般线性地址以及4kb对齐是否满足）
+    if (vbase != 0) {
+        // 检查是否是高一半内核空间地址
+        if (vbase < 0xffff800000000000ULL) {
+            phymemSubMgr.remap_dec(addr); // 回滚引用计数
+            return nullptr;
+        }
+        
+        // 检查是否4kb对齐
+        if (vbase & 0xFFF) {
+            phymemSubMgr.remap_dec(addr); // 回滚引用计数
+            return nullptr;
+        }
+    } else {
+        // vbase为0则自动分配
+        // 参照pgs_allocate_remapped扫描一个空闲虚拟地址空间
+        
+        // 从前向后扫描，查找空闲空间
+        for (int i = 0; i < vaddrobj_count; i++) {
+            vaddr_t current_end = vaddr_objs[i].base + (vaddr_objs[i].size_in_numof4kbpgs << 12);
+            bool found_space = true;
+            
+            // 检查下一个对象是否会与当前分配冲突
+            if (i + 1 < vaddrobj_count) {
+                vaddr_t next_start = vaddr_objs[i+1].base;
+                if (current_end + size_in_byte > next_start) {
+                    found_space = false;
+                }
+            }
+            
+            if (found_space) {
+                vbase = current_end;
+                target_index = i + 1;
+                break;
+            }
+        }
+        
+        // 如果没有找到空闲空间，则在末尾分配
+        if (vbase == 0 && vaddrobj_count > 0) {
+            vbase = vaddr_objs[vaddrobj_count-1].base + (vaddr_objs[vaddrobj_count-1].size_in_numof4kbpgs << 12);
+        }
+        
+        // 如果是第一次分配
+        if (vaddrobj_count == 0) {
+            // 使用高一半内核空间的起始地址
+            vbase = 0xffff800000000000ULL;
+        }
+    }
+    
+    // 移动后续的vaddr_objs项为新项腾出空间
+    for (int i = vaddrobj_count; i > target_index; i--) {
+        vaddr_objs[i] = vaddr_objs[i-1];
+    }
+    
+    // 在vaddr_objs里面新增虚拟内存对象
+    vaddr_seg_t& orient_seg = vaddr_objs[target_index];
+    
+    // 设置子表
+    orient_seg.max_num_of_subtb_entries = orient_seg.num_of_subtb_entries = 1;
+    orient_seg.subtb = new vaddr_seg_subtb_t[1];
+    orient_seg.subtb->phybase = addr;
+    orient_seg.subtb->num_of_4kbpgs = numof_4kbpgs;
+    
+    // 创建访问权限
+    pgaccess tmp_access = {0};
+    tmp_access.is_kernel = flags.is_kernel;
+    tmp_access.is_writeable = flags.is_writable;
+    tmp_access.is_executable = flags.is_executable;
+    tmp_access.cache_strategy = flags.cache_strateggy;
+    tmp_access.is_global = flags.is_global;
+    tmp_access.is_occupyied = 1;
+    
+    // 创建页队列并进行映射
+    phymem_pgs_queue* pacage = seg_to_queue(vbase, size_in_byte);
+    if(pacage == nullptr) {
+        delete[] orient_seg.subtb;
+        phymemSubMgr.remap_dec(addr); // 回滚引用计数
+        return nullptr;
+    }
+    
+    phyaddr_t result = Inner_fixed_addr_manage(vbase, *pacage, tmp_access, addr, true);
+    delete pacage;
+    
+    if(result == vbase + size_in_byte) {
+        // 映射成功，设置段信息
+        orient_seg.base = vbase;
+        orient_seg.size_in_numof4kbpgs = numof_4kbpgs;
+        orient_seg.flags = flags;
+        vaddrobj_count++;
+        return (void*)vbase;
+    } else {
+        delete[] orient_seg.subtb;
+        phymemSubMgr.remap_dec(addr); // 回滚引用计数
+        return nullptr;
+    }
+}
+
+void *KernelSpacePgsMemMgr::phy_pgs_allocate(uint64_t size_in_byte, uint8_t align_require)
+{
+    return phymemSubMgr.alloc(size_in_byte,align_require);
+}
+int KernelSpacePgsMemMgr::fixedaddr_phy_pgs_allocate(phyaddr_t addr, uint64_t size_in_byte)
+{
+    return phymemSubMgr.fixedaddr_allocate(addr,size_in_byte);
+}
+int KernelSpacePgsMemMgr::free_phy_pgs(phyaddr_t addr)
+{
+    return phymemSubMgr.free(addr);
+}
 int KernelSpacePgsMemMgr::pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte, pgaccess access)
 {
     if(addr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
+    if(fixedaddr_phy_pgs_allocate(addr,size_in_byte)!=OS_SUCCESS)return OS_MEMRY_ALLOCATE_FALT;
     size_in_byte += PAGE_OFFSET_MASK[0];
     size_in_byte &= ~PAGE_OFFSET_MASK[0];
     phy_memDesriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
@@ -487,12 +619,10 @@ int KernelSpacePgsMemMgr::pgs_free(phyaddr_t addr, size_t size_in_byte)
     access.is_executable=false;
     phyaddr_t alloced_addr= Inner_fixed_addr_manage(addr,*queue,access);
     if (alloced_addr!=addr+size_in_byte)return OS_MEMRY_ALLOCATE_FALT;
-   
+    phymemSubMgr.free(addr);
     delete queue;
     return OS_SUCCESS;
  }
-
-
 
 
  KernelSpacePgsMemMgr::phymem_pgs_queue *KernelSpacePgsMemMgr::seg_to_queue(phyaddr_t base,uint64_t size_in_bytes){
@@ -555,3 +685,4 @@ int KernelSpacePgsMemMgr::pgs_free(phyaddr_t addr, size_t size_in_byte)
     }
     return queue;
 }
+

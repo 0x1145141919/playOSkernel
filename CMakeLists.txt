@@ -2,20 +2,36 @@
 
 cmake_minimum_required(VERSION 3.15)  # 推荐使用较新版本以支持现代特性
 project(Kernel LANGUAGES C CXX)       # 显式声明支持 C 和 C++
-# 设置构建类型变量，默认为Release
+# 设置构建类型变量，默认为Debug
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build (Debug or Release)" FORCE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build (Debug or Release)" FORCE)
+endif()
+# 查找 NASM 汇编器
+find_program(NASM_EXECUTABLE nasm)
+if(NOT NASM_EXECUTABLE)
+    message(FATAL_ERROR "NASM assembler not found!")
 endif()
 
-# 全局编译选项（对 C 和 C++ 均生效）
-add_compile_options(
-    -Wall
-    -Wextra
+add_definitions(
+    #-DPG5LV_ENABLE
 )
+# 设置 NASM 编译选项（例如：-f elf64 或 -f win32）
+set(NASM_FLAGS "-f elf64")
+# 定义汇编文件编译规则
+enable_language(ASM_NASM)  # CMake 3.8+ 支持
+set(CMAKE_ASM_NASM_SOURCE_FILE_EXTENSIONS asm)  # 关联 .asm 后缀
+
+# 设置 NASM 编译器和选项
+set(CMAKE_ASM_NASM_COMPILER ${NASM_EXECUTABLE})
+set(CMAKE_ASM_NASM_COMPILE_OBJECT "<CMAKE_ASM_NASM_COMPILER> <FLAGS> -gdwarf -o <OBJECT> <SOURCE>")
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcmodel=large")
 # 根据构建类型设置不同的编译选项
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "Building in DEBUG mode")
-    add_compile_options(-g -O0)
+    # 在Debug模式下添加调试信息并禁用优化
+    add_compile_options(-g -O0 -gdwarf-4)
+    set(DEBUG_LINK_FLAGS "-g")
 else()
     message(STATUS "Building in RELEASE mode")
     add_compile_options(-O3)
@@ -25,60 +41,71 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c23")          # C 标准
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++23")    # C++ 标准
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
-add_compile_options(-fno-stack-protector)
-
+set(CMAKE_KEEP_BUILD_FILES ON)
 
 # 定义通用源文件
 set(SRC_COMMON
-    src/memory/Memory.cpp
-    src/memory/kpoolmemmgr.cpp
-    src/memory/phygpsmemmgr_init.cpp
-    src/memory/phygpsmemmgr_print.cpp
-    src/memory/phygpsmemmgr_freememmanage.cpp
-    src/memory/pgtable_query.cpp
+    src/efi_about/UefiRunTimeServices.cpp
     src/utils/util.cpp
     src/drivers/VideoDriver.cpp
     src/drivers/PortDriver.c
 )
 
+# 添加gnu-efi作为外部项目
+include(ExternalProject)
+ExternalProject_Add(
+    gnu-efi
+    SOURCE_DIR ${CMAKE_SOURCE_DIR}/outsbmodules/gnu-efi
+    CONFIGURE_COMMAND ""  # 跳过 configure 阶段
+    BUILD_COMMAND make    # 调用 make 编译
+    INSTALL_COMMAND ""     # 不安装
+    BUILD_IN_SOURCE TRUE   # 在源目录构建
+)
+
+# 获取gnu-efi构建目录路径
+ExternalProject_Get_Property(gnu-efi SOURCE_DIR)
+set(GNU_EFI_SOURCE_DIR ${SOURCE_DIR})
+add_subdirectory(src/memory)
+add_subdirectory(outsbmodules/tinySTL)
 # 内核可执行文件
 add_executable(kernel.elf
     ${CMAKE_SOURCE_DIR}/src/kinit.cpp
         src/utils/kcirclebufflogMgr.cpp
-        src/memory/phygpsmemmgr_new_cr3.cpp
         src/Processor/processor_self_manage.cpp
+        src/kernel_entry.asm
+        src/Interrupts/Interrupt_Init.cpp
+        src/Processor/processor_Ks_stacks_mgr.cpp
+        $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
+)
+
+# 链接gnu-efi库
+target_link_libraries(kernel.elf PRIVATE 
+    ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
+    ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
+    tinySTL
 )
 
 # Memory 模块测试可执行文件
-add_executable(memmory_module_test
-    ${CMAKE_SOURCE_DIR}/src/tests/Memory_moudle_test.cpp
-    ${SRC_COMMON}
-)
-
+#add_executable(memmory_module_test
+ #   ${CMAKE_SOURCE_DIR}/src/tests/Memory_moudle_test.cpp
+  #  ${SRC_COMMON}
+#)
 
 # 头文件路径（对 C/C++ 均可见）
 target_include_directories(kernel.elf PRIVATE
-    "/usr/include/efi/"
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src/include"
-)
-target_include_directories(memmory_module_test PRIVATE
-    "/usr/include/efi/"
-    "${CMAKE_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}/src/include"
+    "${GNU_EFI_SOURCE_DIR}/inc"
+    "${GNU_EFI_SOURCE_DIR}/inc/x86_64"
+    "${CMAKE_SOURCE_DIR}/outsbmodules/tinySTL/tinySTL"
 )
 
-# 定义内核专用编译选项
-set(KERNEL_COMPILE_OPTS
-    -nostdlib
-    -ffreestanding
-    -fno-use-cxa-atexit
-    -fno-exceptions
-    -fno-builtin
-    -static
-    -DKERNEL_MODE
-)
+#target_include_directories(memmory_module_test PRIVATE
+#    "/usr/include/efi/"
+#    "${CMAKE_SOURCE_DIR}"
+#    "${CMAKE_SOURCE_DIR}/src/include"
+#)
 
 # 内核链接选项
 set(KERNEL_LINK_OPTS
@@ -87,12 +114,32 @@ set(KERNEL_LINK_OPTS
     -fno-use-cxa-atexit
     -fno-exceptions
     -fno-builtin
+    -fno-rtti
+    -fno-asynchronous-unwind-tables
     -static
-    -T${CMAKE_SOURCE_DIR}/linker_for_kernel.ld
+    -T${CMAKE_SOURCE_DIR}/kld.ld
     -lgcc
+    -Wl,--wrap=__stack_chk_fail
 )
 
+# 如果在Debug模式下，添加调试链接标志
+if(DEBUG_LINK_FLAGS)
+    list(APPEND KERNEL_LINK_OPTS ${DEBUG_LINK_FLAGS})
+endif()
+
 # 应用编译选项
-target_compile_options(kernel.elf PRIVATE ${KERNEL_COMPILE_OPTS})
+target_compile_options(kernel.elf PRIVATE 
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra 
+    -ffreestanding
+    -fno-exceptions
+    -fno-builtin
+    -fno-rtti
+    -static
+    -fpermissive
+    -fno-PIC
+    -DKERNEL_MODE>
+$<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
+)
 target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})
-target_compile_options(memmory_module_test PRIVATE -DTEST_MODE)
+
+#target_compile_options(memmory_module_test PRIVATE -DTEST_MODE)

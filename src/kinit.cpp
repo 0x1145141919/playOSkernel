@@ -1,14 +1,20 @@
 #include<stdint.h>
 #include<efi.h>
 #include "PortDriver.h"
+#include "KernelEntryPointDefinetion.h"
 #include "os_error_definitions.h"
 #include "VideoDriver.h"
 #include "kcirclebufflogMgr.h"
 #include "16x32AsciiCharacterBitmapSet.h"
-#include "Memory.h"
-#include "kpoolmemmgr.h"
-#include "phygpsmemmgr.h"
+#include "processor_Ks_stacks_mgr.h"
+#include "Interrupt.h"
+#include "./memory/includes/Memory.h"
+#include "./memory/includes/kpoolmemmgr.h"
+#include "./memory/includes/phygpsmemmgr.h"
 #include "processor_self_manage.h"
+#include "UefiRunTimeServices.h"
+#undef __stack_chk_fail
+extern  void __wrap___stack_chk_fail(void);
 // 定义C++运行时需要的符号
  extern "C" {
     // DSO句柄，对于静态链接的内核，可以简单定义为空
@@ -22,22 +28,25 @@
         return 0;
     }
 }
-EFI_SYSTEM_TABLE*global_gST;
+void delay(unsigned int milliseconds) {
+    for (unsigned int i = 0; i < milliseconds * 10000; ++i) {
+        // 空循环，占用 CPU
+        asm volatile("nop"); // 防止编译器优化（可选）
+    }
+}
+EFI_TIME global_time;
+uint32_t efi_map_ver;
 /*
 注意，这个函数刚进入时还使用的是bootloader的栈
 在特定几个函数初始化好后才能使用切换到映像的栈
 */
-extern "C" int _kernel_Init(void* TransferPage,
-    int numofpages,
-    EFI_MEMORY_DESCRIPTORX64*memDescript,
-    int numofDiscriptors,
-     EFI_SYSTEM_TABLE*gST) 
+extern "C" void kernel_start( BootInfoHeader* transfer) 
 {   
-    asm volatile("cli   ");
+
     int  Status=0;
-    
-    
-    GlobalBasicGraphicInfoType* TFG=(GlobalBasicGraphicInfoType*)TransferPage;
+    global_gST=transfer->gST_ptr;
+    efi_map_ver=transfer->mapversion;
+    GlobalBasicGraphicInfoType* TFG=(GlobalBasicGraphicInfoType*)&transfer->graphic_metainfo;
     Status = InitialGlobalBasicGraphicInfo(
         TFG->horizentalResolution,
         TFG->verticalResolution,
@@ -51,9 +60,11 @@ extern "C" int _kernel_Init(void* TransferPage,
     if (Status!=OS_SUCCESS)
     {
         serial_puts("InitialGlobalBasicGraphicInfo Failed\n");
-        return Status;
+        return ;
     }
     gKpoolmemmgr.Init();
+      
+      // 3. 此时所有参数已处理完毕，可以安全切换栈
     Status =InitialGlobalCharacterSetBitmapControler(
         32,
         16,
@@ -77,20 +88,21 @@ extern "C" int _kernel_Init(void* TransferPage,
     if (Status!=OS_SUCCESS)
     {
         serial_puts("InitialKernelShellControler Failed\n");
-        return Status;
+        return ;
     }
-    gBaseMemMgr.Init(memDescript,numofDiscriptors);  
-      // 3. 此时所有参数已处理完毕，可以安全切换栈
-    asm volatile (
-        "mov $_stack_top, %rsp\n"  // 切换到内核栈
-        "mov %rsp, %rbp\n"         // 重置帧指针
-    );
+    
     LocalCPU bsp_regieters;
     // 初始化全局Ascii位图控制器
     kputsSecure("Welcome to PlayOSKernelShell\n");
-    
+    gBaseMemMgr.Init(reinterpret_cast<EFI_MEMORY_DESCRIPTORX64*>(transfer->memory_map_ptr),transfer->memory_map_entry_count);
     gBaseMemMgr.printPhyMemDesTb();
     gKspacePgsMemMgr.Init();
+    gRuntimeServices.Init(global_gST, efi_map_ver);
+    global_time = gRuntimeServices.rt_time_get();
+    gProcessor_Ks_stacks_mgr.Init();
+    gInterrupt_mgr.Init();
+    gRuntimeServices.rt_shutdown();
+    asm volatile("hlt");
     //中断接管工作
-    asm volatile("hlt");    
+
 }

@@ -5,6 +5,7 @@
 #include "errno.h"
 #include "VideoDriver.h"
 #include "kcirclebufflogMgr.h"
+#include "OS_utils.h"
 #ifdef TEST_MODE
 #include "stdio.h"
 #include <inttypes.h>

@@ -7,7 +7,7 @@
 #include "pgtable45.h"
 KernelSpacePgsMemMgr gKspacePgsMemMgr;
 
-
+extern "C" uint8_t _pgtb_heap_lma;
 /**
  * @brief 
  * 
@@ -25,12 +25,7 @@ KernelSpacePgsMemMgr gKspacePgsMemMgr;
 KernelSpacePgsMemMgr::pgtb_heap_mgr_t::pgtb_heap_mgr_t()
 {
     
-    if(gBaseMemMgr.FixedPhyaddPgallocate(0x200000,0x400000,OS_KERNEL_DATA)!=OS_SUCCESS)
-    {
-        kputsSecure("KernelSpacePgsMemMgr::pgtb_heap_mgr_t: fail to initialize\n");
-        heap_base=0;
-        return;
-    }heap_base=0x200000;
+ heap_base=0x200000;
     setmem(maps,num_of_2mbpgs*sizeof(_2mb_pg_bitmapof_4kbpgs),0);
     root_index=0;
 }
@@ -109,10 +104,65 @@ PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
      }
      enable_new_cr3();
 }
+uint16_t pagesnum_to_max_entry_count(uint64_t num_of_4kbpgs)
+{
+    if(num_of_4kbpgs<=1ULL<<9)
+    {
+        return (num_of_4kbpgs+15)>>4;
+    }else if(num_of_4kbpgs<=1ULL<<15)
+    {
+        return (num_of_4kbpgs+63)>>6;
+    }else{
+        return 4096;
+    }
+}
 KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
 {//从第1mb开始，低1mb内存的内容不能自由分配，其它子管理器进行管理
     allocatable_mem_seg_count=0;
     setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
+    phy_memDesriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDesriptor*end=base+gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
+    phy_memDesriptor*scan_start=gBaseMemMgr.queryPhysicalMemoryUsage(0x100000);
+    phy_memDesriptor*scan_index=scan_start;
+    while (scan_index<end)
+    { 
+       if(scan_index->Type==freeSystemRam)
+            {
+                // 检查是否超出最大条目数
+                if (allocatable_mem_seg_count >= max_entry_count) {
+                    kputsSecure("phymemSegsSubMgr_t: too many memory segments\n");
+                    break;
+                }
+
+                phyaddr_t seg_base = (scan_index==scan_start) ? 0x100000 : scan_index->PhysicalStart;
+                phyaddr_t seg_end = scan_index->PhysicalStart + scan_index->NumberOfPages * 0x1000;
+                uint64_t seg_size = (seg_end - seg_base) >> 12;
+                
+                allocatable_mem_seg[allocatable_mem_seg_count].base = seg_base;
+                allocatable_mem_seg[allocatable_mem_seg_count].size_in_numof4kbpgs = seg_size;
+                allocatable_mem_seg[allocatable_mem_seg_count].max_num_of_subtb_entries =
+                    pagesnum_to_max_entry_count(allocatable_mem_seg[allocatable_mem_seg_count].size_in_numof4kbpgs);
+                allocatable_mem_seg[allocatable_mem_seg_count].num_of_subtb_entries = 0;
+                
+                // 分配子表内存
+                allocatable_mem_seg[allocatable_mem_seg_count].subtb =
+                    new minimal_phymem_seg_t[allocatable_mem_seg[allocatable_mem_seg_count].max_num_of_subtb_entries];
+                
+                // 检查内存分配是否成功
+                if (allocatable_mem_seg[allocatable_mem_seg_count].subtb == nullptr) {
+                    kputsSecure("phymemSegsSubMgr_t: failed to allocate memory for subtb\n");
+                    // 释放之前分配的内存
+                    for (int i = 0; i < allocatable_mem_seg_count; i++) {
+                        delete[] allocatable_mem_seg[i].subtb;
+                    }
+                    allocatable_mem_seg_count = 0;
+                    break;
+                }
+                
+                allocatable_mem_seg_count++;
+            }
+        scan_index++;
+    }
 }
 int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
 {
@@ -179,7 +229,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags fla
     return OS_SUCCESS;
 }
 int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
-{//有无限递归风险
+{
 
     uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
     uint16_t lv3_index=(addr&lineaddr_index_filters:: PML4_INDEX_MASK_lv3)>>39;
@@ -241,7 +291,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags fla
 }
 
 int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
-{//有无限递归风险
+{
 
     uint16_t lv1_index=(addr&lineaddr_index_filters:: PD_INDEX_MASK_lv1)>>21;
     uint16_t lv2_index=(addr&lineaddr_index_filters:: PDPT_INDEX_MASK_lv2)>>30;
