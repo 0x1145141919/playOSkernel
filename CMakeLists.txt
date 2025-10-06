@@ -45,7 +45,7 @@ set(CMAKE_KEEP_BUILD_FILES ON)
 
 # 定义通用源文件
 set(SRC_COMMON
-    src/efi_about/UefiRunTimeServices.cpp
+    src/efi_about/UefiRunTimeServices.cpp #USERMODE需要替换成对应的标准库
     src/utils/util.cpp
     src/drivers/VideoDriver.cpp
     src/drivers/PortDriver.c
@@ -75,6 +75,8 @@ add_executable(kernel.elf
         src/kernel_entry.asm
         src/Interrupts/Interrupt_Init.cpp
         src/Processor/processor_Ks_stacks_mgr.cpp
+        src/panic/panic.cpp
+        src/Interrupts/exceptions_handler.cpp
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
@@ -85,14 +87,23 @@ target_link_libraries(kernel.elf PRIVATE
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
     tinySTL
 )
-
 # Memory 模块测试可执行文件
-#add_executable(memmory_module_test
- #   ${CMAKE_SOURCE_DIR}/src/tests/Memory_moudle_test.cpp
-  #  ${SRC_COMMON}
+#add_executable(memory_module_test
+#    ${CMAKE_SOURCE_DIR}/src/tests/Memory_moudle_test.cpp
+#    ${SRC_COMMON}
+#)
+
+# 链接gnu-efi库和Mem_module_shared动态库到测试可执行文件
+#target_link_libraries(memory_module_test PRIVATE 
+ #   Mem_module_shared
 #)
 
 # 头文件路径（对 C/C++ 均可见）
+#target_include_directories(memory_module_test PRIVATE
+ #   "${CMAKE_SOURCE_DIR}/src/include"
+  #  "/usr/include/efi"
+#)
+
 target_include_directories(kernel.elf PRIVATE
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src/include"
@@ -100,12 +111,6 @@ target_include_directories(kernel.elf PRIVATE
     "${GNU_EFI_SOURCE_DIR}/inc/x86_64"
     "${CMAKE_SOURCE_DIR}/outsbmodules/tinySTL/tinySTL"
 )
-
-#target_include_directories(memmory_module_test PRIVATE
-#    "/usr/include/efi/"
-#    "${CMAKE_SOURCE_DIR}"
-#    "${CMAKE_SOURCE_DIR}/src/include"
-#)
 
 # 内核链接选项
 set(KERNEL_LINK_OPTS
@@ -129,7 +134,7 @@ endif()
 
 # 应用编译选项
 target_compile_options(kernel.elf PRIVATE 
-    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra 
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra  -mgeneral-regs-only
     -ffreestanding
     -fno-exceptions
     -fno-builtin
@@ -138,6 +143,7 @@ target_compile_options(kernel.elf PRIVATE
     -fpermissive
     -fno-PIC
     -DKERNEL_MODE>
+       
 $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
 )
 target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})

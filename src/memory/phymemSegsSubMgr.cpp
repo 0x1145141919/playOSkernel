@@ -718,7 +718,7 @@ minimal_phymem_seg_t KernelSpacePgsMemMgr::phymemSegsSubMgr_t::addr_query(phyadd
             if (seg.num_of_subtb_entries == 0) {
                 minimal_phymem_seg_t result;
                 result.base = phyaddr;
-                result.num_of_4kbpgs = 1;
+                result.num_of_4kbpgs = seg.size_in_numof4kbpgs;
                 result.type = FREE;
                 result.remapped_count = 0;
                 return result;
@@ -739,7 +739,7 @@ minimal_phymem_seg_t KernelSpacePgsMemMgr::phymemSegsSubMgr_t::addr_query(phyadd
                     // 地址在占用段中
                     minimal_phymem_seg_t result;
                     result.base = phyaddr;
-                    result.num_of_4kbpgs = 1;
+                    result.num_of_4kbpgs = sub_seg.num_of_4kbpgs;
                     result.type = OCCUPYIED;
                     result.remapped_count = sub_seg.remapped_count;
                     return result;
@@ -747,9 +747,10 @@ minimal_phymem_seg_t KernelSpacePgsMemMgr::phymemSegsSubMgr_t::addr_query(phyadd
                     // 地址在当前子段之前，检查是否在空隙中
                     if (mid == 0 || phyaddr >= seg.subtb[mid-1].base + seg.subtb[mid-1].num_of_4kbpgs * PAGE_SIZE_IN_LV[0]) {
                         // 地址在空隙中
+                        phyaddr_t pre_seg_end = seg.subtb[mid-1].base + seg.subtb[mid-1].num_of_4kbpgs * PAGE_SIZE_IN_LV[0];
                         minimal_phymem_seg_t result;
                         result.base = phyaddr;
-                        result.num_of_4kbpgs = 1;
+                        result.num_of_4kbpgs = (phyaddr - pre_seg_end)>>12;
                         result.type = FREE;
                         result.remapped_count = 0;
                         return result;
@@ -759,9 +760,11 @@ minimal_phymem_seg_t KernelSpacePgsMemMgr::phymemSegsSubMgr_t::addr_query(phyadd
                     // 地址在当前子段之后，检查是否在空隙中
                     if (mid == seg.num_of_subtb_entries - 1 || phyaddr < seg.subtb[mid+1].base) {
                         // 地址在空隙中
+                        phyaddr_t end_addr = sub_seg.base + sub_seg.num_of_4kbpgs * PAGE_SIZE_IN_LV[0];
+                        phyaddr_t next_seg_start = seg.subtb[mid+1].base;
                         minimal_phymem_seg_t result;
                         result.base = phyaddr;
-                        result.num_of_4kbpgs = 1;
+                        result.num_of_4kbpgs = (next_seg_start - end_addr)>>12;
                         result.type = FREE;
                         result.remapped_count = 0;
                         return result;

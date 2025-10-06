@@ -2,7 +2,7 @@
 #include "stdint.h"
 #include "Memory.h"
 typedef  uint64_t phyaddr_t;
-typedef uint8_t _2mb_pg_bitmapof_4kbpgs[64];
+typedef uint8_t bitset512_t[64];
 typedef uint8_t pgsbitmap_entry2bits_width[128];
 
 enum cache_strategy_t:uint8_t
@@ -19,7 +19,16 @@ union ia32_pat_t
    uint64_t value;
    cache_strategy_t  mapped_entry[8];
 };
-
+struct pgaccess
+{
+    uint8_t is_kernel:1;
+    uint8_t is_writeable:1;
+    uint8_t is_readable:1;
+    uint8_t is_executable:1;
+    uint8_t is_global:1;
+    uint8_t is_occupyied:1;
+    cache_strategy_t cache_strategy;
+};
 #define PHY_ATOM_PAGE 0
 #define VIR_ATOM_PAGE 1
 enum short_pg_type:uint8_t{
@@ -120,7 +129,7 @@ uint16_t kernel_sapce_PCID;
 class pgtb_heap_mgr_t{
     
     static const uint8_t num_of_2mbpgs=2;
-    _2mb_pg_bitmapof_4kbpgs maps[num_of_2mbpgs];
+    bitset512_t maps[num_of_2mbpgs];
     public:
     phyaddr_t heap_base;
     uint64_t* pgtb_root_phyaddr;
@@ -134,16 +143,7 @@ class pgtb_heap_mgr_t{
 };
 pgtb_heap_mgr_t*pgtb_heap_ptr;
 psmemmgr_flags_t flags;
-struct pgaccess
-{
-    uint8_t is_kernel:1;
-    uint8_t is_writeable:1;
-    uint8_t is_readable:1;
-    uint8_t is_executable:1;
-    uint8_t is_global:1;
-    uint8_t is_occupyied;
-    cache_strategy_t cache_strategy;
-};
+
 PgControlBlockHeader*rootlv4PgCBtb=nullptr;
 // 辅助函数：打印四级表
 void PrintLevel4Table(lowerlv_PgCBtb* table, int parentIndex);
@@ -253,6 +253,7 @@ class phymemSegsSubMgr_t{
 */
 
       phymemSegsSubMgr_t();
+      void Init();
 /*
 查询是否有对应基址的占用内存段并在重映射计数上加一
 自然不能超过0xffff
@@ -333,9 +334,9 @@ int modify_pgtb_in_5lv(phyaddr_t base,uint64_t endaddr);
 
 
 public:
-const pgaccess PG_RW={1,1,1,0};
-const pgaccess PG_RWX ={1,1,1,1};
-const pgaccess PG_R ={1,0,1,0};
+const pgaccess PG_RW={1,1,1,0,1,1,WB};
+const pgaccess PG_RWX ={1,1,1,1,1,1,WB};
+const pgaccess PG_R ={1,0,1,0,1,0,WB};
 
 void *pgs_allocate(uint64_t size_in_byte, pgaccess access, uint8_t align_require);
 int pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t size_in_byte, pgaccess access);
@@ -381,9 +382,39 @@ int free_phy_pgs(phyaddr_t addr);
     /**
      * 上面四个页级别物理内存分配器必须在is_pgsallocate_enable开启后才能使用    
      */
+static constexpr pgflags kspace_data_flags = {
+    .physical_or_virtual_pg = VIR_ATOM_PAGE,
+    .is_exist = 1,
+    .is_atom = 1,
+    .is_reserved = 0,
+    .is_occupied = 1,
+    .is_kernel = 1,
+    .is_readable = 1,
+    .is_writable = 1,
+    .is_executable = 0,
+    .is_remaped = 1,
+    .pg_lv = 0,
+    .cache_strateggy = WB,
+    .is_global = 1
+};
+static constexpr pgflags kspace_code_flags = {
+    .physical_or_virtual_pg = VIR_ATOM_PAGE,
+    .is_exist = 1,
+    .is_atom = 1,
+    .is_reserved = 0,
+    .is_occupied = 1,
+    .is_kernel = 1,
+    .is_readable = 1,
+    .is_writable = 0,
+    .is_executable = 1,
+    .is_remaped = 1,
+    .pg_lv = 0,
+    .cache_strateggy = WB,
+    .is_global = 1
+};
     void Init();
     void PrintPgsMemMgrStructure();
-    
+    void* v_to_phyaddrtraslation(vaddr_t vaddr);
 };
 extern KernelSpacePgsMemMgr gKspacePgsMemMgr;
 void print_PgControlBlockHeader(struct PgControlBlockHeader* header);

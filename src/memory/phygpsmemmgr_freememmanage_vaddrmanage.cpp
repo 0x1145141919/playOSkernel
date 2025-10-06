@@ -19,7 +19,7 @@ void *KernelSpacePgsMemMgr::pgs_allocate_remapped(size_t size_in_byte, pgflags f
     size_in_byte&=~PAGE_OFFSET_MASK[0];
     vaddr_t vend;
     uint64_t numof_4kbpgs=size_in_byte>>12;
-    
+    if(align_require<12)align_require=12;
     // 修改：从前向后扫描空闲虚拟地址空间，而不是直接在vaddrobj_count处分配
     // 查找第一个合适的空闲虚拟地址空间
     vaddr_t vbase = 0;
@@ -29,7 +29,8 @@ void *KernelSpacePgsMemMgr::pgs_allocate_remapped(size_t size_in_byte, pgflags f
     for (int i = 0; i < vaddrobj_count; i++) {
         vaddr_t current_end = vaddr_objs[i].base + (vaddr_objs[i].size_in_numof4kbpgs << 12);
         bool found_space = true;
-        
+        current_end=align_up(current_end,1ULL<< align_require);
+        if(current_end==0){return nullptr;} 
         // 检查下一个对象是否会与当前分配冲突
         if (i + 1 < vaddrobj_count) {
             vaddr_t next_start = vaddr_objs[i+1].base;
@@ -48,6 +49,7 @@ void *KernelSpacePgsMemMgr::pgs_allocate_remapped(size_t size_in_byte, pgflags f
     // 如果没有找到空闲空间，则在末尾分配
     if (vbase == 0 && vaddrobj_count > 0) {
         vbase = vaddr_objs[vaddrobj_count-1].base + (vaddr_objs[vaddrobj_count-1].size_in_numof4kbpgs << 12);
+        vbase=align_up(vbase,1ULL<< align_require);
     }
     
     // 如果是第一次分配

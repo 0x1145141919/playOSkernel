@@ -11,159 +11,97 @@
 GlobalMemoryPGlevelMgr_t gBaseMemMgr;
 //efi内存描述符表id为0,操作系统自己维护的内存描述符表id为1
 // 默认构造函数
-GlobalMemoryPGlevelMgr_t::GlobalMemoryPGlevelMgr_t() {
-    // 初始化成员变量
-    rootPhyMemDscptTbBsPtr = nullptr;
-    EfiMemMapEntryCount = 0;
 
-}
 extern uint64_t kernel_load_addr;
 
 
-GlobalMemoryPGlevelMgr_t::GlobalMemoryPGlevelMgr_t(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount) {
-    EfiMemMap = gEfiMemdescriptromap;
-    EfiMemMapEntryCount = entryCount;
-    // KSCR3 需要通过其他方式初始化
-}
-void GlobalMemoryPGlevelMgr_t::Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount)
 
+void GlobalMemoryPGlevelMgr_t::Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount)
+/**
+ * 
+ */
 {
     this->flags.is_alloc_service_enabled = false;
-    this->flags.is_vaddr_enabled = false;
-    EfiMemMap = new EFI_MEMORY_DESCRIPTORX64[entryCount];
-    gKpoolmemmgr.clear(EfiMemMap);
+    this->flags.is_vaddr_enabled = true;
     EfiMemMapEntryCount = entryCount;
+    ksystemramcpy(
+        gEfiMemdescriptromap,
+        EfiMemMap,
+        entryCount*sizeof(EFI_MEMORY_DESCRIPTORX64)
+    );
+    fillMemoryHolesInEfiMap();
+    for(uint64_t i=EfiMemMapEntryCount-1; i >= 0; i--)
+    {
+        if(EfiMemMap[i-1].Type==EFI_RESERVED_MEMORY_TYPE)
+        {
+            EfiMemMapEntryCount--;
+        }else{
+            break;
+        }
+    }
     /*
     扫描gEfiMemdescriptromap的同时新建EfiMemMap，回收其中启动时服务的内存，忽略后面的冗余表项，然后realloc收缩范围
     */
-   int efiMapIndex = 0;
-   for(uint64_t i = 0; i < entryCount; i++)
+   int rootMapIndex = 0;
+   phy_memDesriptor being_constructed_entry;
+   for(uint64_t i = 0; i < EfiMemMapEntryCount; i++)
+   {PHY_MEM_TYPE tmp_converted_type;
+switch (EfiMemMap[i].Type)
+    {
+    
+        case freeSystemRam:
+        case EFI_LOADER_DATA:
+        case EFI_LOADER_CODE:
+        case EFI_BOOT_SERVICES_CODE:
+        case EFI_BOOT_SERVICES_DATA:
+        tmp_converted_type = freeSystemRam;
+        break;
+    
+    default:
+        tmp_converted_type = (PHY_MEM_TYPE)EfiMemMap[i].Type;
+    }  
+     if(i==0)
    {
-    if(gEfiMemdescriptromap[i].Type==EFI_BOOT_SERVICES_CODE||gEfiMemdescriptromap[i].Type==EFI_BOOT_SERVICES_DATA||gEfiMemdescriptromap[i].Type==freeSystemRam)
-    {
-        // 检查是否可以与前一个内存段合并
-        if(efiMapIndex > 0 && 
-           EfiMemMap[efiMapIndex-1].PhysicalStart+(EfiMemMap[efiMapIndex-1].NumberOfPages<<12)==gEfiMemdescriptromap[i].PhysicalStart)
-        {
-            if(EfiMemMap[efiMapIndex-1].Type==freeSystemRam)
-            {
-                EfiMemMap[efiMapIndex-1].NumberOfPages+=gEfiMemdescriptromap[i].NumberOfPages;
-            }else{
-                EfiMemMap[efiMapIndex].PhysicalStart=gEfiMemdescriptromap[i].PhysicalStart;
-                EfiMemMap[efiMapIndex].NumberOfPages=gEfiMemdescriptromap[i].NumberOfPages;
-                EfiMemMap[efiMapIndex].Type=freeSystemRam;
-                efiMapIndex++;
-            }
-        } else {
-            // 无法合并，创建新的内存段
-            EfiMemMap[efiMapIndex].PhysicalStart=gEfiMemdescriptromap[i].PhysicalStart;
-            EfiMemMap[efiMapIndex].NumberOfPages=gEfiMemdescriptromap[i].NumberOfPages;
-            EfiMemMap[efiMapIndex].Type=freeSystemRam;
-            efiMapIndex++;
-        }
-    }else{
-        EfiMemMap[efiMapIndex].PhysicalStart=gEfiMemdescriptromap[i].PhysicalStart;
-        EfiMemMap[efiMapIndex].NumberOfPages=gEfiMemdescriptromap[i].NumberOfPages;
-        EfiMemMap[efiMapIndex].Type=gEfiMemdescriptromap[i].Type;
-        efiMapIndex++;
+    being_constructed_entry.Type = tmp_converted_type;
+    being_constructed_entry.PhysicalStart = EfiMemMap[i].PhysicalStart;
+    being_constructed_entry.VirtualStart = 0;
+    being_constructed_entry.NumberOfPages = EfiMemMap[i].NumberOfPages;
+    being_constructed_entry.Attribute = 0;
+     rootPhyMemDscptTbBsPtr[rootMapIndex].NumberOfPages += EfiMemMap[i].NumberOfPages;
+     rootPhyMemDscptTbBsPtr[rootMapIndex].Type = tmp_converted_type;
+     rootPhyMemDscptTbBsPtr[rootMapIndex].PhysicalStart = EfiMemMap[i].PhysicalStart;
+    continue;
+    }
+    if(tmp_converted_type==being_constructed_entry.Type)
+    { 
+        being_constructed_entry.NumberOfPages += EfiMemMap[i].NumberOfPages;
+   }else{
+        // 结束前一个合并段
+        rootPhyMemDscptTbBsPtr[rootMapIndex].Type = being_constructed_entry.Type;
+        rootPhyMemDscptTbBsPtr[rootMapIndex].PhysicalStart = being_constructed_entry.PhysicalStart;
+        rootPhyMemDscptTbBsPtr[rootMapIndex].NumberOfPages = being_constructed_entry.NumberOfPages;
+         rootPhyMemDscptTbBsPtr[rootMapIndex].remapped_count = 0;
+        rootPhyMemDscptTbBsPtr[rootMapIndex].VirtualStart = 0;
+        rootPhyMemDscptTbBsPtr[rootMapIndex].Attribute = 0;
+        being_constructed_entry.PhysicalStart = EfiMemMap[i].PhysicalStart;
+        being_constructed_entry.VirtualStart = 0;
+        being_constructed_entry.Type = tmp_converted_type;
+        being_constructed_entry.NumberOfPages = EfiMemMap[i].NumberOfPages;
+        rootMapIndex++;
     }
    }
-   
-   /*
-   然后再是去除冗余表项
-   */
-  for(int i = efiMapIndex; i > 0; i--)
-  {
-    if(EfiMemMap[i-1].Type==EfiReservedMemoryType)
-    {
-        efiMapIndex--;
-    }else{
-        break;
-    }
-  }
-  EfiMemMapEntryCount = efiMapIndex;
-  fillMemoryHolesInEfiMap();
-gKpoolmemmgr.realloc(EfiMemMap,EfiMemMapEntryCount*sizeof(EFI_MEMORY_DESCRIPTORX64));
-   /*
-   从Efi新表复制到物理内存描述符表的时候在标记内核代码段，数据段（efi表中是loader_data/code）
-   再回收loadercode,loaderdata类型的内存
-   */
-  uint64_t tmp_rootPhymemTbentryCount = EfiMemMapEntryCount;
-  rootPhymemTbentryCount = tmp_rootPhymemTbentryCount;
+ksystemramcpy(
+    rootPhyMemDscptTbBsPtr,
+    EfiMemMap,
+    rootPhymemTbentryCount*sizeof(phy_memDesriptor)
+);
+  rootPhymemTbentryCount = rootMapIndex;
+  EfiMemMapEntryCount = rootMapIndex;
+max_phy_addr=rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].PhysicalStart+
+rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
+
+
   
-  // 修复：避免重复分配和内存泄漏
-  if (rootPhyMemDscptTbBsPtr != nullptr) {
-      delete[] rootPhyMemDscptTbBsPtr;
-  }
-  
-  phy_memDesriptor *tmp_tb=new phy_memDesriptor[tmp_rootPhymemTbentryCount];
-  gKpoolmemmgr.clear(tmp_tb); // 初始化临时表
-  
-  // 复制EFI内存映射到临时表
-  for (uint64_t i = 0; i < tmp_rootPhymemTbentryCount; i++) {
-      tmp_tb[i].PhysicalStart = EfiMemMap[i].PhysicalStart;
-      tmp_tb[i].NumberOfPages = EfiMemMap[i].NumberOfPages;
-      tmp_tb[i].Type = (PHY_MEM_TYPE)EfiMemMap[i].Type;
-  }
-  
-  // 标记内核代码段和数据段
-  for (uint64_t i = 0; i < tmp_rootPhymemTbentryCount; i++)
-  {
-    if(tmp_tb[i].Type==EFI_LOADER_CODE && tmp_tb[i].PhysicalStart==0x4000000)
-    {
-        tmp_tb[i].Type=OS_KERNEL_CODE;
-        // 防止数组越界
-        if (i+1 < tmp_rootPhymemTbentryCount) {
-            tmp_tb[i+1].Type=OS_KERNEL_DATA;
-        }
-        break;
-    }
-  }
-  
-  rootPhyMemDscptTbBsPtr = new phy_memDesriptor[128];
-  int phyDescIndex = 0;
-  for(uint64_t i = 0; i < tmp_rootPhymemTbentryCount; i++)
-  {
-    if(tmp_tb[i].Type==EFI_LOADER_CODE||tmp_tb[i].Type==EFI_LOADER_DATA||tmp_tb[i].Type==freeSystemRam)
-    {
-        // 检查是否可以与前一个内存段合并
-        if(phyDescIndex > 0 && 
-           rootPhyMemDscptTbBsPtr[phyDescIndex-1].PhysicalStart+(rootPhyMemDscptTbBsPtr[phyDescIndex-1].NumberOfPages<<12)==tmp_tb[i].PhysicalStart)
-        {
-            if(rootPhyMemDscptTbBsPtr[phyDescIndex-1].Type==freeSystemRam)
-            {
-                rootPhyMemDscptTbBsPtr[phyDescIndex-1].NumberOfPages+=tmp_tb[i].NumberOfPages;
-            }else{
-                rootPhyMemDscptTbBsPtr[phyDescIndex].PhysicalStart=tmp_tb[i].PhysicalStart;
-                rootPhyMemDscptTbBsPtr[phyDescIndex].NumberOfPages=tmp_tb[i].NumberOfPages;
-                rootPhyMemDscptTbBsPtr[phyDescIndex].Type=freeSystemRam;
-                phyDescIndex++;
-            }
-        } else {
-            rootPhyMemDscptTbBsPtr[phyDescIndex].PhysicalStart=tmp_tb[i].PhysicalStart;
-            rootPhyMemDscptTbBsPtr[phyDescIndex].NumberOfPages=tmp_tb[i].NumberOfPages;
-            rootPhyMemDscptTbBsPtr[phyDescIndex].Type=freeSystemRam;
-            phyDescIndex++;
-        }
-    }else{
-        rootPhyMemDscptTbBsPtr[phyDescIndex].PhysicalStart=tmp_tb[i].PhysicalStart;
-        rootPhyMemDscptTbBsPtr[phyDescIndex].NumberOfPages=tmp_tb[i].NumberOfPages;
-        rootPhyMemDscptTbBsPtr[phyDescIndex].Type=tmp_tb[i].Type;
-        phyDescIndex++;
-    }
-   }
-   
-   // 清理临时内存
-   delete[] tmp_tb;
-   
-   rootPhymemTbentryCount = phyDescIndex;
-   
-   // 确保索引有效后再访问
-   if (rootPhymemTbentryCount > 0) {
-       max_phy_addr = rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].PhysicalStart+\
-                      rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
-   }
-   
     this->flags.is_alloc_service_enabled = true;
 }
 phy_memDesriptor *GlobalMemoryPGlevelMgr_t::getGlobalPhysicalMemoryInfo()
@@ -275,7 +213,8 @@ void GlobalMemoryPGlevelMgr_t::fillMemoryHolesInEfiMap() {
             uint64_t holePages = (nextStart - currentEnd) / EFI_PAGE_SIZE;
             
             // 创建Reserved类型的描述符
-            EFI_MEMORY_DESCRIPTORX64 holeDesc = {0};
+            EFI_MEMORY_DESCRIPTORX64 holeDesc ;
+            setmem(&holeDesc,sizeof(EFI_MEMORY_DESCRIPTORX64),0);
             holeDesc.Type = EFI_RESERVED_MEMORY_TYPE;
             holeDesc.PhysicalStart = currentEnd;
             holeDesc.NumberOfPages = holePages;
@@ -604,6 +543,14 @@ void GlobalMemoryPGlevelMgr_t::printEfiMemoryDescriptorTable()
     }
     
     kputsSecure("========== End of Map ==========\n");
+}
+
+GlobalMemoryPGlevelMgr_t::GlobalMemoryPGlevelMgr_t()
+{
+}
+
+GlobalMemoryPGlevelMgr_t::GlobalMemoryPGlevelMgr_t(EFI_MEMORY_DESCRIPTORX64 *gEfiMemdescriptromap, uint64_t entryCount)
+{
 }
 
 void GlobalMemoryPGlevelMgr_t::printPhyMemDesTb()

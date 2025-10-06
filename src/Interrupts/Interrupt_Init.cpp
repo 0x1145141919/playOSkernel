@@ -28,14 +28,14 @@ void Interrupt_mgr_t::Init()//真正的初始化函数
 {
     // 初始化全局GDT表
     // 内核代码段
-    global_gdt.entries[1] = kspace_CS_entry;
+    global_gdt.entries[kspace_CS_gdt_selector>>3] = kspace_CS_entry;
     // 内核数据段
-    global_gdt.entries[2] = kspace_DS_SS_entry;
+    global_gdt.entries[kspace_DS_SS_gdt_selector>>3] = kspace_DS_SS_entry;
     // 用户代码段
-    global_gdt.entries[3] = userspace_CS_entry;
+    global_gdt.entries[userspace_CS_gdt_selector>>3] = userspace_CS_entry;
     // 用户数据段
-    global_gdt.entries[4] = userspace_DS_SS_entry;
-    
+    global_gdt.entries[userspace_DS_SS_gdt_selector>>3] = userspace_DS_SS_entry;
+
     // 设置GDTR
     global_gdt_ptr.limit = sizeof(global_gdt) - 1;
     global_gdt_ptr.base = (uint64_t)&global_gdt;
@@ -49,6 +49,38 @@ void Interrupt_mgr_t::Init()//真正的初始化函数
         global_idt[i].ist_index = 1;
         global_idt[i].dpl = 0; // 内核特权级
     }
+    global_idt[Interrupt_mgr_t::DIVIDE_ERROR].offset_low = (uint16_t)((uint64_t)exception_handler_div_by_zero & 0xFFFF);
+    global_idt[Interrupt_mgr_t::DIVIDE_ERROR].offset_mid = (uint16_t)(((uint64_t)exception_handler_div_by_zero >> 16) & 0xFFFF);
+   global_idt[Interrupt_mgr_t::DIVIDE_ERROR].offset_high = (uint32_t)(((uint64_t)exception_handler_div_by_zero >> 32) & 0xFFFFFFFF);
+   
+    // 注册新增的异常处理函数
+    global_idt[Interrupt_mgr_t::INVALID_OPCODE].offset_low = (uint16_t)((uint64_t)exception_handler_invalid_opcode & 0xFFFF);
+    global_idt[Interrupt_mgr_t::INVALID_OPCODE].offset_mid = (uint16_t)(((uint64_t)exception_handler_invalid_opcode >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::INVALID_OPCODE].offset_high = (uint32_t)(((uint64_t)exception_handler_invalid_opcode >> 32) & 0xFFFFFFFF);
+    
+    global_idt[Interrupt_mgr_t::GENERAL_PROTECTION_FAULT].offset_low = (uint16_t)((uint64_t)exception_handler_general_protection & 0xFFFF);
+    global_idt[Interrupt_mgr_t::GENERAL_PROTECTION_FAULT].offset_mid = (uint16_t)(((uint64_t)exception_handler_general_protection >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::GENERAL_PROTECTION_FAULT].offset_high = (uint32_t)(((uint64_t)exception_handler_general_protection >> 32) & 0xFFFFFFFF);
+    
+    global_idt[Interrupt_mgr_t::DOUBLE_FAULT].offset_low = (uint16_t)((uint64_t)exception_handler_double_fault & 0xFFFF);
+    global_idt[Interrupt_mgr_t::DOUBLE_FAULT].offset_mid = (uint16_t)(((uint64_t)exception_handler_double_fault >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::DOUBLE_FAULT].offset_high = (uint32_t)(((uint64_t)exception_handler_double_fault >> 32) & 0xFFFFFFFF);
+    
+    global_idt[Interrupt_mgr_t::PAGE_FAULT].offset_low = (uint16_t)((uint64_t)exception_handler_page_fault & 0xFFFF);
+    global_idt[Interrupt_mgr_t::PAGE_FAULT].offset_mid = (uint16_t)(((uint64_t)exception_handler_page_fault >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::PAGE_FAULT].offset_high = (uint32_t)(((uint64_t)exception_handler_page_fault >> 32) & 0xFFFFFFFF);
+    
+    global_idt[Interrupt_mgr_t::INVALID_TSS].offset_low = (uint16_t)((uint64_t)exception_handler_invalid_tss & 0xFFFF);
+    global_idt[Interrupt_mgr_t::INVALID_TSS].offset_mid = (uint16_t)(((uint64_t)exception_handler_invalid_tss >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::INVALID_TSS].offset_high = (uint32_t)(((uint64_t)exception_handler_invalid_tss >> 32) & 0xFFFFFFFF);
+    
+    global_idt[Interrupt_mgr_t::SIMD_FLOATING_POINT_EXCEPTION].offset_low = (uint16_t)((uint64_t)exception_handler_simd_floating_point & 0xFFFF);
+    global_idt[Interrupt_mgr_t::SIMD_FLOATING_POINT_EXCEPTION].offset_mid = (uint16_t)(((uint64_t)exception_handler_simd_floating_point >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::SIMD_FLOATING_POINT_EXCEPTION].offset_high = (uint32_t)(((uint64_t)exception_handler_simd_floating_point >> 32) & 0xFFFFFFFF);
+    
+    global_idt[Interrupt_mgr_t::VIRTUALIZATION_EXCEPTION].offset_low = (uint16_t)((uint64_t)exception_handler_virtualization & 0xFFFF);
+    global_idt[Interrupt_mgr_t::VIRTUALIZATION_EXCEPTION].offset_mid = (uint16_t)(((uint64_t)exception_handler_virtualization >> 16) & 0xFFFF);
+    global_idt[Interrupt_mgr_t::VIRTUALIZATION_EXCEPTION].offset_high = (uint32_t)(((uint64_t)exception_handler_virtualization >> 32) & 0xFFFFFFFF);
     
     // 根据Intel手册，某些中断号未被使用，将它们的present位设置为0
     global_idt[15].present = 0;  // 中断号15未被使用
@@ -95,6 +127,47 @@ int Interrupt_mgr_t::processor_Interrupt_init(uint32_t apic_id)
     return OS_SUCCESS;
 }
 
+int Interrupt_mgr_t::processor_Interrupt_register(uint32_t apic_id, uint8_t interrupt_number, void *handler)
+{
+    Local_processor_Interrupt_mgr_t*local_processor_interrupt_mgr=local_processor_interrupt_mgr_array[apic_id];
+    if (apic_id>=total_processor_count)
+    {
+        return OS_INVALID_PARAMETER ;
+    }
+    
+    return local_processor_interrupt_mgr->register_handler(interrupt_number,handler);
+}
+
+int Interrupt_mgr_t::processor_Interrupt_unregister(uint32_t apic_id, uint8_t interrupt_number)
+{
+    if(apic_id>=total_processor_count)return OS_INVALID_PARAMETER ;
+    Local_processor_Interrupt_mgr_t*local_processor_interrupt_mgr=local_processor_interrupt_mgr_array[apic_id];
+    return local_processor_interrupt_mgr->unregister_handler(interrupt_number);
+}
+
+int Interrupt_mgr_t::Local_processor_Interrupt_mgr_t::register_handler(uint8_t interrupt_number, void *handler)
+{
+    uint64_t handler_addr = (uint64_t)handler;
+    Interrupt_mgr_t::IDTEntry&entry=this->IDTEntry[interrupt_number];
+    if(handler_addr<0xffff800000000000)//内核地址空间
+    {
+        return OS_INVALID_ADDRESS;
+    }
+    entry.offset_low = (uint16_t)(handler_addr & 0xFFFF);
+    entry.offset_mid = (uint16_t)((handler_addr >> 16) & 0xFFFF);
+    entry.offset_high = (uint32_t)((handler_addr >> 32) & 0xFFFFFFFF);
+    entry.present = 1;
+
+    return 0;
+}
+
+int Interrupt_mgr_t::Local_processor_Interrupt_mgr_t::unregister_handler(uint8_t interrupt_number)
+{
+    Interrupt_mgr_t::IDTEntry& entry = this->IDTEntry[interrupt_number];
+    entry.present = 0;
+    return 0;
+}
+
 Interrupt_mgr_t::Local_processor_Interrupt_mgr_t::Local_processor_Interrupt_mgr_t(uint32_t apic_id)
 {
     this->apic_id=apic_id;
@@ -120,6 +193,19 @@ Interrupt_mgr_t::Local_processor_Interrupt_mgr_t::Local_processor_Interrupt_mgr_
     gdt->tss_entry[apic_id].base2=(tss_content>>24)&(base2_mask);
     gdt->tss_entry[apic_id].base3=(tss_content>>32)&(base3_mask);
     asm volatile("lgdt %0"::"m"(gInterrupt_mgr.global_gdt_ptr));
-    uint16_t tss_gdt_index=gInterrupt_mgr.gdt_headcount+apic_id*2;
+    uint64_t cs_selector = kspace_CS_gdt_selector;
+    asm volatile("pushq %0\n"
+                 "leaq 1f(%%rip), %%rax\n"
+                 "pushq %%rax\n"
+                 "lretq\n"
+                 "1:\n"
+                 :
+                 : "r"(cs_selector)
+                 : "rax");
+        IDTR idtr;
+        idtr.limit = sizeof(IDTEntry) - 1;
+        idtr.base = (uint64_t)IDTEntry;
+    asm volatile("lidt %0"::"m"(idtr));
+    uint16_t tss_gdt_index = gInterrupt_mgr.gdt_headcount + apic_id * 2;
     asm volatile("ltr %w0"::"r"(tss_gdt_index<<3));
 }

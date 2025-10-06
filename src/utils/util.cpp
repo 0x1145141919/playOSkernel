@@ -39,6 +39,20 @@ int strlen(const char *s) {
         size_in_byte--;
     }
 }
+void __kspace_stack_chk_fail(void)
+{
+    asm volatile ("int $0xc");
+}
+
+// 定义栈保护的canary值
+uintptr_t __stack_chk_guard = 0x595e9f73bb9247cf;
+
+// 使用链接器wrap选项重载__stack_chk_fail函数
+extern "C" void __wrap___stack_chk_fail(void)
+{
+    __kspace_stack_chk_fail();
+}
+
 void ksystemramcpy(void*src,void*dest,size_t length)
 //最好用于内核内存空间内的内存拷贝，不然会出现未定义行为
 {  uint64_t remainder=length&0x7;
@@ -140,12 +154,12 @@ void linearTBSerialInsert(
     // 更新表项总数
     *TotalEntryCount += entryCount;
 }
-bool getbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs* bitmap,uint16_t index)
+bool getbit_entry1bit_width(bitset512_t* bitmap,uint16_t index)
 {
     uint8_t* map=(uint8_t*)bitmap;
     return (map[index>>3]&masks_entry1bit_width[index&7])!=0;
 }
-void setbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t index)
+void setbit_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t index)
 {
     uint8_t* map=(uint8_t*)bitmap;
     if(value)
@@ -153,7 +167,7 @@ void setbit_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t i
     else
         map[index>>3]&=~masks_entry1bit_width[index&7];
 }
-void setbits_entry1bit_width(_2mb_pg_bitmapof_4kbpgs*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits)
+void setbits_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits)
 {
     int bits_left=len_in_bits;
     uint8_t * map_8bit=(uint8_t*)bitmap;
@@ -242,4 +256,13 @@ void setentries_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t val
         setentry_entry2bits_width(bitmap, value, i);
         i++;
     }
+}
+uint64_t align_up(uint64_t value, uint64_t alignment) {
+    // 检查alignment是否为2的幂
+    if ((alignment & (alignment - 1)) != 0) {
+        // 如果不是2的幂，可以返回0或者处理错误
+        return 0; // 或者抛出错误/断言
+    }
+    // 计算对齐后的值
+    return (value + alignment - 1) & ~(alignment - 1);
 }

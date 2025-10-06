@@ -6,7 +6,7 @@
 #include "OS_utils.h"
 #include "pgtable45.h"
 #include "processor_self_manage.h"
-
+#include "linker_symbols.h"
 static inline void bitset64bits_set(uint64_t&bitset,uint64_t bitpos)
 {
     bitset|=1ULL<<bitpos;
@@ -356,60 +356,120 @@ void KernelSpacePgsMemMgr::enable_new_cr3() {
         default:
             return;
     }
-    phy_memDesriptor*global_tb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
-    uint64_t count=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    vaddr_t valloc_base=(cpu_pglv==4?0xffff800000000000:0xff<<56ULL);
-    vaddr_t scan_addr=valloc_base;
-    
-    gBaseMemMgr.printPhyMemDesTb();
-    for(uint64_t i=0;i<count;i++)
-    {   
-        pgflags tmp_flags={0};
-        pgaccess tmp_access={0};
-        tmp_access.is_kernel=tmp_flags.is_kernel=1;
+    uint8_t* status;
+        pgflags tmp_flags;
         tmp_flags.is_exist=1;
-        tmp_access.is_readable= tmp_flags.is_readable=1;
-        switch(global_tb[i].Type)
-        {
-            case EFI_RUNTIME_SERVICES_CODE:
-            case OS_KERNEL_CODE:
-            tmp_access.is_executable= tmp_flags.is_executable=1;
-            tmp_access.is_writeable= tmp_flags.is_writable=0;
-            goto set_flags;
-            case EFI_RUNTIME_SERVICES_DATA:
-            case OS_KERNEL_DATA:
-            case OS_KERNEL_STACK:
-            case EFI_ACPI_RECLAIM_MEMORY:
-            case EFI_MEMORY_MAPPED_IO:
-            tmp_access.is_writeable= tmp_flags.is_writable=1;
-            set_flags:
-            tmp_access.is_global= tmp_flags.is_global=1;
-            tmp_flags.physical_or_virtual_pg=1;
-            tmp_access.is_occupyied= tmp_flags.is_occupied=1;
-            tmp_access.cache_strategy=tmp_flags.cache_strateggy=cache_strategy_t::WB;
-            if(global_tb[i].Type==EFI_MEMORY_MAPPED_IO)
-            tmp_access.cache_strategy=tmp_flags.cache_strateggy=cache_strategy_t::UC;
-            vaddr_objs[vaddrobj_count].base=scan_addr;
-            global_tb[i].VirtualStart=scan_addr;
-            vaddr_objs[vaddrobj_count].type=(PHY_MEM_TYPE)global_tb[i].Type;
-            vaddr_objs[vaddrobj_count].size_in_numof4kbpgs=global_tb[i].NumberOfPages;
-            vaddr_objs[vaddrobj_count].flags=tmp_flags;
-            vaddr_objs[vaddrobj_count].max_num_of_subtb_entries=vaddr_objs[vaddrobj_count].num_of_subtb_entries=1;
-            vaddr_objs[vaddrobj_count].subtb=new vaddr_seg_subtb_t;
-            vaddr_objs[vaddrobj_count].subtb->phybase=global_tb[i].PhysicalStart;
-            vaddr_objs[vaddrobj_count].subtb->num_of_4kbpgs=global_tb[i].NumberOfPages;
-            phymem_pgs_queue* pgs_pacage=seg_to_queue(scan_addr,global_tb[i].NumberOfPages<<12);
-            if(pgs_pacage==nullptr){
-                kputsSecure("seg_to_queue failed\n");
-                delete pgs_pacage;
-                return;
-            }
-             Inner_fixed_addr_manage(scan_addr,*pgs_pacage,tmp_access,global_tb[i].PhysicalStart,true);
-             scan_addr+=(global_tb[i].NumberOfPages<<12);
-             vaddrobj_count++;
-             delete pgs_pacage;
-             break;            
-        }
+        tmp_flags.is_kernel=1;
+        tmp_flags.is_readable=1;
+        tmp_flags.is_reserved=1;
+        tmp_flags.is_global=1;
+        tmp_flags.is_remaped=1;
+        tmp_flags.is_atom=1;
+        tmp_flags.cache_strateggy=WB;
+        tmp_flags.physical_or_virtual_pg=VIR_ATOM_PAGE;
+    /*
+    分配并映射内核代码段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&KImgphybase,(uint64_t)(&text_end-&text_begin)
+    );
+    tmp_flags.is_writable=0;
+    tmp_flags.is_executable=1;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&KImgphybase,tmp_flags,(vaddr_t)&text_begin);
+    if(status!=&text_begin)
+    {
+        kputsSecure("remap kernel text segment failed\n");
+        return;
+    }
+    
+    /*
+    分配并映射内核数据段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&_data_lma, (uint64_t)(&_data_end - &_data_start)
+    );
+    tmp_flags.is_writable=1;
+    tmp_flags.is_executable=0;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&_data_lma, tmp_flags, (vaddr_t)&_data_start);
+    if(status!=&_data_start)
+    {
+        kputsSecure("remap kernel data segment failed\n");
+        return;
+    }
+    
+    /*
+    分配并映射内核只读数据段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&_rodata_lma, (uint64_t)(&_rodata_end - &_rodata_start)
+    );
+    tmp_flags.is_writable=0;
+    tmp_flags.is_executable=0;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&_rodata_lma, tmp_flags, (vaddr_t)&_rodata_start);
+    if(status!=&_rodata_start)
+    {
+        kputsSecure("remap kernel rodata segment failed\n");
+        return;
+    }
+    
+    /*
+    分配并映射内核栈段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&_stack_lma, (uint64_t)(&_stack_top - &_stack_bottom)
+    );
+    tmp_flags.is_writable=1;
+    tmp_flags.is_executable=0;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&_stack_lma, tmp_flags, (vaddr_t)&_stack_bottom);
+    if(status!=&_stack_bottom)
+    {
+        kputsSecure("remap kernel stack segment failed\n");
+        return;
+    }
+    
+    /*
+    分配并映射内核堆段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&_heap_lma, (uint64_t)(&__heap_end - &__heap_start)
+    );
+    tmp_flags.is_writable=1;
+    tmp_flags.is_executable=0;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&_heap_lma, tmp_flags, (vaddr_t)&__heap_start);
+    if(status!=&__heap_start)
+    {
+        kputsSecure("remap kernel heap segment failed\n");
+        return;
+    }
+    
+    /*
+    分配并映射内核页表堆段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&_pgtb_heap_lma, (uint64_t)(&__pgtbhp_end - &__pgtbhp_start)
+    );
+    tmp_flags.is_writable=1;
+    tmp_flags.is_executable=0;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&_pgtb_heap_lma, tmp_flags, (vaddr_t)&__pgtbhp_start);
+    if(status!=&__pgtbhp_start)
+    {
+        kputsSecure("remap kernel pgtb heap segment failed\n");
+        return;
+    }
+    
+    /*
+    分配并映射内核日志段
+    */
+    fixedaddr_phy_pgs_allocate(
+        (phyaddr_t)&_klog_lma, (uint64_t)(&__klog_end - &__klog_start)
+    );
+    tmp_flags.is_writable=1;
+    tmp_flags.is_executable=0;
+    status=(uint8_t*)pgs_remapp((phyaddr_t)&_klog_lma, tmp_flags, (vaddr_t)&__klog_start);
+    if(status!=&__klog_start)
+    {
+        kputsSecure("remap kernel log segment failed\n");
+        return;
     }
     LocalCPU localcpu;
     uint64_t new_cr3=0;

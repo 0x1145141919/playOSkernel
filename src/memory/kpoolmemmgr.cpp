@@ -14,8 +14,9 @@ constexpr uint16_t FirstStaticHeapMaxObjCount = 4096;
 HeapObjectMetav2 objMetaTable_for_FirstStaticHeap[FirstStaticHeapMaxObjCount] = {0};
 #ifdef KERNEL_MODE
 extern "C" {
-    extern uint64_t __heap_start;
-    extern uint64_t __heap_end;
+    extern uint8_t __heap_start;
+    extern uint8_t __heap_end;
+    extern uint8_t _heap_lma;
 }
 #endif
 // 简单的对数函数实现（如果标准库不可用）
@@ -369,9 +370,9 @@ void kpoolmemmgr_t::Init()
 {
 #ifdef KERNEL_MODE
     // 获取内核堆的起始地址和大小
-    first_static_heap.heap.heapStart = (phyaddr_t)__heap_start;
-    first_static_heap.heap.heapVStart = (vaddr_t)__heap_start;
-    first_static_heap.heap.heapSize = (uint64_t)(__heap_end-__heap_start);
+    first_static_heap.heap.heapStart = (phyaddr_t)&_heap_lma;
+    first_static_heap.heap.heapVStart = (vaddr_t)&__heap_start;
+    first_static_heap.heap.heapSize = (uint64_t)(&__heap_end - &__heap_start);
     first_static_heap.heap.freeSize =   first_static_heap.heap.heapSize;
 #endif    
     first_static_heap.heap.status.block_exist = 0;

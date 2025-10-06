@@ -30,10 +30,6 @@ SECTIONS {
         . = ALIGN(8);
     }
     
-    /* 动态链接相关部分 */
-    .dynamic : { *(.dynamic) }
-    .got : { *(.got) }
-    .got.plt : { *(.got.plt) }
     
     /* 确保所有必要的节都被包含 */
     /DISCARD/ : {

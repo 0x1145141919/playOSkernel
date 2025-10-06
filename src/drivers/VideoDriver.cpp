@@ -1079,9 +1079,9 @@ int kpnumSecure(void* numptr, int format, int len)//有符号十进制的情况�
     case UNHEX: {
         // 十六进制输出（智能省略前导零）
         unsigned char* bytes = (unsigned char*)&num;
-        buf[buffer_index]='0';
-        buffer_index--;
         
+        buffer_index--;
+        buf[buffer_index]=0;
         for (int byte_idx = 0; byte_idx <len; byte_idx++) {
             unsigned char byte = bytes[byte_idx];
             // 处理低4位

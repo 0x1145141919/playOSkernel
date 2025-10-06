@@ -13,7 +13,32 @@ namespace gdtentry
     constexpr uint8_t execute_only_type = 0b1001;
     constexpr uint8_t read_write_type = 0b0011;
 } // namespace gdtentry
-
+struct interrupt_frame {
+    uint64_t rip;    // 指令指针
+    uint64_t cs;     // 代码段选择子
+    uint64_t rflags; // CPU标志
+    uint64_t rsp;    // 栈指针（仅特权级变化时压入）
+    uint64_t ss;     // 栈段选择子（仅特权级变化时压入）
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rdi;
+    uint64_t rsi;
+    uint64_t rbp;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+};
+__attribute__((interrupt)) void exception_handler_div_by_zero(interrupt_frame* frame);
+__attribute__((interrupt)) void exception_handler_invalid_opcode(interrupt_frame* frame);        // #UD
+__attribute__((interrupt)) void exception_handler_general_protection(interrupt_frame* frame, uint64_t error_code); // #GP
+__attribute__((interrupt)) void exception_handler_double_fault(interrupt_frame* frame, uint64_t error_code);       // #DF
+__attribute__((interrupt)) void exception_handler_page_fault(interrupt_frame* frame, uint64_t error_code);         // #PF
+__attribute__((interrupt)) void exception_handler_invalid_tss(interrupt_frame* frame, uint64_t error_code);        // #TS
+__attribute__((interrupt)) void exception_handler_simd_floating_point(interrupt_frame* frame);    // #XM
+__attribute__((interrupt)) void exception_handler_virtualization(interrupt_frame* frame, uint64_t error_code);     // #VE
 class  Interrupt_mgr_t { 
       private:
     // 小于32的中断号定义常量
@@ -64,6 +89,7 @@ static constexpr x64_gdtentry kspace_DS_SS_entry = {
     .g = 1,
     .base2 = 0x00
 };
+static constexpr uint8_t kspace_DS_SS_gdt_selector = 0x10;
 static constexpr x64_gdtentry kspace_CS_entry = {
     .limit0 = 0xFFFF,
     .base0 = 0x0000,
@@ -79,6 +105,7 @@ static constexpr x64_gdtentry kspace_CS_entry = {
     .g = 1,
     .base2 = 0x00
 };
+static constexpr uint8_t kspace_CS_gdt_selector = 0x08;
 static constexpr x64_gdtentry userspace_DS_SS_entry = {
       .limit0 = 0xFFFF,
     .base0 = 0x0000,
@@ -94,6 +121,7 @@ static constexpr x64_gdtentry userspace_DS_SS_entry = {
     .g = 1,
     .base2 = 0x00
 };
+static constexpr uint8_t userspace_CS_gdt_selector = 0x18;
 static constexpr x64_gdtentry userspace_CS_entry = {
     .limit0 = 0xFFFF,
     .base0 = 0x0000,
@@ -109,7 +137,7 @@ static constexpr x64_gdtentry userspace_CS_entry = {
     .g = 1,
     .base2 = 0x00
 };
-
+static constexpr uint8_t userspace_DS_SS_gdt_selector = 0x20;
 struct IDTEntry {
     uint16_t offset_low;      // 中断处理程序地址的低16位 (位 15-0)
     uint16_t segment_selector;// 代码段选择子 (位 15-0)
@@ -158,6 +186,11 @@ struct GDTR
     uint16_t limit;
     uint64_t base;
 }__attribute__((packed));
+struct IDTR
+{
+    uint16_t limit;
+    uint64_t base;
+}__attribute__((packed));
 static constexpr uint32_t max_processor_count = 2048;
 static constexpr uint8_t gdt_headcount = 0x20;
 struct x64GDT
@@ -171,6 +204,8 @@ class Local_processor_Interrupt_mgr_t {
     TSSentry tss;
     uint32_t apic_id;
     public:
+    int register_handler(uint8_t interrupt_number,void* handler);
+    int unregister_handler(uint8_t interrupt_number);
     Local_processor_Interrupt_mgr_t(uint32_t apic_id);
     };
 uint32_t total_processor_count=0;
@@ -206,5 +241,7 @@ public:
 Interrupt_mgr_t();
 void Init();
 int processor_Interrupt_init(uint32_t apic_id);
+int processor_Interrupt_register(uint32_t apic_id,uint8_t interrupt_number,void* handler);
+int processor_Interrupt_unregister(uint32_t apic_id,uint8_t interrupt_number);
 };
 extern Interrupt_mgr_t gInterrupt_mgr;

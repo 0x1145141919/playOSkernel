@@ -13,6 +13,7 @@
 #include "./memory/includes/phygpsmemmgr.h"
 #include "processor_self_manage.h"
 #include "UefiRunTimeServices.h"
+#include "panic.h"
 #undef __stack_chk_fail
 extern  void __wrap___stack_chk_fail(void);
 // 定义C++运行时需要的符号
@@ -90,7 +91,7 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
         serial_puts("InitialKernelShellControler Failed\n");
         return ;
     }
-    
+    gkernelPanicManager.Init(5);
     LocalCPU bsp_regieters;
     // 初始化全局Ascii位图控制器
     kputsSecure("Welcome to PlayOSKernelShell\n");
@@ -101,7 +102,10 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
     global_time = gRuntimeServices.rt_time_get();
     gProcessor_Ks_stacks_mgr.Init();
     gInterrupt_mgr.Init();
+     int a=10,b=0,c;
+    c=a/b;
     gRuntimeServices.rt_shutdown();
+   
     asm volatile("hlt");
     //中断接管工作
 

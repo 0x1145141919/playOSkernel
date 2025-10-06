@@ -435,21 +435,29 @@ void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access,
 void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, pgflags flags, vaddr_t vbase)
 {
     // 根据物理基址addr使用phymemSubMgr子系统中物理内存段增减引用数
-    int remap_result = phymemSubMgr.remap_inc(addr);
+    int remap_result = phymemSubMgr.remap_inc(addr);uint64_t size_in_byte;
+    uint64_t numof_4kbpgs;
     
     // 若是失败再尝试使用gBaseMemMgr的物理内存段增减引用数接口
     if (remap_result != 0) {
         // TODO: 尝试使用gBaseMemMgr的物理内存段增减引用数接口
-        // 暂时直接返回空指针
-        return nullptr;
-    }
-    
-    // 成功增加引用数之后用对应的查询接口得到相应物理内存段的信息
+        phy_memDesriptor* query_result = gBaseMemMgr.queryPhysicalMemoryUsage(addr);
+        int status = gBaseMemMgr.descriptor_remapped_inc(addr);
+        if (status != OS_SUCCESS) {
+            return nullptr;
+        }    
+        numof_4kbpgs = query_result->NumberOfPages;
+        size_in_byte = numof_4kbpgs << 12;
+    }else{
+         // 成功增加引用数之后用对应的查询接口得到相应物理内存段的信息
     minimal_phymem_seg_t phy_info = phymemSubMgr.addr_query(addr);
-    uint64_t size_in_byte = phy_info.num_of_4kbpgs << 12;
-    uint64_t numof_4kbpgs = phy_info.num_of_4kbpgs;
+    size_in_byte = phy_info.num_of_4kbpgs << 12;
+    numof_4kbpgs = phy_info.num_of_4kbpgs;
     
-    int target_index = vaddrobj_count; // 默认在末尾添加
+    // 默认在末尾添加
+    }
+    int target_index = vaddrobj_count; 
+   
     
     // 如果vbase参数非0先检查是不是有效的虚拟地址（4/5级分页下的高一般线性地址以及4kb对齐是否满足）
     if (vbase != 0) {
@@ -550,11 +558,12 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, pgflags flags, vaddr_t vb
 
 void *KernelSpacePgsMemMgr::phy_pgs_allocate(uint64_t size_in_byte, uint8_t align_require)
 {
-    return phymemSubMgr.alloc(size_in_byte,align_require);
+    
+    return phymemSubMgr.alloc((size_in_byte+4095)>>12,align_require);
 }
 int KernelSpacePgsMemMgr::fixedaddr_phy_pgs_allocate(phyaddr_t addr, uint64_t size_in_byte)
 {
-    return phymemSubMgr.fixedaddr_allocate(addr,size_in_byte);
+    return phymemSubMgr.fixedaddr_allocate(addr,(size_in_byte+4095)>>12);
 }
 int KernelSpacePgsMemMgr::free_phy_pgs(phyaddr_t addr)
 {

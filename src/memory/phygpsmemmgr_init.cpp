@@ -5,6 +5,7 @@
 #include "os_error_definitions.h"
 #include "OS_utils.h"
 #include "pgtable45.h"
+
 KernelSpacePgsMemMgr gKspacePgsMemMgr;
 
 extern "C" uint8_t _pgtb_heap_lma;
@@ -25,13 +26,13 @@ extern "C" uint8_t _pgtb_heap_lma;
 KernelSpacePgsMemMgr::pgtb_heap_mgr_t::pgtb_heap_mgr_t()
 {
     
- heap_base=0x200000;
-    setmem(maps,num_of_2mbpgs*sizeof(_2mb_pg_bitmapof_4kbpgs),0);
+ heap_base=(phyaddr_t)&_pgtb_heap_lma;
+    setmem(maps,num_of_2mbpgs*sizeof(bitset512_t),0);
     root_index=0;
 }
 void KernelSpacePgsMemMgr::pgtb_heap_mgr_t::all_entries_clear()
 {
-    setmem(maps,num_of_2mbpgs*sizeof(_2mb_pg_bitmapof_4kbpgs),0);
+    setmem(maps,num_of_2mbpgs*sizeof(bitset512_t),0);
 }
 void *KernelSpacePgsMemMgr::pgtb_heap_mgr_t::pgalloc()
 {
@@ -77,6 +78,7 @@ PgCBtb_construct_func[2] = &KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct;
 PgCBtb_construct_func[3] = &KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct;
 PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
     int status=0;
+    phymemSubMgr.Init();
 #ifdef     KERNEL_MODE
     asm volatile("mov %%cr4,%0" : "=r"(cr4_tmp));
 
@@ -103,6 +105,54 @@ PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
         }   
      }
      enable_new_cr3();
+     pgflags p;
+     p.is_global=1;
+     p.is_kernel=1;
+     p.is_readable=1;
+    p.is_remaped=1;
+    p.is_reserved=0;
+    p.physical_or_virtual_pg=VIR_ATOM_PAGE;
+    p.is_exist=1;
+    p.is_atom=1;
+      for(int i=0;i<entryCount;i++)
+     {
+        switch (phy_memDesTb[i].Type)
+        {
+        case EFI_ACPI_RECLAIM_MEMORY:
+        case EFI_ACPI_MEMORY_NVS:
+        p.cache_strateggy=cache_strategy_t::WB;
+        p.is_writable=1;
+        p.is_executable=0;goto remap_op;
+        case EFI_MEMORY_MAPPED_IO:
+        case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+        p.cache_strateggy=cache_strategy_t::UC;
+        p.is_writable=1;
+        p.is_executable=0;goto remap_op;
+        case EFI_RUNTIME_SERVICES_DATA:
+        p.cache_strateggy=cache_strategy_t::WB;
+        p.is_writable=1;
+        p.is_executable=0;goto remap_op;
+        case EFI_RUNTIME_SERVICES_CODE:
+        p.cache_strateggy=cache_strategy_t::WB;
+        p.is_writable=1;
+        p.is_executable=1;goto remap_op;
+
+
+remap_op:
+        phy_memDesTb[i].VirtualStart=(EFI_VIRTUAL_ADDRESS)
+        pgs_remapp(
+            phy_memDesTb[i].PhysicalStart,
+            p
+        );
+        if(phy_memDesTb[i].VirtualStart==NULL){
+            kputsSecure("remap_op:pgs_remapp failed");
+            return;
+        }
+        default:
+            continue;
+        }
+     }
+     
 }
 uint16_t pagesnum_to_max_entry_count(uint64_t num_of_4kbpgs)
 {
@@ -164,7 +214,55 @@ KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
         scan_index++;
     }
 }
-int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags,phyaddr_t mapped_phyaddr)
+void KernelSpacePgsMemMgr::phymemSegsSubMgr_t::Init()
+{
+        allocatable_mem_seg_count=0;
+    setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
+    phy_memDesriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDesriptor*end=base+gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
+    phy_memDesriptor*scan_start=gBaseMemMgr.queryPhysicalMemoryUsage(0x100000);
+    phy_memDesriptor*scan_index=scan_start;
+    while (scan_index<end)
+    { 
+       if(scan_index->Type==freeSystemRam)
+            {
+                // 检查是否超出最大条目数
+                if (allocatable_mem_seg_count >= max_entry_count) {
+                    kputsSecure("phymemSegsSubMgr_t: too many memory segments\n");
+                    break;
+                }
+
+                phyaddr_t seg_base = (scan_index==scan_start) ? 0x100000 : scan_index->PhysicalStart;
+                phyaddr_t seg_end = scan_index->PhysicalStart + scan_index->NumberOfPages * 0x1000;
+                uint64_t seg_size = (seg_end - seg_base) >> 12;
+                
+                allocatable_mem_seg[allocatable_mem_seg_count].base = seg_base;
+                allocatable_mem_seg[allocatable_mem_seg_count].size_in_numof4kbpgs = seg_size;
+                allocatable_mem_seg[allocatable_mem_seg_count].max_num_of_subtb_entries =
+                    pagesnum_to_max_entry_count(allocatable_mem_seg[allocatable_mem_seg_count].size_in_numof4kbpgs);
+                allocatable_mem_seg[allocatable_mem_seg_count].num_of_subtb_entries = 0;
+                
+                // 分配子表内存
+                allocatable_mem_seg[allocatable_mem_seg_count].subtb =
+                    new minimal_phymem_seg_t[allocatable_mem_seg[allocatable_mem_seg_count].max_num_of_subtb_entries];
+                
+                // 检查内存分配是否成功
+                if (allocatable_mem_seg[allocatable_mem_seg_count].subtb == nullptr) {
+                    kputsSecure("phymemSegsSubMgr_t: failed to allocate memory for subtb\n");
+                    // 释放之前分配的内存
+                    for (int i = 0; i < allocatable_mem_seg_count; i++) {
+                        delete[] allocatable_mem_seg[i].subtb;
+                    }
+                    allocatable_mem_seg_count = 0;
+                    break;
+                }
+                
+                allocatable_mem_seg_count++;
+            }
+        scan_index++;
+    }
+}
+int KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct(phyaddr_t addr, pgflags flags, phyaddr_t mapped_phyaddr)
 {
     int status=0;
     uint64_t lv4_index=(addr&lineaddr_index_filters::PML5_INDEX_MASK_lv4)>>48;
@@ -196,7 +294,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct(phyaddr_t addr, pgflags fla
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist=1;
     higher_uninitialized_entry_flags.is_atom=0;
-
+    higher_uninitialized_entry_flags.cache_strateggy=cache_strategy_t::WB;
     higher_uninitialized_entry_flags.physical_or_virtual_pg=0;
     higher_uninitialized_entry_flags.is_kernel=1;
     // 确保lv4条目存在
@@ -239,7 +337,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv2_entry_construct(phyaddr_t addr, pgflags fla
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist = 1;
     higher_uninitialized_entry_flags.is_atom = 0;
-
+    higher_uninitialized_entry_flags.cache_strateggy = cache_strategy_t::WB;
     higher_uninitialized_entry_flags.physical_or_virtual_pg = 0;
     higher_uninitialized_entry_flags.is_kernel = 1;
 
@@ -304,7 +402,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv1_entry_construct(phyaddr_t addr, pgflags fla
     higher_uninitialized_entry_flags.is_atom = 0;
     higher_uninitialized_entry_flags.physical_or_virtual_pg = 0;
     higher_uninitialized_entry_flags.is_kernel = 1;
-
+     higher_uninitialized_entry_flags.cache_strateggy=cache_strategy_t::WB;
     // 确保lv4条目存在
     if (lv4_PgCBHeader->flags.is_exist != 1) {
         higher_uninitialized_entry_flags.pg_lv = 4;
@@ -380,7 +478,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags fla
     pgflags higher_uninitialized_entry_flags;
     higher_uninitialized_entry_flags.is_exist=1;
     higher_uninitialized_entry_flags.is_atom=0;
-
+    higher_uninitialized_entry_flags.cache_strateggy=cache_strategy_t::WB;
     higher_uninitialized_entry_flags.physical_or_virtual_pg=0;
     higher_uninitialized_entry_flags.is_kernel=1;
     PgCBlv4header*lv4_PgCBHeader=cpu_pglv==5?&rootlv4PgCBtb[lv4_index]:rootlv4PgCBtb;
@@ -506,9 +604,9 @@ flags.is_readable = 1; // 默认可读
 flags.is_writable = (type == EFI_LOADER_DATA || 
                     type == EFI_BOOT_SERVICES_DATA || 
                     type == EFI_RUNTIME_SERVICES_DATA || 
-                    type == freeSystemRam || 
-                    type == OS_KERNEL_DATA || 
-                    type == OS_KERNEL_STACK ||
+                    type == EFI_RUNTIME_SERVICES_CODE ||
+                    type == freeSystemRam ||
+                    type == EfiReservedMemoryType || 
                     type == EFI_UNACCEPTED_MEMORY_TYPE ||
                     type == EFI_ACPI_RECLAIM_MEMORY) 
                     ? 1 : 0;
@@ -516,7 +614,6 @@ flags.is_writable = (type == EFI_LOADER_DATA ||
 flags.is_executable = (type == EFI_LOADER_CODE || 
                       type == EFI_BOOT_SERVICES_CODE || 
                       type == EFI_RUNTIME_SERVICES_CODE || 
-                      type == OS_KERNEL_CODE ||
                       type == EFI_PAL_CODE) 
                       ? 1 : 0;
 if(type==EFI_RUNTIME_SERVICES_CODE||type==EFI_RUNTIME_SERVICES_DATA)
@@ -551,26 +648,7 @@ if (type == EFI_PERSISTENT_MEMORY) {
     flags.is_executable = 0; // 默认不可执行，需要时再设置
 }
 
-// 内核特定类型
-if (type == OS_KERNEL_STACK) {
-    // 内核栈：可读写但不可执行（防止栈执行攻击）
-    flags.is_writable = 1;
-    flags.is_executable = 0;
-}
 
-if (type == OS_KERNEL_DATA) {
-    // 内核数据：可读写不可执行
-    flags.is_writable = 1;
-    flags.is_executable = 0;
-    flags.is_global = 1;
-}
-
-if (type == OS_KERNEL_CODE) {
-    // 内核代码：可读可执行但不可写（代码保护）
-    flags.is_writable = 0;
-    flags.is_executable = 1;
-    flags.is_global = 1;
-}
     
     // 根据队列创建页表项
     scan_addr = base;

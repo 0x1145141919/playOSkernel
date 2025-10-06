@@ -2,7 +2,7 @@
 #include  <stdint.h>
 #include  <efi.h>
 #include  "pgtable45.h"
-typedef enum :uint64_t{
+typedef enum :uint32_t{
     EFI_RESERVED_MEMORY_TYPE,
     EFI_LOADER_CODE,
     EFI_LOADER_DATA,
@@ -39,7 +39,7 @@ typedef uint64_t vaddr_t;
 #pragma pack(push, 8)  // 强制8字节对齐（x64 ABI要求）
 
 typedef struct {
-    UINT32     Type;          // 4字节
+    PHY_MEM_TYPE     Type;          // 4字节
     uint32_t ReservedA;
     
     EFI_PHYSICAL_ADDRESS  PhysicalStart;  // 8字节
@@ -51,7 +51,7 @@ typedef struct {
 
 #pragma pack(pop)  // 恢复默认对齐
 typedef struct phy_memDesriptor{
-    UINT32                          Type;           // Field size is 32 bits followed by 32 bit pad
+    PHY_MEM_TYPE                          Type;           // Field size is 32 bits followed by 32 bit pad
     uint32_t remapped_count;
     
     EFI_PHYSICAL_ADDRESS            PhysicalStart;  // Field size is 64 bits
@@ -69,8 +69,8 @@ typedef struct phy_memDesriptor{
 class GlobalMemoryPGlevelMgr_t {
     private:
     
-    phy_memDesriptor *rootPhyMemDscptTbBsPtr;//这个结构是后面在init函数中内部接口reclaimBootTimeMemory创建的
-    EFI_MEMORY_DESCRIPTORX64 *EfiMemMap;
+    phy_memDesriptor rootPhyMemDscptTbBsPtr[256];//这个结构是后面在init函数中内部接口reclaimBootTimeMemory创建的
+    EFI_MEMORY_DESCRIPTORX64 EfiMemMap[256];
     uint64_t EfiMemMapEntryCount;
     uint64_t rootPhymemTbentryCount;
     phyaddr_t max_phy_addr;

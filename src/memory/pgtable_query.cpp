@@ -155,7 +155,8 @@ phy_memDesriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base,
     phyaddr_t endaddr=base+len_in_bytes;
     DoublyLinkedList<phy_memDesriptor> table;  
     phyaddr_t scan_addr=base;
-    phy_memDesriptor dyn_descriptor={0};
+    phy_memDesriptor dyn_descriptor;
+    setmem(&dyn_descriptor,sizeof(phy_memDesriptor),0);
     uint64_t descriptor_count=0;
     while (scan_addr<endaddr)//一次遍历至少一个页
     {   //返回结果中改成OS_ALLOCATABLE_MEMORY

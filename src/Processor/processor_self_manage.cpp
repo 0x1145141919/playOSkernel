@@ -1,5 +1,6 @@
 #include    "stdint.h"
 #include "processor_self_manage.h"
+#include "OS_utils.h"
 uint64_t LocalCPU::set_bit(uint64_t value, uint8_t bit_position) const {
     return value | (1ULL << bit_position);
 }
