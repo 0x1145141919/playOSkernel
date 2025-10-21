@@ -43,7 +43,7 @@ void GlobalMemoryPGlevelMgr_t::Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptrom
     扫描gEfiMemdescriptromap的同时新建EfiMemMap，回收其中启动时服务的内存，忽略后面的冗余表项，然后realloc收缩范围
     */
    int rootMapIndex = 0;
-   phy_memDesriptor being_constructed_entry;
+   phy_memDescriptor being_constructed_entry;
    for(uint64_t i = 0; i < EfiMemMapEntryCount; i++)
    {PHY_MEM_TYPE tmp_converted_type;
 switch (EfiMemMap[i].Type)
@@ -93,7 +93,7 @@ switch (EfiMemMap[i].Type)
 ksystemramcpy(
     rootPhyMemDscptTbBsPtr,
     EfiMemMap,
-    rootPhymemTbentryCount*sizeof(phy_memDesriptor)
+    rootPhymemTbentryCount*sizeof(phy_memDescriptor)
 );
   rootPhymemTbentryCount = rootMapIndex;
   EfiMemMapEntryCount = rootMapIndex;
@@ -104,7 +104,7 @@ rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
   
     this->flags.is_alloc_service_enabled = true;
 }
-phy_memDesriptor *GlobalMemoryPGlevelMgr_t::getGlobalPhysicalMemoryInfo()
+phy_memDescriptor *GlobalMemoryPGlevelMgr_t::getGlobalPhysicalMemoryInfo()
 {
     return rootPhyMemDscptTbBsPtr;
 }
@@ -112,7 +112,7 @@ uint64_t GlobalMemoryPGlevelMgr_t::getRootPhysicalMemoryDescriptorTableEntryCoun
 {
     return rootPhymemTbentryCount;
 }
-phy_memDesriptor *GlobalMemoryPGlevelMgr_t::queryPhysicalMemoryUsage(uint64_t addr)
+phy_memDescriptor *GlobalMemoryPGlevelMgr_t::queryPhysicalMemoryUsage(uint64_t addr)
 {
     for(int i = 0; i < rootPhymemTbentryCount; i++)
     {
@@ -253,7 +253,7 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
         return -EINVAL;
     }
     
-    phy_memDesriptor* desc = queryPhysicalMemoryUsage(addr);
+    phy_memDescriptor* desc = queryPhysicalMemoryUsage(addr);
     if (!desc || desc->Type != freeSystemRam) {
         return -ENOMEM;
     }
@@ -270,36 +270,36 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
     
     if (beforePages > 0 && afterPages > 0) {
         // ==== 修复1：正确分裂为三个区域 ====
-        phy_memDesriptor originalDesc = *desc;  // 保存原始信息
+        phy_memDescriptor originalDesc = *desc;  // 保存原始信息
         
         // 1. 修改当前描述符为前部空闲
         desc->NumberOfPages = beforePages;  // 保持freeSystemRam类型
         
         // 2. 创建中间分配描述符
-        phy_memDesriptor midDesc = originalDesc;
+        phy_memDescriptor midDesc = originalDesc;
         midDesc.PhysicalStart = addr;
         midDesc.NumberOfPages = requiredPages;
         midDesc.Type = type;  // 设置分配类型
         
         // 3. 创建后部空闲描述符
-        phy_memDesriptor afterDesc = originalDesc;
+        phy_memDescriptor afterDesc = originalDesc;
         afterDesc.PhysicalStart = endAddr;
         afterDesc.NumberOfPages = afterPages;
         
         // 插入两个新描述符（分配块+后部空闲）
-        phy_memDesriptor newDescs[2] = {midDesc, afterDesc};
+        phy_memDescriptor newDescs[2] = {midDesc, afterDesc};
         linearTBSerialInsert(
             &rootPhymemTbentryCount,
             desc - rootPhyMemDscptTbBsPtr + 1,
             newDescs,
             rootPhyMemDscptTbBsPtr,
-            sizeof(phy_memDesriptor),
+            sizeof(phy_memDescriptor),
             2  // 插入两个条目
         );
     }
     else if (beforePages > 0) {
         // 情况2：分配尾部区域
-        phy_memDesriptor newDesc = *desc;
+        phy_memDescriptor newDesc = *desc;
         newDesc.PhysicalStart = addr;
         newDesc.NumberOfPages = requiredPages;
         newDesc.Type = type;  // 设置分配类型
@@ -313,7 +313,7 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
             desc - rootPhyMemDscptTbBsPtr + 1,
             &newDesc,
             rootPhyMemDscptTbBsPtr,
-            sizeof(phy_memDesriptor),1
+            sizeof(phy_memDescriptor),1
         );
         
         // ==== 修复2：删除错误的类型设置 ====
@@ -321,7 +321,7 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
     }
     else if (afterPages > 0) {
         // 情况3：分配头部区域
-        phy_memDesriptor newDesc = *desc;
+        phy_memDescriptor newDesc = *desc;
         newDesc.PhysicalStart = addr;
         newDesc.NumberOfPages = requiredPages;
         newDesc.Type = type;  // 设置分配类型
@@ -336,7 +336,7 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
             desc - rootPhyMemDscptTbBsPtr,
             &newDesc,
             rootPhyMemDscptTbBsPtr,
-            sizeof(phy_memDesriptor),1
+            sizeof(phy_memDescriptor),1
         );
         
         // ==== 修复3：删除错误的类型设置 ====
@@ -363,7 +363,7 @@ int GlobalMemoryPGlevelMgr_t::defaultPhyaddPgallocate(
     
     // 遍历查找合适的空闲块
     for (uint64_t i = 0; i < rootPhymemTbentryCount; ++i) {
-        phy_memDesriptor* desc = &rootPhyMemDscptTbBsPtr[i];
+        phy_memDescriptor* desc = &rootPhyMemDscptTbBsPtr[i];
         
         if (desc->Type == freeSystemRam && 
             desc->NumberOfPages >= requiredPages) {
@@ -393,7 +393,7 @@ int GlobalMemoryPGlevelMgr_t::pageRecycle(phyaddr_t EntryStartphyaddr)
     }
     
     // 查找匹配的内存描述符项
-    phy_memDesriptor* targetDesc = nullptr;
+    phy_memDescriptor* targetDesc = nullptr;
     uint64_t targetIndex = 0;
     
     // 线性查找匹配的物理地址（注释中提到可以使用二分查找优化）
@@ -420,7 +420,7 @@ int GlobalMemoryPGlevelMgr_t::pageRecycle(phyaddr_t EntryStartphyaddr)
     
     // 尝试与前一个表项合并
     if (targetIndex > 0) {
-        phy_memDesriptor* prevDesc = &rootPhyMemDscptTbBsPtr[targetIndex - 1];
+        phy_memDescriptor* prevDesc = &rootPhyMemDscptTbBsPtr[targetIndex - 1];
         // 检查前一个表项是否为空闲且与当前项相邻
         if (prevDesc->Type == freeSystemRam && 
             prevDesc->PhysicalStart + (prevDesc->NumberOfPages << 12) == targetDesc->PhysicalStart) {
@@ -436,7 +436,7 @@ int GlobalMemoryPGlevelMgr_t::pageRecycle(phyaddr_t EntryStartphyaddr)
     
     // 尝试与后一个表项合并
     if (targetIndex < rootPhymemTbentryCount - 1) {
-        phy_memDesriptor* nextDesc = &rootPhyMemDscptTbBsPtr[targetIndex + 1];
+        phy_memDescriptor* nextDesc = &rootPhyMemDscptTbBsPtr[targetIndex + 1];
         // 检查后一个表项是否为空闲且与当前项相邻
         if (nextDesc->Type == freeSystemRam && 
             targetDesc->PhysicalStart + (targetDesc->NumberOfPages << 12) == nextDesc->PhysicalStart) {
@@ -456,7 +456,7 @@ int GlobalMemoryPGlevelMgr_t::pageRecycle(phyaddr_t EntryStartphyaddr)
 void GlobalMemoryPGlevelMgr_t::pageSetValue(phyaddr_t EntryStartphyaddr, uint64_t value)
 {
     
-    phy_memDesriptor* Entry = queryPhysicalMemoryUsage(EntryStartphyaddr);
+    phy_memDescriptor* Entry = queryPhysicalMemoryUsage(EntryStartphyaddr);
     if(Entry)
     {uint64_t* p = (uint64_t*)Entry->PhysicalStart;
         for (int i = 0; i < Entry->NumberOfPages*512; i++)
@@ -577,7 +577,7 @@ void GlobalMemoryPGlevelMgr_t::DisableBasicMemService()
 }
 
 // 使用二分查找在物理内存描述符表中查找指定物理地址的描述符
-phy_memDesriptor* GlobalMemoryPGlevelMgr_t::findDescriptorByAddress(phyaddr_t base) {
+phy_memDescriptor* GlobalMemoryPGlevelMgr_t::findDescriptorByAddress(phyaddr_t base) {
     if (rootPhymemTbentryCount == 0) {
         return nullptr;
     }
@@ -587,7 +587,7 @@ phy_memDesriptor* GlobalMemoryPGlevelMgr_t::findDescriptorByAddress(phyaddr_t ba
     
     while (left <= right) {
         int mid = (left + right) / 2;
-        phy_memDesriptor& desc = rootPhyMemDscptTbBsPtr[mid];
+        phy_memDescriptor& desc = rootPhyMemDscptTbBsPtr[mid];
         
         if (desc.PhysicalStart == base) {
             return &rootPhyMemDscptTbBsPtr[mid];
@@ -621,7 +621,7 @@ int GlobalMemoryPGlevelMgr_t::descriptor_remapped_inc(phyaddr_t base) {
     }
     
     // 使用二分查找找到对应的物理描述符
-    phy_memDesriptor* desc = findDescriptorByAddress(base);
+    phy_memDescriptor* desc = findDescriptorByAddress(base);
     if (desc == nullptr) {
         return -EINVAL;
     }
@@ -644,7 +644,7 @@ int GlobalMemoryPGlevelMgr_t::descriptor_remapped_dec(phyaddr_t base) {
     }
     
     // 使用二分查找找到对应的物理描述符
-    phy_memDesriptor* desc = findDescriptorByAddress(base);
+    phy_memDescriptor* desc = findDescriptorByAddress(base);
     if (desc == nullptr) {
         return -EINVAL;
     }
@@ -663,4 +663,237 @@ int GlobalMemoryPGlevelMgr_t::descriptor_remapped_dec(phyaddr_t base) {
     // 减少重映射数目
     desc->remapped_count--;
     return OS_SUCCESS;
+}
+
+/**
+ * 增加一个新增memorymappedio的成员函数
+ * 有些硬件设备需要使用memorymappedio，所以需要增加这个成员函数
+ * 类似于FixedPhyaddPgallocate，但是不进行位检查。
+ * 只有在分配的物理地址空间满足将分配物理地址区间在原描述符表中全部为Reserved,
+ * 或一部分在Reserved,另一部分高于最大物理地址范围
+ * 或完全高于最大物理地址范围时，才允许进行分配
+ */
+int GlobalMemoryPGlevelMgr_t::registMMIO(IN phyaddr_t addr, IN uint64_t numof_4kbpgs) {
+
+    
+    // 验证地址对齐
+    if (addr % PAGE_SIZE_4KB != 0) {
+        return -EINVAL;
+    }
+    
+    const uint64_t requiredPages = numof_4kbpgs;
+    const uint64_t endAddr = addr + requiredPages * PAGE_SIZE_4KB;
+    
+    // 检查地址范围是否有效
+    // 如果完全在物理内存范围内，需要检查是否全部为Reserved类型
+    if (endAddr <= max_phy_addr) {
+        // 完全在物理内存范围内
+        bool all_reserved = true;
+        phyaddr_t current_addr = addr;
+        
+        while (current_addr < endAddr) {
+            phy_memDescriptor* desc = queryPhysicalMemoryUsage(current_addr);
+            if (!desc) {
+                all_reserved = false;
+                break;
+            }
+            
+            // 检查当前描述符是否为Reserved类型
+            if (desc->Type != EFI_RESERVED_MEMORY_TYPE) {
+                all_reserved = false;
+                break;
+            }
+            
+            phyaddr_t desc_end = desc->PhysicalStart + desc->NumberOfPages * PAGE_SIZE_4KB;
+            current_addr = (endAddr < desc_end) ? endAddr : desc_end;
+        }
+        
+        if (!all_reserved) {
+            return -EPERM; // 不满足条件，不允许分配
+        }
+    } 
+    // 如果部分在物理内存范围内，部分超出
+    else if (addr < max_phy_addr) {
+        // 检查物理内存范围内的部分是否为Reserved类型
+        phyaddr_t current_addr = addr;
+        bool all_reserved = true;
+        
+        while (current_addr < max_phy_addr) {
+            phy_memDescriptor* desc = queryPhysicalMemoryUsage(current_addr);
+            if (!desc) {
+                all_reserved = false;
+                break;
+            }
+            
+            // 检查当前描述符是否为Reserved类型
+            if (desc->Type != EFI_RESERVED_MEMORY_TYPE) {
+                all_reserved = false;
+                break;
+            }
+            
+            phyaddr_t desc_end = desc->PhysicalStart + desc->NumberOfPages * PAGE_SIZE_4KB;
+            current_addr = (max_phy_addr < desc_end) ? max_phy_addr : desc_end;
+        }
+        
+        if (!all_reserved) {
+            return -EPERM; // 不满足条件，不允许分配
+        }
+    }
+    // 如果完全高于最大物理地址范围，则直接允许分配
+    
+    // 执行分配操作，类似于FixedPhyaddPgallocate，但类型为EFI_MEMORY_MAPPED_IO
+    phy_memDescriptor* desc = queryPhysicalMemoryUsage(addr);
+    if (!desc) {
+        // 创建新的描述符项（完全高于物理内存范围的情况）
+        phy_memDescriptor newDesc;
+        setmem(&newDesc, sizeof(phy_memDescriptor), 0);
+        newDesc.Type = EFI_MEMORY_MAPPED_IO;
+        newDesc.PhysicalStart = addr;
+        newDesc.NumberOfPages = requiredPages;
+        newDesc.Attribute = 0;
+        newDesc.remapped_count = 0;
+        
+        // 在适当位置插入新描述符
+        // 找到插入位置
+        uint64_t insertIndex = 0;
+        for (insertIndex = 0; insertIndex < rootPhymemTbentryCount; insertIndex++) {
+            if (rootPhyMemDscptTbBsPtr[insertIndex].PhysicalStart > addr) {
+                break;
+            }
+        }
+        
+        linearTBSerialInsert(
+            &rootPhymemTbentryCount,
+            insertIndex,
+            &newDesc,
+            rootPhyMemDscptTbBsPtr,
+            sizeof(phy_memDescriptor),
+            1
+        );
+    } else {
+        // 修改现有描述符（在物理内存范围内的部分）
+        const uint64_t descEnd = desc->PhysicalStart + desc->NumberOfPages * PAGE_SIZE_4KB;
+        
+        if (endAddr > descEnd) {
+            return -ENOMEM; // 超出当前描述符范围
+        }
+        
+        const uint64_t beforePages = (addr - desc->PhysicalStart) / PAGE_SIZE_4KB;
+        const uint64_t afterPages = (descEnd - endAddr) / PAGE_SIZE_4KB;
+        
+        if (beforePages > 0 && afterPages > 0) {
+            // 分裂为三个区域
+            phy_memDescriptor originalDesc = *desc;
+            
+            // 1. 修改当前描述符为前部保留
+            desc->NumberOfPages = beforePages;
+            
+            // 2. 创建中间MMIO描述符
+            phy_memDescriptor midDesc = originalDesc;
+            midDesc.PhysicalStart = addr;
+            midDesc.NumberOfPages = requiredPages;
+            midDesc.Type = EFI_MEMORY_MAPPED_IO;
+            
+            // 3. 创建后部保留描述符
+            phy_memDescriptor afterDesc = originalDesc;
+            afterDesc.PhysicalStart = endAddr;
+            afterDesc.NumberOfPages = afterPages;
+            
+            // 插入两个新描述符（MMIO块+后部保留）
+            phy_memDescriptor newDescs[2] = {midDesc, afterDesc};
+            linearTBSerialInsert(
+                &rootPhymemTbentryCount,
+                desc - rootPhyMemDscptTbBsPtr + 1,
+                newDescs,
+                rootPhyMemDscptTbBsPtr,
+                sizeof(phy_memDescriptor),
+                2
+            );
+        }
+        else if (beforePages > 0) {
+            // 分配尾部区域
+            phy_memDescriptor newDesc = *desc;
+            newDesc.PhysicalStart = addr;
+            newDesc.NumberOfPages = requiredPages;
+            newDesc.Type = EFI_MEMORY_MAPPED_IO;
+            
+            // 修改原描述符为前部保留
+            desc->NumberOfPages = beforePages;
+            
+            // 插入MMIO块
+            linearTBSerialInsert(
+                &rootPhymemTbentryCount,
+                desc - rootPhyMemDscptTbBsPtr + 1,
+                &newDesc,
+                rootPhyMemDscptTbBsPtr,
+                sizeof(phy_memDescriptor),
+                1
+            );
+        }
+        else if (afterPages > 0) {
+            // 分配头部区域
+            phy_memDescriptor newDesc = *desc;
+            newDesc.PhysicalStart = addr;
+            newDesc.NumberOfPages = requiredPages;
+            newDesc.Type = EFI_MEMORY_MAPPED_IO;
+            
+            // 修改原描述符为后部保留
+            desc->PhysicalStart = endAddr;
+            desc->NumberOfPages = afterPages;
+            
+            // 插入MMIO块
+            linearTBSerialInsert(
+                &rootPhymemTbentryCount,
+                desc - rootPhyMemDscptTbBsPtr,
+                &newDesc,
+                rootPhyMemDscptTbBsPtr,
+                sizeof(phy_memDescriptor),
+                1
+            );
+        }
+        else {
+            // 整个块分配（无前后保留区域）
+            desc->Type = EFI_MEMORY_MAPPED_IO;
+        }
+    }
+    
+    return OS_SUCCESS;
+}
+
+int GlobalMemoryPGlevelMgr_t::unregistMMIO(IN phyaddr_t addr) {
+    // 查找匹配的内存描述符项
+    phy_memDescriptor* targetDesc = nullptr;
+    uint64_t targetIndex = 0;
+    
+    // 线性查找匹配的物理地址
+    for (uint64_t i = 0; i < rootPhymemTbentryCount; i++) {
+        if (rootPhyMemDscptTbBsPtr[i].PhysicalStart == addr) {
+            targetDesc = &rootPhyMemDscptTbBsPtr[i];
+            targetIndex = i;
+            break;
+        }
+    }
+    
+    // 如果未找到匹配的项，返回错误
+    if (targetDesc == nullptr) {
+        return -EINVAL;
+    }
+    
+    // 检查是否为MMIO类型
+    if (targetDesc->Type != EFI_MEMORY_MAPPED_IO) {
+        return -EPERM;
+    }
+    
+    // 只有完全高于最大物理地址范围时，而且重映射数目为0时，才允许进行释放
+    if (addr >= max_phy_addr && targetDesc->remapped_count == 0) {
+        // 删除该项
+        for (uint64_t i = targetIndex; i < rootPhymemTbentryCount - 1; i++) {
+            rootPhyMemDscptTbBsPtr[i] = rootPhyMemDscptTbBsPtr[i + 1];
+        }
+        rootPhymemTbentryCount--;
+        return OS_SUCCESS;
+    }
+    
+    // 如果不满足条件，不允许释放
+    return -EPERM;
 }

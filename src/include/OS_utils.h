@@ -86,6 +86,8 @@ void linearTBSerialInsert(
     uint64_t entryCount = 1
 ) ;
 int strlen(const char *s);
+int get_first_true_bit_index(bitset512_t* bitmap);
+int get_first_zero_bit_index(bitset512_t *bitmap) ;
 bool getbit_entry1bit_width(bitset512_t* bitmap,uint16_t index);
 void setbit_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t index);
 void setbits_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits);

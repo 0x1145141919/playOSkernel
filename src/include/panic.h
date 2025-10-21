@@ -39,8 +39,6 @@ public:
     // 触发内核恐慌，打印错误信息和寄存器信息并停机
     void panic(const char* message, const pt_regs& regs) const;
     
-    // 支持可变参数的内核恐慌函数（无额外信息）
-    void panic(const char* format, ...) const;
     
     // 带信息包的内核恐慌函数
     void panic(const char* message, const panic_info_t& info) const;

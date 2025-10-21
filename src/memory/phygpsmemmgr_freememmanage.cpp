@@ -387,10 +387,10 @@ void *KernelSpacePgsMemMgr::pgs_allocate(uint64_t size_in_byte, pgaccess access,
     size_in_byte += PAGE_OFFSET_MASK[0];
     size_in_byte &= ~PAGE_OFFSET_MASK[0];
     uint64_t align_require_mask = (1ULL << align_require) - 1;
-    phy_memDesriptor*usage_query_result=nullptr;
+    phy_memDescriptor*usage_query_result=nullptr;
     while(true){
     usage_query_result = queryPhysicalMemoryUsage(scan_addr,size_in_byte);
-    if(usage_query_result==(phy_memDesriptor*)OS_OUT_OF_MEMORY)
+    if(usage_query_result==(phy_memDescriptor*)OS_OUT_OF_MEMORY)
     return (void*)OS_OUT_OF_MEMORY;    
     if(usage_query_result==nullptr)return nullptr;
     if(usage_query_result[0].Type==OS_ALLOCATABLE_MEMORY&&
@@ -441,7 +441,7 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, pgflags flags, vaddr_t vb
     // 若是失败再尝试使用gBaseMemMgr的物理内存段增减引用数接口
     if (remap_result != 0) {
         // TODO: 尝试使用gBaseMemMgr的物理内存段增减引用数接口
-        phy_memDesriptor* query_result = gBaseMemMgr.queryPhysicalMemoryUsage(addr);
+        phy_memDescriptor* query_result = gBaseMemMgr.queryPhysicalMemoryUsage(addr);
         int status = gBaseMemMgr.descriptor_remapped_inc(addr);
         if (status != OS_SUCCESS) {
             return nullptr;
@@ -472,6 +472,19 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, pgflags flags, vaddr_t vb
             phymemSubMgr.remap_dec(addr); // 回滚引用计数
             return nullptr;
         }
+        
+        // 检查是否与已分配的虚拟地址空间有重叠
+        vaddr_t vaddr_end = vbase + size_in_byte;
+        for (int i = 0; i < vaddrobj_count; i++) {
+            vaddr_t existing_start = vaddr_objs[i].base;
+            vaddr_t existing_end = vaddr_objs[i].base + (vaddr_objs[i].size_in_numof4kbpgs << 12);
+            
+            // 检查区间是否重叠: [vbase, vaddr_end) 与 [existing_start, existing_end)
+            if (!(vaddr_end <= existing_start || vbase >= existing_end)) {
+                phymemSubMgr.remap_dec(addr); // 回滚引用计数
+                return nullptr; // 有重叠，返回nullptr
+            }
+        }
     } else {
         // vbase为0则自动分配
         // 参照pgs_allocate_remapped扫描一个空闲虚拟地址空间
@@ -489,6 +502,7 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, pgflags flags, vaddr_t vb
                 }
             }
             
+            // 检查当前空隙是否足够大
             if (found_space) {
                 vbase = current_end;
                 target_index = i + 1;
@@ -575,7 +589,7 @@ int KernelSpacePgsMemMgr::pgs_fixedaddr_allocate(IN phyaddr_t addr, IN size_t si
     if(fixedaddr_phy_pgs_allocate(addr,size_in_byte)!=OS_SUCCESS)return OS_MEMRY_ALLOCATE_FALT;
     size_in_byte += PAGE_OFFSET_MASK[0];
     size_in_byte &= ~PAGE_OFFSET_MASK[0];
-    phy_memDesriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
+    phy_memDescriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
     if(usage_query_result[1].Type!=EfiReservedMemoryType)
     {
             delete usage_query_result;
@@ -606,7 +620,7 @@ int KernelSpacePgsMemMgr::pgs_free(phyaddr_t addr, size_t size_in_byte)
         if(addr&PAGE_OFFSET_MASK[0])return OS_INVALID_ADDRESS;
     size_in_byte += PAGE_OFFSET_MASK[0];
     size_in_byte &= ~PAGE_OFFSET_MASK[0];
-    phy_memDesriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
+    phy_memDescriptor*usage_query_result = queryPhysicalMemoryUsage(addr,size_in_byte);
     for(;usage_query_result->Type!=EfiReservedMemoryType;usage_query_result++)
     {
         if(usage_query_result->Type!=OS_ALLOCATABLE_MEMORY)

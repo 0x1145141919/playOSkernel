@@ -45,10 +45,10 @@ set(CMAKE_KEEP_BUILD_FILES ON)
 
 # 定义通用源文件
 set(SRC_COMMON
-    src/efi_about/UefiRunTimeServices.cpp #USERMODE需要替换成对应的标准库
+ #USERMODE需要替换成对应的标准库
     src/utils/util.cpp
     src/drivers/VideoDriver.cpp
-    src/drivers/PortDriver.c
+    src/drivers/PortDriver.cpp
 )
 
 # 添加gnu-efi作为外部项目
@@ -69,6 +69,7 @@ add_subdirectory(src/memory)
 add_subdirectory(outsbmodules/tinySTL)
 # 内核可执行文件
 add_executable(kernel.elf
+    src/efi_about/UefiRunTimeServices.cpp
     ${CMAKE_SOURCE_DIR}/src/kinit.cpp
         src/utils/kcirclebufflogMgr.cpp
         src/Processor/processor_self_manage.cpp
@@ -77,39 +78,36 @@ add_executable(kernel.elf
         src/Processor/processor_Ks_stacks_mgr.cpp
         src/panic/panic.cpp
         src/Interrupts/exceptions_handler.cpp
+        src/acpi_subsystems/acpimgr.cpp
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
-
+add_executable(fs_test
+    src/tests/fs_test_main.cpp
+    src/drivers/MemoryDisk.cpp
+     ${SRC_COMMON}
+)
+target_include_directories(
+    fs_test PRIVATE
+    "/usr/include/efi"
+     "${CMAKE_SOURCE_DIR}/src/include"
+)
+target_compile_options(
+    fs_test PRIVATE
+ -DUSER_MODE>
+)
 # 链接gnu-efi库
 target_link_libraries(kernel.elf PRIVATE 
     ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
     tinySTL
 )
-# Memory 模块测试可执行文件
-#add_executable(memory_module_test
-#    ${CMAKE_SOURCE_DIR}/src/tests/Memory_moudle_test.cpp
-#    ${SRC_COMMON}
-#)
 
-# 链接gnu-efi库和Mem_module_shared动态库到测试可执行文件
-#target_link_libraries(memory_module_test PRIVATE 
- #   Mem_module_shared
-#)
-
-# 头文件路径（对 C/C++ 均可见）
-#target_include_directories(memory_module_test PRIVATE
- #   "${CMAKE_SOURCE_DIR}/src/include"
-  #  "/usr/include/efi"
-#)
 
 target_include_directories(kernel.elf PRIVATE
-    "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src/include"
     "${GNU_EFI_SOURCE_DIR}/inc"
     "${GNU_EFI_SOURCE_DIR}/inc/x86_64"
-    "${CMAKE_SOURCE_DIR}/outsbmodules/tinySTL/tinySTL"
 )
 
 # 内核链接选项
@@ -147,5 +145,3 @@ target_compile_options(kernel.elf PRIVATE
 $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
 )
 target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})
-
-#target_compile_options(memmory_module_test PRIVATE -DTEST_MODE)

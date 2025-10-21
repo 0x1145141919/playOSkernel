@@ -1,5 +1,6 @@
 #include "OS_utils.h"
 #include "stdint.h"
+#include <x86intrin.h>
 typedef uint64_t size_t;
 const uint8_t masks_entry1bit_width[8]={128,64,32,16,8,4,2,1};
 const uint8_t masks_entry2bits_width[4]={192,48,12,3};
@@ -10,6 +11,52 @@ int strlen(const char *s) {
         len++;
     return len;
 }
+
+int get_first_true_bit_index(bitset512_t *bitmap) {//记得用bitreserve改写
+    for (int i = 0; i < 8; i++) {
+        uint64_t chunk = (*bitmap)[i]; // 获取第i个64位块
+        if (chunk == 0) continue;      // 如果全0则跳过
+        
+        // 使用TZCNT找到最低位设置位的位置
+        unsigned long index = _tzcnt_u64(chunk);
+        
+        // 计算全局位置：块索引*64 + 块内位置
+        return (i << 6) + index&(~7)+(7-index&7);
+    }
+    return -1; // 没有找到任何设置位
+}
+int get_first_zero_bit_index(bitset512_t *bitmap) {
+    for (int i = 0; i < 8; i++) {
+        uint64_t chunk = (*bitmap)[i];
+        uint64_t inverted_chunk = ~chunk;  // 取反，0 变 1，1 变 0
+        
+        if (inverted_chunk == 0) continue; // 如果全 1（取反后全 0），跳过
+        
+        // 使用 TZCNT 找到最低位的 1（即原数据的最低位的 0）
+        unsigned long index = _tzcnt_u64(inverted_chunk);
+        
+        // 计算全局位置：块索引 * 64 + 块内位置
+          return (i << 6) + index&(~7)+(7-index&7);
+    }
+    return -1;  // 没有找到任何 0 位（所有位都是 1）
+}
+int strcmp(const char *str1, const char *str2)
+{
+    while (*str1 && (*str1 == *str2)) {
+        str1++;
+        str2++;
+    }
+    return *(unsigned char*)str1 - *(unsigned char*)str2;
+}
+int strncmp(const char* str1, const char* str2, size_t n) { 
+    while (n-- && *str1 && (*str1 == *str2)) {
+        str1++;
+        str2++;
+    }
+    if (n == (size_t)-1) return 0; // 比较了n个字符且都相等
+    return *(unsigned char*)str1 - *(unsigned char*)str2;
+}
+
  void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
     uint8_t* p = static_cast<uint8_t*>(ptr);
     

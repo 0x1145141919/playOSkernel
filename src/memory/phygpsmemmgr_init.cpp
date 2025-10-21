@@ -91,7 +91,7 @@ PgCBtb_construct_func[4] = &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct;
      rootlv4PgCBtb=new PgControlBlockHeader[512];
      else rootlv4PgCBtb=new PgControlBlockHeader;
      pgtb_heap_ptr=new pgtb_heap_mgr_t;
-     phy_memDesriptor* phy_memDesTb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+     phy_memDescriptor* phy_memDesTb=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
      uint64_t entryCount=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
     cache_strategy_table.value=0x407050600070106;
     kernel_sapce_PCID=0;
@@ -154,26 +154,18 @@ remap_op:
      }
      
 }
-uint16_t pagesnum_to_max_entry_count(uint64_t num_of_4kbpgs)
+const inline   uint16_t pagesnum_to_max_entry_count(uint64_t num_of_4kbpgs)
 {
-    if(num_of_4kbpgs<=1ULL<<9)
-    {
-        return (num_of_4kbpgs+15)>>4;
-    }else if(num_of_4kbpgs<=1ULL<<15)
-    {
-        return (num_of_4kbpgs+63)>>6;
-    }else{
-        return 4096;
-    }
+    return num_of_4kbpgs>4096?4096:num_of_4kbpgs;
 }
 KernelSpacePgsMemMgr::phymemSegsSubMgr_t::phymemSegsSubMgr_t()
 {//从第1mb开始，低1mb内存的内容不能自由分配，其它子管理器进行管理
     allocatable_mem_seg_count=0;
     setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
-    phy_memDesriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
-    phy_memDesriptor*end=base+gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    phy_memDesriptor*scan_start=gBaseMemMgr.queryPhysicalMemoryUsage(0x100000);
-    phy_memDesriptor*scan_index=scan_start;
+    phy_memDescriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDescriptor*end=base+gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
+    phy_memDescriptor*scan_start=gBaseMemMgr.queryPhysicalMemoryUsage(0x100000);
+    phy_memDescriptor*scan_index=scan_start;
     while (scan_index<end)
     { 
        if(scan_index->Type==freeSystemRam)
@@ -218,10 +210,10 @@ void KernelSpacePgsMemMgr::phymemSegsSubMgr_t::Init()
 {
         allocatable_mem_seg_count=0;
     setmem(&allocatable_mem_seg[0],sizeof(allocatable_mem_seg_t)*max_entry_count,0);
-    phy_memDesriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
-    phy_memDesriptor*end=base+gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    phy_memDesriptor*scan_start=gBaseMemMgr.queryPhysicalMemoryUsage(0x100000);
-    phy_memDesriptor*scan_index=scan_start;
+    phy_memDescriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDescriptor*end=base+gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
+    phy_memDescriptor*scan_start=gBaseMemMgr.queryPhysicalMemoryUsage(0x100000);
+    phy_memDescriptor*scan_index=scan_start;
     while (scan_index<end)
     { 
        if(scan_index->Type==freeSystemRam)
@@ -561,7 +553,7 @@ int KernelSpacePgsMemMgr::PgCBtb_lv0_entry_construct(phyaddr_t addr, pgflags fla
     }
     return OS_SUCCESS;
 }
-int KernelSpacePgsMemMgr::construct_pgsbasedon_phy_memDescriptor(phy_memDesriptor memDescriptor)
+int KernelSpacePgsMemMgr::construct_pgsbasedon_phy_memDescriptor(phy_memDescriptor memDescriptor)
 {
     int status;
     PHY_MEM_TYPE type = (PHY_MEM_TYPE)memDescriptor.Type;

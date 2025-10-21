@@ -3,6 +3,9 @@
 #include "OS_utils.h"
 #include "../memory/includes/phygpsmemmgr.h"
 #include "processor_Ks_stacks_mgr.h"
+#include "gSTResloveAPIs.h"
+#include "panic.h"
+#include "VideoDriver.h"
 /*
 
 */
@@ -91,15 +94,11 @@ void Interrupt_mgr_t::Init()//真正的初始化函数
     
     global_idt[Interrupt_mgr_t::DOUBLE_FAULT].ist_index = double_fault_exception_ist_index; // 双重错误使用不同的IST栈
 
-    
-    // TODO: 需要设置实际的中断处理程序地址
-    
-    // 为BSP初始化Local_processor_Interrupt_mgr_t
+
     // 使用CPUID指令查询APIC ID
     uint32_t eax, ebx, ecx, edx;
     // CPUID指令获取APIC ID
     // leaf 1, subleaf 0 contains APIC ID in EBX[31:24]
-    uint32_t bsp_apic_id = 0;
  asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0));
 if (eax >= 0xB) {
     // 使用 CPUID leaf 0xB 获取 x2APIC ID
@@ -114,13 +113,52 @@ if (eax >= 0xB) {
                  : "a"(1), "c"(0));
     bsp_apic_id = (ebx >> 24) & 0xFF; // APIC ID 在 EBX[31:24]
 }   
-        cpuid(0xB, 1, &eax, &ebx, &ecx, &edx);
-    if (ecx == 2) {  // Level Type = 2 (Core)
-        total_processor_count = ebx & 0xFFFF;  // EBX[15:0] = 物理核心数量
-    }
     processor_Interrupt_init(bsp_apic_id);
+    //解析MADT表，加载IOAPIC信息
+    MADT_Table*madt_table=(MADT_Table*)gAcpiVaddrSapceMgr.get_acpi_table("APIC");
+    uint32_t processor_count=0;
+    uint32_t io_apic_count=0;
+    uint8_t*base_addr=(uint8_t*)madt_table;
+    uint8_t*scannr=base_addr+sizeof(MADT_Table);
+    uint8_t*end_addr=base_addr+madt_table->Header.Length;
+    while (scannr<end_addr)
+    {
+     switch(*scannr)
+     {
+
+    case MADT_entrytype::IOAPIC: 
+    io_apic_structure*structure=(io_apic_structure*)scannr;
+    io_apic_mgr_array[io_apic_count]=new io_apic_mgr_t(structure->io_apic_id,structure->io_apic_address);
+    scannr+=sizeof(io_apic_structure); 
+    break;
+    case MADT_entrytype::Lx2APIC_NMI: 
+    scannr+=sizeof(local_x2apic_nmi_structure);
+    break;
+     case MADT_entrytype::LAPIC_NMI: 
+     scannr+=sizeof(local_apic_nmi_structure);
+     break;
+     case MADT_entrytype::NMI_Source: 
+     scannr+=sizeof(nmi_source_structure);
+     break;
+     case MADT_entrytype::x2LocalAPIC: 
+     processor_count++;
+     scannr+=sizeof(processor_local_x2apic_structure);
+     break; 
+     case MADT_entrytype::LocalAPIC: 
+     processor_count++;
+     scannr+=sizeof(Local_APIC_entry);
+     break;
+
+     default:
+     kputsSecure("Unsupported MADT entry type");
+     kpnumSecure(scannr,UNHEX,1);
+
+     gkernelPanicManager.panic("Unsupported MADT entry type");
+    }
+    }
+    total_processor_count=processor_count;
 }
-//对于某个apic_id的核心进行中断初始化
+// 对于某个apic_id的核心进行中断初始化
 int Interrupt_mgr_t::processor_Interrupt_init(uint32_t apic_id)
 {
     local_processor_interrupt_mgr_array[apic_id]=new Local_processor_Interrupt_mgr_t(apic_id);
@@ -143,6 +181,36 @@ int Interrupt_mgr_t::processor_Interrupt_unregister(uint32_t apic_id, uint8_t in
     if(apic_id>=total_processor_count)return OS_INVALID_PARAMETER ;
     Local_processor_Interrupt_mgr_t*local_processor_interrupt_mgr=local_processor_interrupt_mgr_array[apic_id];
     return local_processor_interrupt_mgr->unregister_handler(interrupt_number);
+}
+
+int Interrupt_mgr_t::set_processor_count(uint32_t count)
+{
+    if(total_processor_count)return OS_BAD_FUNCTION;
+    total_processor_count=count;
+    return OS_SUCCESS;
+}
+
+int Interrupt_mgr_t::io_apic_rte_set(uint8_t io_apicid, uint8_t rte_index, io_apic_mgr_t::redirection_entry entry)
+{   
+    if(io_apicid>=16)return OS_INVALID_PARAMETER;
+    int status;
+    status=io_apic_mgr_array[io_apicid]->write_redirection_entry(rte_index,entry);
+    if (status!=OS_SUCCESS)
+    {
+        /* code */
+    }
+    
+    status = io_apic_mgr_array[io_apicid]->load_redirection_entry(rte_index);
+    if (status!=OS_SUCCESS)
+    {
+        /* code */
+    }
+    return OS_SUCCESS;
+}
+
+Interrupt_mgr_t::io_apic_mgr_t::redirection_entry Interrupt_mgr_t::io_apic_rte_get(uint8_t io_apicid, uint8_t rte_index)
+{
+    return io_apic_mgr_array[io_apicid]->get_redirection_entry(rte_index);
 }
 
 int Interrupt_mgr_t::Local_processor_Interrupt_mgr_t::register_handler(uint8_t interrupt_number, void *handler)

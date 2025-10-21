@@ -144,19 +144,19 @@ PgControlBlockHeader&KernelSpacePgsMemMgr::PgCBtb_lv0_entry_query(phyaddr_t addr
  * 如果是类型为freeSystemRam则需要特殊处理，不过这部分我来研究
  */
 
-phy_memDesriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
+phy_memDescriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
 {
     if (base & PAGE_OFFSET_MASK[0])         
-        return (phy_memDesriptor*)OS_INVALID_ADDRESS;
-    if(base+len_in_bytes>gBaseMemMgr.getMaxPhyaddr())return (phy_memDesriptor*)OS_OUT_OF_MEMORY;
+        return (phy_memDescriptor*)OS_INVALID_ADDRESS;
+    if(base+len_in_bytes>gBaseMemMgr.getMaxPhyaddr())return (phy_memDescriptor*)OS_OUT_OF_MEMORY;
     len_in_bytes += PAGE_SIZE_IN_LV[0] - 1;
     len_in_bytes &= ~PAGE_OFFSET_MASK[0];
     bool is_dyn_pushed;
     phyaddr_t endaddr=base+len_in_bytes;
-    DoublyLinkedList<phy_memDesriptor> table;  
+    DoublyLinkedList<phy_memDescriptor> table;  
     phyaddr_t scan_addr=base;
-    phy_memDesriptor dyn_descriptor;
-    setmem(&dyn_descriptor,sizeof(phy_memDesriptor),0);
+    phy_memDescriptor dyn_descriptor;
+    setmem(&dyn_descriptor,sizeof(phy_memDescriptor),0);
     uint64_t descriptor_count=0;
     while (scan_addr<endaddr)//一次遍历至少一个页
     {   //返回结果中改成OS_ALLOCATABLE_MEMORY
@@ -216,18 +216,18 @@ phy_memDesriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base,
     descriptor_count++;
     is_dyn_pushed=true;
 }
-    phy_memDesriptor*result=new phy_memDesriptor[descriptor_count+1];
+    phy_memDescriptor*result=new phy_memDescriptor[descriptor_count+1];
     gKpoolmemmgr.clear(result);
     int index=0;
     for (auto i = table.begin(); i != table.end(); i++,index++)
     {
-        phy_memDesriptor dyn2=*i;
-        ksystemramcpy(&dyn2,result+index,sizeof(phy_memDesriptor));
+        phy_memDescriptor dyn2=*i;
+        ksystemramcpy(&dyn2,result+index,sizeof(phy_memDescriptor));
     }
     return result;
 }
 
-phy_memDesriptor *KernelSpacePgsMemMgr::getPhyMemoryspace()
+phy_memDescriptor *KernelSpacePgsMemMgr::getPhyMemoryspace()
 {
     return queryPhysicalMemoryUsage(0,gBaseMemMgr.getMaxPhyaddr());
 }

@@ -14,6 +14,7 @@
 #include "processor_self_manage.h"
 #include "UefiRunTimeServices.h"
 #include "panic.h"
+#include "gSTResloveAPIs.h"
 #undef __stack_chk_fail
 extern  void __wrap___stack_chk_fail(void);
 // 定义C++运行时需要的符号
@@ -56,7 +57,7 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
         TFG->FrameBufferBase,
         TFG->FrameBufferSize
     );
-    serial_init();
+    serial_init_stage1();
     gkcirclebufflogMgr.Init();
     if (Status!=OS_SUCCESS)
     {
@@ -99,13 +100,11 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
     gBaseMemMgr.printPhyMemDesTb();
     gKspacePgsMemMgr.Init();
     gRuntimeServices.Init(global_gST, efi_map_ver);
-    global_time = gRuntimeServices.rt_time_get();
+    gBaseMemMgr.DisableBasicMemService();
     gProcessor_Ks_stacks_mgr.Init();
     gInterrupt_mgr.Init();
-     int a=10,b=0,c;
-    c=a/b;
+    gAcpiVaddrSapceMgr.Init(global_gST);
     gRuntimeServices.rt_shutdown();
-   
     asm volatile("hlt");
     //中断接管工作
 

@@ -10,8 +10,8 @@ runtime_services_t::runtime_services_t(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
 {
     gST = sti;
     uint64_t filter_maxcount = gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    phy_memDesriptor entries_fileter[filter_maxcount];
-    phy_memDesriptor*copyptr=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDescriptor entries_fileter[filter_maxcount];
+    phy_memDescriptor*copyptr=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
     uint64_t filter_count = 0;
     for (uint64_t i = 0; i < filter_maxcount; i++)
     {

@@ -137,6 +137,62 @@ void *KernelSpacePgsMemMgr::pgs_allocate_remapped(size_t size_in_byte, pgflags f
      
     return nullptr;
 }
+/*
+根据设计，一个虚拟地址只会映射到一个物理地址，但是一个物理地址可能映射到多个虚拟地址
+这个地址转换函数负责虚拟地址转换，原理是查询vaddr_objs[4096]以及其子表的数据结构
+*/
+void* KernelSpacePgsMemMgr::v_to_phyaddrtraslation(vaddr_t vaddr) {
+    // 遍历vaddr_objs数组查找包含该虚拟地址的段
+    for (int i = 0; i < vaddrobj_count; i++) {
+        vaddr_seg_t& seg = vaddr_objs[i];
+        
+        // 检查虚拟地址是否在当前段范围内
+        if (vaddr >= seg.base && vaddr < seg.base + (seg.size_in_numof4kbpgs << 12)) {
+            // 如果该段有子表（碎片分配）
+            if (seg.num_of_subtb_entries > 0 && seg.subtb != nullptr) {
+                // 遍历子表查找具体映射
+                vaddr_t current_base = seg.base;
+                for (int j = 0; j < seg.num_of_subtb_entries; j++) {
+                    vaddr_seg_subtb_t& sub_seg = seg.subtb[j];
+                    vaddr_t sub_seg_end = current_base + (sub_seg.num_of_4kbpgs << 12);
+                    
+                    // 检查虚拟地址是否在当前子段范围内
+                    if (vaddr >= current_base && vaddr < sub_seg_end) {
+                        // 计算在当前子段中的偏移量
+                        uint64_t offset = vaddr - current_base;
+                        return (void*)(sub_seg.phybase + offset);
+                    }
+                    
+                    current_base = sub_seg_end;
+                }
+            } else {
+                // 连续分配情况：直接计算偏移量
+                uint64_t offset = vaddr - seg.base;
+                if (seg.subtb != nullptr) {
+                    return (void*)(seg.subtb[0].phybase + offset);
+                }
+            }
+            // 找到对应段但未找到具体映射
+            return nullptr;
+        }
+    }
+    
+    // 未找到包含该虚拟地址的段，尝试通过页表查询
+    PgControlBlockHeader& lv1_entry = PgCBtb_lv1_entry_query(vaddr);
+    if (lv1_entry.flags.is_exist && !lv1_entry.flags.is_atom) {
+        uint16_t lv0_index = (vaddr & 0x1FF000) >> 12;  // PT_INDEX_MASK_lv0
+        PgControlBlockHeader& lv0_entry = lv1_entry.base.lowerlvPgCBtb->entries[lv0_index];
+        if (lv0_entry.flags.is_exist && lv0_entry.flags.is_atom) {
+            phyaddr_t phy_addr = lv0_entry.base.base_phyaddr;
+            phy_addr += (vaddr & 0xFFF);  // 加上页内偏移
+            return (void*)phy_addr;
+        }
+    }
+    
+    // 未找到映射关系
+    return nullptr;
+}
+
 /**
  * 确定物理地址尝试分配一个连续的物理内存空间返回一个分配的连续的虚拟地址空间
  * 根据权限要求，物理地址基址，大小要求先phymemSubMgr子系统中使用固定物理地址分配器尝试分配物理内存，再分配一片连续的虚拟地址空间（高一半内核空间）

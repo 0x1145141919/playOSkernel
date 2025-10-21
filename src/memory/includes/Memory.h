@@ -2,6 +2,7 @@
 #include  <stdint.h>
 #include  <efi.h>
 #include  "pgtable45.h"
+#include "devices_typeids.h"
 typedef enum :uint32_t{
     EFI_RESERVED_MEMORY_TYPE,
     EFI_LOADER_CODE,
@@ -50,7 +51,7 @@ typedef struct {
 } EFI_MEMORY_DESCRIPTORX64;
 
 #pragma pack(pop)  // 恢复默认对齐
-typedef struct phy_memDesriptor{
+typedef struct phy_memDescriptor{
     PHY_MEM_TYPE                          Type;           // Field size is 32 bits followed by 32 bit pad
     uint32_t remapped_count;
     
@@ -64,12 +65,12 @@ typedef struct phy_memDesriptor{
      * 上面的约定只在phy_memDesriptor *KernelSpacePgsMemMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
      * 的返回结果中有效
      */
-    phy_memDesriptor*submaptable;
-}  phy_memDesriptor; //PHY_MEMORY_DESCRIPTOR
+    phy_memDescriptor*submaptable;
+}  phy_memDescriptor; //PHY_MEMORY_DESCRIPTOR
 class GlobalMemoryPGlevelMgr_t {
     private:
     
-    phy_memDesriptor rootPhyMemDscptTbBsPtr[256];//这个结构是后面在init函数中内部接口reclaimBootTimeMemory创建的
+    phy_memDescriptor rootPhyMemDscptTbBsPtr[256];//这个结构是后面在init函数中内部接口reclaimBootTimeMemory创建的
     EFI_MEMORY_DESCRIPTORX64 EfiMemMap[256];
     uint64_t EfiMemMapEntryCount;
     uint64_t rootPhymemTbentryCount;
@@ -84,7 +85,7 @@ class GlobalMemoryPGlevelMgr_t {
     void sortEfiMemoryMapByPhysicalStart();
     void fillMemoryHolesInEfiMap();
     // 使用二分查找在物理内存描述符表中查找指定物理地址的描述符
-    phy_memDesriptor* findDescriptorByAddress(phyaddr_t base);
+    phy_memDescriptor* findDescriptorByAddress(phyaddr_t base);
 
   
     public:
@@ -108,8 +109,8 @@ class GlobalMemoryPGlevelMgr_t {
     GlobalMemoryPGlevelMgr_t(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount);
     // 移除析构函数声明，因为在freestanding环境中不需要
     void Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount);
-    phy_memDesriptor* queryPhysicalMemoryUsage(phyaddr_t addr);
-    phy_memDesriptor* getGlobalPhysicalMemoryInfo();
+    phy_memDescriptor* queryPhysicalMemoryUsage(phyaddr_t addr);
+    phy_memDescriptor* getGlobalPhysicalMemoryInfo();
     uint64_t getRootPhysicalMemoryDescriptorTableEntryCount();
     bool Ismemspaceneighbors(uint16_t index_a, uint16_t index_b, uint64_t tbid);
     int FixedPhyaddPgallocate(IN phyaddr_t addr,
@@ -124,5 +125,15 @@ class GlobalMemoryPGlevelMgr_t {
     uint64_t getGlobalPhysicalMemoryMgrflags();
     int descriptor_remapped_inc(phyaddr_t base);
   int descriptor_remapped_dec(phyaddr_t base);
+  /**
+   * 增加一个新增memorymappedio的成员函数
+   * 有些硬件设备需要使用memorymappedio，所以需要增加这个成员函数
+   * 类似于FixedPhyaddPgallocate，但是不进行位检查。
+   *只有在分配的物理地址空间满足将分配物理地址区间在原描述符表中全部为Reserved,
+   或一部分在Reserved,另一部分高于最大物理地址范围
+   或完全高于最大物理地址范围时，才允许进行分配
+   */
+  int registMMIO(IN phyaddr_t addr, IN uint64_t numof_4kbpgs);
+  int unregistMMIO(IN phyaddr_t addr);//只有完全高于最大物理地址范围时，而且重映射数目为0时，才允许进行释放
 };
 extern GlobalMemoryPGlevelMgr_t gBaseMemMgr;

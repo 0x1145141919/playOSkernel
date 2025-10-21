@@ -180,7 +180,7 @@ int (KernelSpacePgsMemMgr::*PgCBtb_construct_func[5])(uint64_t,pgflags,phyaddr_t
     &KernelSpacePgsMemMgr::PgCBtb_lv3_entry_construct,
     &KernelSpacePgsMemMgr::PgCBtb_lv4_entry_construct
 };
-int construct_pgsbasedon_phy_memDescriptor (phy_memDesriptor memDescriptor);
+int construct_pgsbasedon_phy_memDescriptor (phy_memDescriptor memDescriptor);
 /**
  * 第0级别表在创建的时候会对高级别的表项进行解析，初始化，
  * 如果存在高级别表项那么就直接使用，不存在那么就创建
@@ -377,8 +377,8 @@ void*pgs_remapp(phyaddr_t addr,pgflags flags,vaddr_t vbase=0);
 void *phy_pgs_allocate(uint64_t size_in_byte, uint8_t align_require);//此接口分配的内存基于物理地址，不支持权限配置，只能配置为读写权限
 int fixedaddr_phy_pgs_allocate(phyaddr_t addr,uint64_t size_in_byte);
 int free_phy_pgs(phyaddr_t addr);
-    phy_memDesriptor* queryPhysicalMemoryUsage(phyaddr_t base,uint64_t len_in_bytes);
-    phy_memDesriptor* getPhyMemoryspace();
+    phy_memDescriptor* queryPhysicalMemoryUsage(phyaddr_t base,uint64_t len_in_bytes);
+    phy_memDescriptor* getPhyMemoryspace();
     /**
      * 上面四个页级别物理内存分配器必须在is_pgsallocate_enable开启后才能使用    
      */
@@ -395,6 +395,21 @@ static constexpr pgflags kspace_data_flags = {
     .is_remaped = 1,
     .pg_lv = 0,
     .cache_strateggy = WB,
+    .is_global = 1
+};
+static constexpr pgflags kspace_mmio_flags = {
+    .physical_or_virtual_pg = VIR_ATOM_PAGE,
+    .is_exist = 1,
+    .is_atom = 1,
+    .is_reserved = 1,
+    .is_occupied = 1,
+    .is_kernel = 1,
+    .is_readable = 1,
+    .is_writable = 1,
+    .is_executable = 0,
+    .is_remaped = 1,
+    .pg_lv = 0,
+    .cache_strateggy = UC,
     .is_global = 1
 };
 static constexpr pgflags kspace_code_flags = {
@@ -414,6 +429,10 @@ static constexpr pgflags kspace_code_flags = {
 };
     void Init();
     void PrintPgsMemMgrStructure();
+    /*
+    根据设计，一个虚拟地址只会映射到一个物理地址，但是一个物理地址可能映射到多个虚拟地址
+    这个地址转换函数负责虚拟地址转换，原理是查询vaddr_objs[4096]以及其子表的数据结构
+    */
     void* v_to_phyaddrtraslation(vaddr_t vaddr);
 };
 extern KernelSpacePgsMemMgr gKspacePgsMemMgr;
