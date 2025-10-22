@@ -18,7 +18,10 @@ class init_fs_t {//支持卸载后向前移动，不卸载的情况下向后增�
     struct SuperCluster;
     struct Inode;
     struct FileEntryinDir;
-
+static constexpr uint64_t LEVLE1_INDIRECT_START_CLUSTER_INDEX = 12;
+static constexpr uint64_t LEVEL2_INDIRECT_START_CLUSTER_INDEX =  LEVLE1_INDIRECT_START_CLUSTER_INDEX +512;
+static constexpr uint64_t LEVEL3_INDIRECT_START_CLUSTER_INDEX =  LEVEL2_INDIRECT_START_CLUSTER_INDEX +512*512;
+static constexpr uint64_t LEVEL4_INDIRECT_START_CLUSTER_INDEX =  LEVEL3_INDIRECT_START_CLUSTER_INDEX +512*512*512;
 static constexpr uint64_t HYPER_CLUSTER_INDEX=0;
 static constexpr uint64_t CLUSTER_DEFAULT_SIZE = 4096;
 static constexpr uint64_t DEFAULT_BLOCKS_GROUP_MAX_CLUSTER = 8 * 4096;
@@ -91,9 +94,8 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     } __attribute__((packed));
     
     struct FileExtentsEntry_t {
-        InnerPointer start_pointer;          // 起始指针
-        uint32_t end_pointer_block_offset;   // 结束指针块内偏移
-        uint64_t end_pointer_cluster_index;  // 结束指针簇索引
+        uint64_t first_cluster_index;
+        uint32_t length_in_clusters;
     } __attribute__((packed));
     
     union data_descript {
@@ -116,6 +118,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     
     struct FileEntryinDir {
         uint8_t filename[48];                // 文件名，使用uint8_t避免平台相关的符号扩展问题
+        //显然 最多47个字节
         uint32_t inode_index;                // inode索引
         uint32_t block_group_index;          // 块组索引
     } __attribute__((packed));
@@ -178,6 +181,44 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t block_group_index,
         uint64_t inode_index,
         Inode& inode
+    );
+    int inode_content_read(//从特定偏移量上读取，若超出大小会报错
+        Inode the_inode,
+        uint64_t stream_base_offset,
+        uint64_t size,
+        uint8_t*buffer
+    );
+    int inode_level1_idiread(//从一级索引表上读取
+        uint64_t rootClutser_of_lv1_index,
+        uint64_t fsize,
+        uint64_t start_cluster_index_of_datastream,
+        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
+        uint8_t*buffer
+    );
+        int inode_level2_idiread(//从一级索引表上读取
+        uint64_t rootClutser_of_lv1_index,
+        uint64_t fsize,
+        uint64_t start_cluster_index_of_datastream,
+        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
+        uint8_t*buffer
+    );
+        int inode_level3_idiread(//从一级索引表上读取
+        uint64_t rootClutser_of_lv3_index,
+        uint64_t fsize,
+        uint64_t start_cluster_index_of_datastream,
+        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
+        uint8_t*buffer
+    );
+    int inode_filecluster_to_cluster_index(
+        Inode the_inode,
+        uint64_t file_cluster_index,
+        uint64_t&cluster_index
+    );
+    int inode_content_write(//从特定偏移量上覆写，若超出大小会报错
+        Inode the_inode,
+        uint64_t stream_base_offset,
+        uint64_t size,
+        uint8_t*buffer
     );
     int path_analyze(char*path,Inode& inode);
     HyperCluster*fs_metainf;

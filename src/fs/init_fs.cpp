@@ -768,11 +768,627 @@ int init_fs_t::get_inode(uint64_t block_group_index, uint64_t inode_index, Inode
    }
     return OS_SUCCESS;
 }
-//从根inode解析路径
-int init_fs_t::path_analyze(char *path, Inode &inode)
+int init_fs_t::inode_content_read(Inode the_inode, uint64_t stream_base_offset, uint64_t size, uint8_t *buffer)
+{//todo：还未完成
+    int status;
+    uint64_t start_cluster_index=stream_base_offset/fs_metainf->cluster_size;
+    uint32_t in_cluster_start_offset=stream_base_offset%fs_metainf->cluster_size;
+    uint32_t first_cluster_data_size=fs_metainf->cluster_size-in_cluster_start_offset;
+    uint64_t stream_end=stream_base_offset+size;
+    uint64_t end_cluster_index=stream_end/fs_metainf->cluster_size;
+    uint32_t in_cluster_end_offset=stream_end%fs_metainf->cluster_size; 
+    uint64_t cluster_scanner=start_cluster_index;
+    uint64_t buffer_byte_scanner=0;
+    if(the_inode.flags.extents_or_indextable==INDEX_TABLE_TYPE)
+    {
+        
+        //处理初始簇数据流的逻辑
+        phylayer->read(
+            cluster_scanner*fs_metainf->cluster_block_count,
+            in_cluster_start_offset,
+            buffer,
+            first_cluster_data_size
+        );
+        buffer_byte_scanner+=first_cluster_data_size;
+        while(cluster_scanner<=end_cluster_index)
+        {
+            
+            if(cluster_scanner==end_cluster_index)
+            {
+                uint64_t last_cluster_in_absolute;
+                status=inode_filecluster_to_cluster_index(
+                    the_inode,
+                    cluster_scanner,
+                    last_cluster_in_absolute
+                );
+                if(is_memdiskv1)
+                {
+                    ksystemramcpy(
+                        memdiskv1_blockdevice->get_vaddr(last_cluster_in_absolute*fs_metainf->cluster_block_count),
+                        buffer+buffer_byte_scanner,
+                        in_cluster_end_offset
+                    );
+                }else{
+                    status=phylayer->read(
+                        last_cluster_in_absolute*fs_metainf->cluster_block_count,
+                        0,
+                        buffer+buffer_byte_scanner,
+                        in_cluster_end_offset
+                    );
+                    if(status!=OS_SUCCESS)return status;
+                }
+                cluster_scanner++;
+                continue;
+            }
+            if(cluster_scanner<LEVLE1_INDIRECT_START_CLUSTER_INDEX)
+            {
+                if(is_memdiskv1)
+                {
+                    while(cluster_scanner<LEVLE1_INDIRECT_START_CLUSTER_INDEX&&cluster_scanner<=end_cluster_index)
+                    {
+                        ksystemramcpy(
+                            memdiskv1_blockdevice->get_vaddr(the_inode.data_desc.index_table.direct_pointers[cluster_scanner]*fs_metainf->cluster_block_count),
+                            buffer+buffer_byte_scanner,
+                            fs_metainf->cluster_size
+                        );
+                        buffer_byte_scanner+=fs_metainf->cluster_size;
+                        cluster_scanner++;
+                    }
+                }else{
+                    while(cluster_scanner<LEVLE1_INDIRECT_START_CLUSTER_INDEX&&cluster_scanner<=end_cluster_index)
+                    {
+                        status= phylayer->readblk(
+                            the_inode.data_desc.index_table.direct_pointers[cluster_scanner]*fs_metainf->cluster_block_count,
+                            fs_metainf->cluster_block_count,
+                            buffer+buffer_byte_scanner
+                        );
+                        if (status!=OS_SUCCESS)
+                        {
+                            return status;
+                        }
+                        buffer_byte_scanner+=fs_metainf->cluster_size;
+                        cluster_scanner++;
+                    }
+                }
+                continue;
+            } 
+            if(cluster_scanner<LEVEL2_INDIRECT_START_CLUSTER_INDEX)
+            /*
+            这种情况下所需要的接口是内含簇引索区间合法性校验，在指定区间内读取数据流到指定缓冲区的接口
+            */
+            {
+                uint64_t stage_end_cluster_index=end_cluster_index<LEVEL2_INDIRECT_START_CLUSTER_INDEX?end_cluster_index:LEVEL2_INDIRECT_START_CLUSTER_INDEX;
+                status=inode_level1_idiread(
+                    the_inode.data_desc.index_table.double_indirect_pointer,
+                    the_inode.file_size,
+                    cluster_scanner,
+                    stage_end_cluster_index,
+                    buffer+buffer_byte_scanner
+                );
+                if(status!=OS_SUCCESS)
+                {
+                    return status;
+                }
+                cluster_scanner=stage_end_cluster_index;
+                buffer_byte_scanner=in_cluster_start_offset+stage_end_cluster_index*fs_metainf->cluster_size;
+            }
+            if (cluster_scanner<LEVEL3_INDIRECT_START_CLUSTER_INDEX)
+            {
+                uint64_t stage_end_cluster_index=end_cluster_index<LEVEL3_INDIRECT_START_CLUSTER_INDEX?end_cluster_index:LEVEL3_INDIRECT_START_CLUSTER_INDEX;
+                status=inode_level2_idiread(
+                    the_inode.data_desc.index_table.double_indirect_pointer,
+                    the_inode.file_size,
+                    cluster_scanner,
+                    stage_end_cluster_index,
+                    buffer+buffer_byte_scanner
+                );
+                if(status!=OS_SUCCESS)
+                {
+                    return status;
+                }
+                cluster_scanner=stage_end_cluster_index;
+                buffer_byte_scanner=in_cluster_start_offset+stage_end_cluster_index*fs_metainf->cluster_size;
+            }
+            if(cluster_scanner<LEVEL4_INDIRECT_START_CLUSTER_INDEX)
+            {
+                uint64_t stage_end_cluster_index=end_cluster_index<LEVEL4_INDIRECT_START_CLUSTER_INDEX?end_cluster_index:LEVEL4_INDIRECT_START_CLUSTER_INDEX;
+                status=inode_level3_idiread(
+                    the_inode.data_desc.index_table.double_indirect_pointer,
+                    the_inode.file_size,
+                    cluster_scanner,
+                    stage_end_cluster_index,
+                    buffer+buffer_byte_scanner
+                );
+                if(status!=OS_SUCCESS)
+                {
+                    return status;
+                }
+                cluster_scanner=stage_end_cluster_index;
+                buffer_byte_scanner=in_cluster_start_offset+stage_end_cluster_index*fs_metainf->cluster_size;
+            }
+            
+        }
+    }else{
+        if(is_memdiskv1)
+        {
+            FileExtentsEntry_t* extents_entry_array = (FileExtentsEntry_t*)memdiskv1_blockdevice->get_vaddr(the_inode.data_desc.extents.first_cluster_index*fs_metainf->cluster_block_count);
+            uint32_t extents_entry_array_count=the_inode.data_desc.extents.entries_count;
+        }
+    }
+
+}
+
+int init_fs_t::inode_level1_idiread(uint64_t rootClutser_of_lv1_index, uint64_t fsize, uint64_t start_cluster_index_of_datastream, uint64_t end_cluster_index_of_datastream, uint8_t *buffer)
 {
-    if(strlen(path)==0||strlen(path)>=FILE_PATH_MAX_LEN)return OS_INVALID_FILE_PATH;
-    if(path[0]!='/')return OS_INVALID_FILE_PATH;
+    if(start_cluster_index_of_datastream<LEVLE1_INDIRECT_START_CLUSTER_INDEX
+    ||end_cluster_index_of_datastream>=LEVEL2_INDIRECT_START_CLUSTER_INDEX)return OS_INVALID_PARAMETER;
+    if(fsize/fs_metainf->cluster_size>end_cluster_index_of_datastream)return OS_INVALID_PARAMETER;
+    int status;
+    uint32_t MaxClusterEntryCount = fs_metainf->cluster_size / sizeof(uint64_t);
+    uint64_t cluster_scanner = start_cluster_index_of_datastream;
+
+    if (is_memdiskv1) {
+        uint64_t* lv0_cluster_entries = (uint64_t*)memdiskv1_blockdevice->get_vaddr(rootClutser_of_lv1_index * fs_metainf->cluster_block_count);
+        if (lv0_cluster_entries == nullptr) {
+            return OS_FILE_SYSTEM_DAMAGED;
+        }
+        for (uint32_t i = 0; i < MaxClusterEntryCount; i++) {
+            if (lv0_cluster_entries[i] == 0) {
+                return OS_FILE_SYSTEM_DAMAGED;
+            }
+            if (cluster_scanner < end_cluster_index_of_datastream) {
+                ksystemramcpy(
+                    (uint8_t*)memdiskv1_blockdevice->get_vaddr(lv0_cluster_entries[i] * fs_metainf->cluster_block_count),
+                    buffer + (cluster_scanner - start_cluster_index_of_datastream) * fs_metainf->cluster_size,
+                    fs_metainf->cluster_size
+                );
+                cluster_scanner++;
+            } else {
+                return OS_SUCCESS;
+            }
+        }
+    } else {
+        uint64_t* lv0_cluster_entries = new uint64_t[MaxClusterEntryCount];
+        status = phylayer->readblk(
+            rootClutser_of_lv1_index * fs_metainf->cluster_block_count,
+            1,
+            lv0_cluster_entries
+        );
+        if (status != OS_SUCCESS) {
+            delete[] lv0_cluster_entries;
+            return status;
+        }
+        for (uint32_t i = 0; i < MaxClusterEntryCount; i++) {
+            if (lv0_cluster_entries[i] == 0) {
+                delete[] lv0_cluster_entries;
+                return OS_FILE_SYSTEM_DAMAGED;
+            }
+            if (cluster_scanner < end_cluster_index_of_datastream) {
+                status = phylayer->readblk(
+                    lv0_cluster_entries[i] * fs_metainf->cluster_block_count,
+                    1,
+                    buffer + (cluster_scanner - start_cluster_index_of_datastream) * fs_metainf->cluster_size
+                );
+                if (status != OS_SUCCESS) {
+                    delete[] lv0_cluster_entries;
+                    return status;
+                }
+                cluster_scanner++;
+            } else {
+                delete[] lv0_cluster_entries;
+                return OS_SUCCESS;
+            }
+        }
+        delete[] lv0_cluster_entries;
+    }
     
+    return OS_BAD_FUNCTION;
+}
+
+int init_fs_t::inode_level2_idiread(uint64_t rootClutser_of_lv1_index, uint64_t fsize, uint64_t start_cluster_index_of_datastream, uint64_t end_cluster_index_of_datastream, uint8_t *buffer)
+{
+        if(start_cluster_index_of_datastream<LEVEL2_INDIRECT_START_CLUSTER_INDEX
+    ||end_cluster_index_of_datastream>=LEVEL3_INDIRECT_START_CLUSTER_INDEX)return OS_INVALID_PARAMETER;
+    if(fsize/fs_metainf->cluster_size>end_cluster_index_of_datastream)return OS_INVALID_PARAMETER;
+    int status;
+    uint32_t MaxClusterEntryCount = fs_metainf->cluster_size / sizeof(uint64_t);
+    uint64_t cluster_scanner = start_cluster_index_of_datastream;
+
+    if (is_memdiskv1) {
+        uint64_t* lv1_cluster_entries = (uint64_t*)memdiskv1_blockdevice->get_vaddr(rootClutser_of_lv1_index * fs_metainf->cluster_block_count);
+        if (lv1_cluster_entries == nullptr) {
+            return OS_FILE_SYSTEM_DAMAGED;
+        }
+        for (uint32_t i = 0; i < MaxClusterEntryCount; i++) {
+            uint64_t* lv0_cluster_entries = (uint64_t*)memdiskv1_blockdevice->get_vaddr(lv1_cluster_entries[i] * fs_metainf->cluster_block_count);
+            if (lv0_cluster_entries == nullptr) {
+                return OS_FILE_SYSTEM_DAMAGED;
+            }
+            for (uint32_t j = 0; j < MaxClusterEntryCount; j++) {
+                if (lv0_cluster_entries[j] == 0) {
+                    return OS_FILE_SYSTEM_DAMAGED;
+                }
+                if (cluster_scanner < end_cluster_index_of_datastream) {
+                    ksystemramcpy(
+                        (uint8_t*)memdiskv1_blockdevice->get_vaddr(lv0_cluster_entries[j] * fs_metainf->cluster_block_count),
+                        buffer + (cluster_scanner - start_cluster_index_of_datastream) * fs_metainf->cluster_size,
+                        fs_metainf->cluster_size
+                    );
+                    cluster_scanner++;
+                } else {
+                    return OS_SUCCESS;
+                }
+            }
+        }
+    } else {
+        uint64_t* lv1_cluster_entries = new uint64_t[MaxClusterEntryCount];
+        status = phylayer->readblk(
+            rootClutser_of_lv1_index * fs_metainf->cluster_block_count,
+            1,
+            lv1_cluster_entries
+        );
+        if (status != OS_SUCCESS) {
+            delete[] lv1_cluster_entries;
+            return status;
+        }
+        for (uint32_t i = 0; i < MaxClusterEntryCount; i++) {
+            uint64_t* lv0_cluster_entries = new uint64_t[MaxClusterEntryCount];
+            status = phylayer->readblk(
+                lv1_cluster_entries[i] * fs_metainf->cluster_block_count,
+                1,
+                lv0_cluster_entries
+            );
+            if (status != OS_SUCCESS) {
+                delete[] lv0_cluster_entries;
+                delete[] lv1_cluster_entries;
+                return status;
+            }
+            for (uint32_t j = 0; j < MaxClusterEntryCount; j++) {
+                if (cluster_scanner < end_cluster_index_of_datastream) {
+                    status = phylayer->readblk(
+                        lv0_cluster_entries[j] * fs_metainf->cluster_block_count,
+                        1,
+                        buffer + (cluster_scanner - start_cluster_index_of_datastream) * fs_metainf->cluster_size
+                    );
+                    if (status != OS_SUCCESS) {
+                        delete[] lv0_cluster_entries;
+                        delete[] lv1_cluster_entries;
+                        return status;
+                    }
+                    cluster_scanner++;
+                } else {
+                    delete[] lv0_cluster_entries;
+                    delete[] lv1_cluster_entries;
+                    return OS_SUCCESS;
+                }
+            }
+            delete[] lv0_cluster_entries;
+        }
+        delete[] lv1_cluster_entries;
+    }
+    
+    return OS_BAD_FUNCTION;
+}
+
+int init_fs_t::inode_level3_idiread(uint64_t rootClutser_of_lv3_index, uint64_t fsize, uint64_t start_cluster_index_of_datastream, uint64_t end_cluster_index_of_datastream, uint8_t *buffer)
+{     if(start_cluster_index_of_datastream<LEVEL3_INDIRECT_START_CLUSTER_INDEX
+    ||end_cluster_index_of_datastream>=LEVEL4_INDIRECT_START_CLUSTER_INDEX)return OS_INVALID_PARAMETER;
+    if(fsize/fs_metainf->cluster_size>end_cluster_index_of_datastream)return OS_INVALID_PARAMETER;
+    int status;
+    uint32_t MaxClusterEntryCount=fs_metainf->cluster_size/sizeof(uint64_t);
+    //引索合法性校验
+    uint64_t cluster_scanner=start_cluster_index_of_datastream;
+    if(is_memdiskv1){
+        uint64_t*lv2_cluster_entries=(uint64_t*)memdiskv1_blockdevice->get_vaddr(rootClutser_of_lv3_index*fs_metainf->cluster_block_count);
+        for(uint32_t i=0;i<MaxClusterEntryCount;i++)
+        {
+            uint64_t*lv1_cluster_entries=(uint64_t*)memdiskv1_blockdevice->get_vaddr(lv2_cluster_entries[i]*fs_metainf->cluster_block_count);
+            if(lv1_cluster_entries==nullptr)
+            {
+                return OS_FILE_SYSTEM_DAMAGED;
+            }
+            for(uint32_t j=0;j<MaxClusterEntryCount;j++)
+            {
+                uint64_t*lv0_cluster_entries=(uint64_t*)memdiskv1_blockdevice->get_vaddr(lv1_cluster_entries[j]*fs_metainf->cluster_block_count);
+                if(lv0_cluster_entries==nullptr)
+                {
+                    return OS_FILE_SYSTEM_DAMAGED;
+                }
+                for(uint32_t k=0;k<MaxClusterEntryCount;k++)
+                {
+                    if(lv0_cluster_entries[k]==0)
+                    {
+                        return OS_FILE_SYSTEM_DAMAGED;
+                    }
+                    if(cluster_scanner<end_cluster_index_of_datastream){
+                    ksystemramcpy(
+                        memdiskv1_blockdevice->get_vaddr(lv0_cluster_entries[k] * fs_metainf->cluster_size),
+                        buffer+(cluster_scanner-start_cluster_index_of_datastream)*fs_metainf->cluster_size,
+                        fs_metainf->cluster_size
+                    );
+                    cluster_scanner++;
+                }else{
+                    return OS_SUCCESS;
+                }
+                }
+            }
+        }
+    }else{
+        uint64_t*lv2_cluster_entries=new uint64_t[MaxClusterEntryCount];
+        status =phylayer->readblk(
+            rootClutser_of_lv3_index*fs_metainf->cluster_block_count,
+            1,
+            lv2_cluster_entries
+        );
+        if(status!=OS_SUCCESS){
+            delete[] lv2_cluster_entries;
+            return status;
+        }
+        for(uint32_t i=0;i<MaxClusterEntryCount;i++)
+        {
+            uint64_t*lv1_cluster_entries=new uint64_t[MaxClusterEntryCount];
+            status =phylayer->readblk(
+                lv2_cluster_entries[i]*fs_metainf->cluster_block_count,
+                1,
+                lv1_cluster_entries
+            );
+            if(status!=OS_SUCCESS)
+            {
+                delete[] lv1_cluster_entries;
+                delete[] lv2_cluster_entries;
+                return status;
+            }
+            
+            for(uint32_t j=0;j<MaxClusterEntryCount;j++)
+            {
+                uint64_t*lv0_cluster_entries=new uint64_t[MaxClusterEntryCount];
+                status =phylayer->readblk(
+                    lv1_cluster_entries[j]*fs_metainf->cluster_block_count,
+                    1,
+                    lv0_cluster_entries
+                );
+                if(status!=OS_SUCCESS)
+                {
+                    delete[] lv0_cluster_entries;
+                    delete[] lv1_cluster_entries;
+                    delete[] lv2_cluster_entries;
+                    return status;
+                }
+                for(uint32_t k=0;k<MaxClusterEntryCount;k++)
+                {
+                    if(cluster_scanner<end_cluster_index_of_datastream)
+                    {
+                        phylayer->readblk(lv0_cluster_entries[k]*fs_metainf->cluster_block_count,
+                            1,
+                            buffer+(cluster_scanner-start_cluster_index_of_datastream)*fs_metainf->cluster_size
+                        );
+                        cluster_scanner++;
+                    }else{
+                        return OS_SUCCESS;
+                    }
+                }
+                delete[] lv0_cluster_entries;
+            }
+            delete[] lv1_cluster_entries; 
+        }
+    }
+    
+return OS_BAD_FUNCTION;
+}
+/*文件的cluster索引转换成
+实际的簇索引
+*/
+int init_fs_t::inode_filecluster_to_cluster_index(Inode the_inode, uint64_t file_cluster_index, uint64_t &cluster_index)
+{
+    if (file_cluster_index < LEVLE1_INDIRECT_START_CLUSTER_INDEX) {
+
+        cluster_index = the_inode.data_desc.index_table.direct_pointers[file_cluster_index];
+        if (cluster_index == 0) {
+            return OS_FILE_NOT_FOUND;
+        }
+        return OS_SUCCESS;
+    }
+
+    uint32_t MaxClusterEntryCount = fs_metainf->cluster_size / sizeof(uint64_t);
+if(!is_memdiskv1){
+    if (file_cluster_index < LEVEL2_INDIRECT_START_CLUSTER_INDEX) {
+        // 一级间接指针范围
+        uint64_t offset = file_cluster_index - LEVLE1_INDIRECT_START_CLUSTER_INDEX;
+        if (offset >= MaxClusterEntryCount) {
+            return OS_INVALID_PARAMETER;
+        }
+
+        uint64_t indirect_block_index = the_inode.data_desc.index_table.double_indirect_pointer * fs_metainf->cluster_block_count;
+        uint64_t* lv0_cluster_tb = new uint64_t[MaxClusterEntryCount];
+        int status = phylayer->readblk(indirect_block_index, 1, lv0_cluster_tb);
+        if (status != OS_SUCCESS) {
+            delete[] lv0_cluster_tb;
+            return status;
+        }
+
+        cluster_index = lv0_cluster_tb[offset];
+        delete[] lv0_cluster_tb;
+        if (cluster_index == 0) {
+            return OS_FILE_NOT_FOUND;
+        }
+        return OS_SUCCESS;
+    }
+
+    if (file_cluster_index < LEVEL3_INDIRECT_START_CLUSTER_INDEX) {
+        // 二级间接指针范围
+        uint64_t offset = file_cluster_index - LEVEL2_INDIRECT_START_CLUSTER_INDEX;
+        if (offset >= MaxClusterEntryCount * MaxClusterEntryCount) {
+            return OS_INVALID_PARAMETER;
+        }
+
+        uint64_t lv1_offset = offset >> 9;  // 相当于 offset / 512
+        uint64_t lv0_offset = offset & 511; // 相当于 offset % 512
+
+        uint64_t lv1_block_index = the_inode.data_desc.index_table.triple_indirect_pointer * fs_metainf->cluster_block_count;
+        uint64_t* lv1_cluster_tb = new uint64_t[MaxClusterEntryCount];
+        int status = phylayer->readblk(lv1_block_index, 1, lv1_cluster_tb);
+        if (status != OS_SUCCESS) {
+            delete[] lv1_cluster_tb;
+            return status;
+        }
+
+        uint64_t lv0_block_index = lv1_cluster_tb[lv1_offset] * fs_metainf->cluster_block_count;
+        uint64_t* lv0_cluster_tb = new uint64_t[MaxClusterEntryCount];
+        status = phylayer->readblk(lv0_block_index, 1, lv0_cluster_tb);
+        if (status != OS_SUCCESS) {
+            delete[] lv0_cluster_tb;
+            delete[] lv1_cluster_tb;
+            return status;
+        }
+
+        cluster_index = lv0_cluster_tb[lv0_offset];
+        delete[] lv0_cluster_tb;
+        delete[] lv1_cluster_tb;
+        if (cluster_index == 0) {
+            return OS_FILE_NOT_FOUND;
+        }
+        return OS_SUCCESS;
+    }
+
+    if (file_cluster_index < LEVEL4_INDIRECT_START_CLUSTER_INDEX) {
+        // 三级间接指针范围
+        uint64_t offset = file_cluster_index - LEVEL3_INDIRECT_START_CLUSTER_INDEX;
+        if (offset >= (uint64_t)MaxClusterEntryCount * MaxClusterEntryCount * MaxClusterEntryCount) {
+            return OS_INVALID_PARAMETER;
+        }
+
+        uint64_t lv2_offset = offset >> 18; // offset / (512*512)
+        uint64_t lv1_offset = (offset >> 9) & 511; // (offset / 512) % 512
+        uint64_t lv0_offset = offset & 511;        // offset % 512
+
+        uint64_t lv2_block_index = the_inode.data_desc.index_table.triple_indirect_pointer * fs_metainf->cluster_block_count;
+        uint64_t* lv2_cluster_tb = new uint64_t[MaxClusterEntryCount];
+        int status = phylayer->readblk(lv2_block_index, 1, lv2_cluster_tb);
+        if (status != OS_SUCCESS) {
+            delete[] lv2_cluster_tb;
+            return status;
+        }
+
+        uint64_t lv1_block_index = lv2_cluster_tb[lv2_offset] * fs_metainf->cluster_block_count;
+        uint64_t* lv1_cluster_tb = new uint64_t[MaxClusterEntryCount];
+        status = phylayer->readblk(lv1_block_index, 1, lv1_cluster_tb);
+        if (status != OS_SUCCESS) {
+            delete[] lv1_cluster_tb;
+            delete[] lv2_cluster_tb;
+            return status;
+        }
+
+        uint64_t lv0_block_index = lv1_cluster_tb[lv1_offset] * fs_metainf->cluster_block_count;
+        uint64_t* lv0_cluster_tb = new uint64_t[MaxClusterEntryCount];
+        status = phylayer->readblk(lv0_block_index, 1, lv0_cluster_tb);
+        if (status != OS_SUCCESS) {
+            delete[] lv0_cluster_tb;
+            delete[] lv1_cluster_tb;
+            delete[] lv2_cluster_tb;
+            return status;
+        }
+
+        cluster_index = lv0_cluster_tb[lv0_offset];
+        delete[] lv0_cluster_tb;
+        delete[] lv1_cluster_tb;
+        delete[] lv2_cluster_tb;
+        if (cluster_index == 0) {
+            return OS_FILE_NOT_FOUND;
+        }
+        return OS_SUCCESS;
+    }
+}else{//内存盘模式下不分配内存，直接解析
+        if (file_cluster_index < LEVEL2_INDIRECT_START_CLUSTER_INDEX) {
+            // 一级间接指针范围
+            uint64_t offset = file_cluster_index - LEVLE1_INDIRECT_START_CLUSTER_INDEX;
+            if (offset >= MaxClusterEntryCount) {
+                return OS_INVALID_PARAMETER;
+            }
+
+            uint64_t* lv0_cluster_tb = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
+                the_inode.data_desc.index_table.double_indirect_pointer * fs_metainf->cluster_block_count
+            );
+            cluster_index = lv0_cluster_tb[offset];
+            if (cluster_index == 0) {
+                return OS_FILE_NOT_FOUND;
+            }
+            return OS_SUCCESS;
+        }
+
+        if (file_cluster_index < LEVEL3_INDIRECT_START_CLUSTER_INDEX) {
+            // 二级间接指针范围
+            uint64_t offset = file_cluster_index - LEVEL2_INDIRECT_START_CLUSTER_INDEX;
+            if (offset >= (uint64_t)MaxClusterEntryCount * MaxClusterEntryCount) {
+                return OS_INVALID_PARAMETER;
+            }
+
+            uint64_t lv1_offset = offset >> 9;
+            uint64_t lv0_offset = offset & 511;
+
+            uint64_t* lv1_cluster_tb = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
+                the_inode.data_desc.index_table.triple_indirect_pointer * fs_metainf->cluster_block_count
+            );
+            uint64_t* lv0_cluster_tb = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
+                lv1_cluster_tb[lv1_offset] * fs_metainf->cluster_block_count
+            );
+            cluster_index = lv0_cluster_tb[lv0_offset];
+            if (cluster_index == 0) {
+                return OS_FILE_NOT_FOUND;
+            }
+            return OS_SUCCESS;
+        }
+
+        if (file_cluster_index < LEVEL4_INDIRECT_START_CLUSTER_INDEX) {
+            // 三级间接指针范围
+            uint64_t offset = file_cluster_index - LEVEL3_INDIRECT_START_CLUSTER_INDEX;
+            if (offset >= (uint64_t)MaxClusterEntryCount * MaxClusterEntryCount * MaxClusterEntryCount) {
+                return OS_INVALID_PARAMETER;
+            }
+
+            uint64_t lv2_offset = offset >> 18;
+            uint64_t lv1_offset = (offset >> 9) & 511;
+            uint64_t lv0_offset = offset & 511;
+
+            uint64_t* lv2_cluster_tb = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
+                the_inode.data_desc.index_table.triple_indirect_pointer * fs_metainf->cluster_block_count
+            );
+            uint64_t* lv1_cluster_tb = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
+                lv2_cluster_tb[lv2_offset] * fs_metainf->cluster_block_count
+            );
+            uint64_t* lv0_cluster_tb = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
+                lv1_cluster_tb[lv1_offset] * fs_metainf->cluster_block_count
+            );
+            cluster_index = lv0_cluster_tb[lv0_offset];
+            if (cluster_index == 0) {
+                return OS_FILE_NOT_FOUND;
+            }
+            return OS_SUCCESS;
+        }
+    }
+    return OS_INVALID_PARAMETER;
+}
+// 从根inode解析路径
+int init_fs_t::path_analyze(char *path, Inode &inode)
+{   
+    uint64_t filepathlen=strlen(path);
+    if(filepathlen==0||filepathlen>=FILE_PATH_MAX_LEN)return OS_INVALID_FILE_PATH;
+    if(path[0]!='/')return OS_INVALID_FILE_PATH;
+    char*NameStrStartptr=path+1;
+    char*NameStrEndptr=path+1;
+    char*end=path+filepathlen;
+    Inode RootdirInode;
+    if(is_memdiskv1){
+    get_inode(fs_metainf->root_block_group_index,fs_metainf->root_directory_inode_index,RootdirInode);
+    FileEntryinDir* rootdirs_file_entry;
+    
+    while (NameStrEndptr<end||NameStrStartptr<end)
+    {
+        while(*NameStrEndptr!='/')NameStrEndptr++;
+        *NameStrEndptr='\0';
+
+    }
+}else{
+
+}
     return OS_SUCCESS;
 }
