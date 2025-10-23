@@ -89,7 +89,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     } __attribute__((packed));
     
     struct extents_metainf {
-        uint64_t first_cluster_index;        // 第一个簇索引
+        uint64_t first_cluster_index_of_extents_array;        // 第一个簇索引
         uint32_t entries_count;              // extent条目数量
     } __attribute__((packed));
     
@@ -121,22 +121,23 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         //显然 最多47个字节
         uint32_t inode_index;                // inode索引
         uint32_t block_group_index;          // 块组索引
-    } __attribute__((packed));
-    uint64_t bitmapindex_to_cluster_index(
-        uint64_t block_group_index,
-        uint32_t bitmap_index
-    );   
+    } __attribute__((packed));  
         //此函数返回void*指针，指针处获得了原始的对应块组的对应种类的位图的原始数据
     void* get_bitmap_base(
         uint64_t block_group_index,
         uint32_t bitmap_type
     );
     
-    uint32_t search_avaliable_inode_bitmap_bit(
-        uint64_t block_group_index
+    uint32_t search_avaliable_inode_bitmap_bit(//未完成所有特性
+        uint64_t&block_group_index//传入0则扫描所有块组，非0则只在特定块组中搜索
     );
-    uint32_t search_avaliable_cluster_bitmap_bit(
-        uint64_t block_group_index
+    uint32_t search_avaliable_cluster_bitmap_bit(//未完成所有特性
+        uint64_t&block_group_index//传入0则扫描所有块组，非0则只在特定块组中搜索
+    );
+    int search_avaliable_cluster_bitmap_bits(
+        uint64_t aquired_avaliable_clusters_count,
+        uint64_t&result_base,
+        uint64_t&block_group_index
     );
     SuperCluster*get_supercluster(uint32_t block_group_index);
 
@@ -172,6 +173,13 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t block_index,
         int &status
     );
+    /**
+     *内部接口处理inode大小改变，
+     *会根据inode指向的文件大小的改变去修改相应bitmap
+     */
+    int resize_inode(Inode& the_inode, uint64_t new_size);//未完成所有特性
+    int Increase_inode_allocated_clusters(Inode& the_inode, uint64_t Increase_clusters_count);//未完成所有特性
+    int Decrease_inode_allocated_clusters(Inode& the_inode, uint64_t Decrease_clusters_count);//未完成所有特性
     int write_inode(
         uint64_t block_group_index,
         uint64_t inode_index,
@@ -181,6 +189,33 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t block_group_index,
         uint64_t inode_index,
         Inode& inode
+    );
+    int inode_content_write(//从特定偏移量上覆写，若超出大小会报错
+        Inode the_inode,
+        uint64_t stream_base_offset,
+        uint64_t size,
+        uint8_t*buffer
+    );
+        int inode_level1_idiwrite(//从一级索引表上读取
+        uint64_t rootClutser_of_lv1_index,
+        uint64_t fsize,
+        uint64_t start_cluster_index_of_datastream,
+        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
+        uint8_t*buffer
+    );
+        int inode_level2_idiwrite(//从一级索引表上读取
+        uint64_t rootClutser_of_lv1_index,
+        uint64_t fsize,
+        uint64_t start_cluster_index_of_datastream,
+        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
+        uint8_t*buffer
+    );
+        int inode_level3_idiwrite(//从一级索引表上读取
+        uint64_t rootClutser_of_lv3_index,
+        uint64_t fsize,
+        uint64_t datastream_start_logical_clst,
+        uint64_t datastream_end_logical_clst,//从start到end_cluster_index-1引索的簇读取
+        uint8_t*buffer
     );
     int inode_content_read(//从特定偏移量上读取，若超出大小会报错
         Inode the_inode,
@@ -209,16 +244,16 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
         uint8_t*buffer
     );
-    int inode_filecluster_to_cluster_index(
+    int filecluster_to_fscluster_in_idxtb(
         Inode the_inode,
         uint64_t file_cluster_index,
         uint64_t&cluster_index
     );
-    int inode_content_write(//从特定偏移量上覆写，若超出大小会报错
+        int filecluster_to_fscluster_in_extents(
         Inode the_inode,
-        uint64_t stream_base_offset,
-        uint64_t size,
-        uint8_t*buffer
+        uint64_t file_cluster_index,
+        uint64_t&cluster_index,
+        FileExtentsEntry_t& extents_entry
     );
     int path_analyze(char*path,Inode& inode);
     HyperCluster*fs_metainf;

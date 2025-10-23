@@ -86,7 +86,7 @@ align 0x1000
 pml4_table:
 dq pml4_table_pdpt_lowmem_rigon+0x3
 times 255 dq 0
-dq pml4_table_pdpt_highmem_rigon+0x3
+dq pml4_table_pdpt_lowmem_rigon+0x3
 times 255 dq 0
 pml4_table_pdpt_lowmem_rigon:
 %assign i 0
@@ -95,38 +95,12 @@ dq i*PAGE_SIZE_IN_LV_2+3+PS_MASK
 %assign i  i+1
 %endrep
 %undef i
-pml4_table_pdpt_highmem_rigon:
-dq pml4_table_pd_highmem_rigon+0x3
-times 511 dq 0
-pml4_table_pd_highmem_rigon:
-%assign i 0
-%rep 511
-dq KImgphybase+i*PAGE_SIZE_IN_LV_1+0x3+PS_MASK
-%assign i  i+1
-%endrep
-%undef i
 pml5_table:
 dq pml5_table_pml4_low+0x3
 times 255 dq 0
-dq pml5_table_pml4_high+0x3
+dq pml5_table_pml4_low+0x3
 times 255 dq 0
 pml5_table_pml4_low:
-dq pml5_table_pml4_low_pdpt+0x3
-pml5_table_pml4_low_pdpt:
-%assign i 0
-%rep 512
-dq i*PAGE_SIZE_IN_LV_2+3+PS_MASK
-%assign i  i+1
-%endrep
-%undef i
-pml5_table_pml4_high:
-dq pml5_table_pml4_high_pdpt+0x3
-pml5_table_pml4_high_pdpt:
-dq pml5_table_pml4_high_pdpt_pd+0x3
-pml5_table_pml4_high_pdpt_pd:
-%assign i 0
-%rep 511
-dq KImgphybase+i*PAGE_SIZE_IN_LV_1+0x3+PS_MASK
-%assign i  i+1
-%endrep
-%undef i
+dq pml4_table_pdpt_lowmem_rigon+0x3
+times 511 dq 0
+
