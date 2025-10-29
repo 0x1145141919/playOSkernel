@@ -97,3 +97,5 @@ void setentries_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t val
 void setmem(void* ptr, uint64_t size_in_byte, uint8_t value);
 extern "C" void __wrap___stack_chk_fail(void);
 uint64_t align_up(uint64_t value, uint64_t alignment);
+extern const uint8_t bit_reverse_table[256];
+uint64_t reverse_perbytes(uint64_t value) ;

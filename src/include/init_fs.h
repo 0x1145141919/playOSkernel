@@ -2,7 +2,11 @@
 #include "BlockDevice.h"
 #include <cstdint>
 #include "MemoryDisk.h"
+
 typedef uint64_t FileID_t;
+
+// 定义无效的位图索引，用于返回错误状态
+static constexpr uint32_t INVALID_BITMAP_INDEX = static_cast<uint32_t>(-1);
 
 class init_fs_t {//支持卸载后向前移动，不卸载的情况下向后增加分区大小
     block_device_t_v1* phylayer;
@@ -19,9 +23,11 @@ class init_fs_t {//支持卸载后向前移动，不卸载的情况下向后增�
     struct Inode;
     struct FileEntryinDir;
 static constexpr uint64_t LEVLE1_INDIRECT_START_CLUSTER_INDEX = 12;
+static constexpr uint64_t DIRECT_CLUSTERS =  LEVLE1_INDIRECT_START_CLUSTER_INDEX;
 static constexpr uint64_t LEVEL2_INDIRECT_START_CLUSTER_INDEX =  LEVLE1_INDIRECT_START_CLUSTER_INDEX +512;
 static constexpr uint64_t LEVEL3_INDIRECT_START_CLUSTER_INDEX =  LEVEL2_INDIRECT_START_CLUSTER_INDEX +512*512;
 static constexpr uint64_t LEVEL4_INDIRECT_START_CLUSTER_INDEX =  LEVEL3_INDIRECT_START_CLUSTER_INDEX +512*512*512;
+static constexpr uint32_t TRIPLE_INDIRECT_CLUSTERS=512*512*512;
 static constexpr uint64_t HYPER_CLUSTER_INDEX=0;
 static constexpr uint64_t CLUSTER_DEFAULT_SIZE = 4096;
 static constexpr uint64_t DEFAULT_BLOCKS_GROUP_MAX_CLUSTER = 8 * 4096;
@@ -134,23 +140,41 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     uint32_t search_avaliable_cluster_bitmap_bit(//未完成所有特性
         uint64_t&block_group_index//传入0则扫描所有块组，非0则只在特定块组中搜索
     );
+    /**
+     * @brief 搜索指定块组中连续的可用的簇位图位
+     * 
+     * @param aquired_avaliable_clusters_count 获取的簇数
+     * @param result_base 获取的起始簇索引
+     * @param block_group_index 块组索引
+     * @return int 0: 成功, 非0: 失败
+
+     */
     int search_avaliable_cluster_bitmap_bits(
         uint64_t aquired_avaliable_clusters_count,
         uint64_t&result_base,
         uint64_t&block_group_index
     );
+    int FileExtentsEntry_merger(FileExtentsEntry_t *old_buff, FileExtentsEntry_t *new_buff, uint64_t &entryies_count);
+    int clusters_bitmap_alloc(
+        uint64_t alloc_clusters_count,
+        FileExtentsEntry_t *extents_entry,
+        uint64_t&entry_count);
     SuperCluster*get_supercluster(uint32_t block_group_index);
-
     int set_inode_bitmap_bit(
         uint64_t block_group_index,
         uint64_t inode_index,
-        bool value
-    );
+        bool value);
     int set_inode_bitmap_bits(
         uint64_t block_group_index,
         uint64_t base_index,
         uint64_t bit_count,
         bool value
+    );
+    int logical_offset_toindex(
+            FileExtentsEntry_t* extents_array,
+            uint64_t extents_count,
+            uint64_t logical_offset ,
+            uint64_t &result_index
     );
     bool get_inode_bitmap_bit(
         uint64_t block_group_index,
@@ -168,6 +192,19 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t bit_count,
         bool value
     );
+    /*之前的接口是在特定块组的位图下的接口，需要在特定块组特定偏移量以及范围设置
+    全局接口是在全局位图下的接口，不需要知道块组，全局的簇的索引解析出对应块组，然后
+    使用对应块组的接口去设置
+    */
+        int global_set_cluster_bitmap_bit(
+        uint64_t block_index,
+        bool value
+    );
+    int global_set_cluster_bitmap_bits(
+        uint64_t base_index,
+        uint64_t bit_count,
+        bool value
+    );
     bool get_cluster_bitmap_bit(
         uint64_t block_group_index,
         uint64_t block_index,
@@ -179,6 +216,37 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
      */
     int resize_inode(Inode& the_inode, uint64_t new_size);//未完成所有特性
     int Increase_inode_allocated_clusters(Inode& the_inode, uint64_t Increase_clusters_count);//未完成所有特性
+    //需要增加的对于特定级别引索表分配表并且处理每一个表项的函数
+    //这几个函数基本上是只在增加文件大小的时候调用
+    //由于是创建，所以说必定是从对应段的第一个引索开始
+    //0级表就是对于文件数据进行指定
+    //n级（非0）就是对于n-1级表进行指定
+    int lv2_create_and_fill(
+        uint64_t&lv2_tb_cluster_phyindex,
+        FileExtentsEntry_t *extents_entry,
+        uint64_t extents_entry_count,
+        uint64_t inextens_start_logical_cluster_index,
+        uint32_t to_allocate_clusters_count
+    );
+        int lv1_create_and_fill(
+        uint64_t&lv1_tb_cluster_phyindex,
+        FileExtentsEntry_t *extents_entry,
+        uint64_t extents_entry_count,
+        uint64_t&skipped_clusters_count,//之于extents_entry，inextens_start_logical_cluster_index算出来的extents表跳过的逻辑簇数
+        //不重复计算已经跳过的来优化时间复杂度到O(n)
+        uint64_t&inextens_start_logical_cluster_index,//此参数要参与内部的关于逻辑簇索引的计算，迭代
+        uint32_t&extents_entry_scanner_index,//此参数要参与内部的关于逻辑簇索引的计算，迭代
+        uint32_t to_allocate_clusters_count
+    );
+    int lv0_create_and_fill(
+        uint64_t&lv1_tb_cluster_phyindex,
+        FileExtentsEntry_t *extents_entry,
+        uint64_t extents_entry_count,
+        uint64_t&skipped_clusters_count,
+        uint64_t&inextens_start_logical_cluster_index,
+        uint32_t&extents_entry_scanner_index,
+        uint32_t to_allocate_clusters_count
+    );
     int Decrease_inode_allocated_clusters(Inode& the_inode, uint64_t Decrease_clusters_count);//未完成所有特性
     int write_inode(
         uint64_t block_group_index,

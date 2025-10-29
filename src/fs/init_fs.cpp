@@ -193,7 +193,8 @@ int init_fs_t::Mkfs()
     root_inode->creation_time = 0;
     root_inode->last_modification_time = 0;
     root_inode->last_access_time = 0;
-    uint64_t rootdir_first_cluster = search_avaliable_cluster_bitmap_bit(0);
+    uint64_t rootdirbg=0;
+    uint64_t rootdir_first_cluster = search_avaliable_cluster_bitmap_bit(rootdirbg);
     root_inode->data_desc.index_table.direct_pointers[0]=rootdir_first_cluster;
     set_cluster_bitmap_bit(0, rootdir_first_cluster, true);
     set_inode_bitmap_bit(0, 0, true);
@@ -439,6 +440,58 @@ int init_fs_t::filecluster_to_fscluster_in_extents(Inode the_inode, uint64_t log
     if(!is_memdiskv1)delete[] extents_array;
     return OS_IO_ERROR;
 }
+
+int init_fs_t::global_set_cluster_bitmap_bit(uint64_t block_index, bool value) {
+    // 检查输入参数有效性
+    if (!is_valid || fs_metainf == nullptr) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    // 检查全局簇索引是否超出范围
+    if (block_index >= fs_metainf->total_clusters) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    for(uint64_t i=0;i<fs_metainf->total_blocks_group_valid ;i++){
+        SuperCluster* sc = get_supercluster(i);
+        if(block_index>=sc->first_cluster_index&&
+           block_index<sc->first_cluster_index+sc->cluster_count){
+               uint64_t local_index=block_index - sc->first_cluster_index;
+               return set_cluster_bitmap_bit(i, local_index, value);
+           }
+    }
+    return OS_INVALID_PARAMETER;
+}
+
+int init_fs_t::global_set_cluster_bitmap_bits(uint64_t base_index, uint64_t bit_count, bool value) {
+    // 检查输入参数有效性
+    if (!is_valid || fs_metainf == nullptr) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    // 检查起始索引是否超出范围
+    if (base_index >= fs_metainf->total_clusters) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    // 检查位数是否为零或导致溢出
+    if (bit_count == 0 || base_index + bit_count > fs_metainf->total_clusters) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+  for(uint64_t i=0;i<fs_metainf->total_blocks_group_valid ;i++){
+        SuperCluster* sc = get_supercluster(i);
+        if(base_index>=sc->first_cluster_index&&
+           base_index<sc->first_cluster_index+sc->cluster_count
+        &&base_index+bit_count<=sc->first_cluster_index+sc->cluster_count){
+               uint64_t local_base_index=base_index - sc->first_cluster_index;
+               set_cluster_bitmap_bits(i, local_base_index, bit_count, value);
+               return OS_SUCCESS;
+           }
+    }
+    return OS_INVALID_PARAMETER;
+}
+
 // 从根inode解析路径
 int init_fs_t::path_analyze(char *path, Inode &inode)
 {   
