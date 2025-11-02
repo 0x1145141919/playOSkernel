@@ -1,9 +1,14 @@
 #include "MemoryDisk.h"
+#ifdef KERNEL_MODE
 #include "VideoDriver.h"
+#endif
 #include "../memory/includes/phygpsmemmgr.h"
 #include "../memory/includes/kpoolmemmgr.h"
 #include "blockdeviceids.h"
 #include "OS_utils.h"
+#ifdef USER_MODE
+#include <cstdio>
+#endif
 #include "os_error_definitions.h"
 MemoryDiskv1*initramfs_phylayer;
 MemoryDiskv1::MemoryDiskv1(uint32_t blocksize, uint64_t blockcount, phyaddr_t pbase)
@@ -11,8 +16,13 @@ MemoryDiskv1::MemoryDiskv1(uint32_t blocksize, uint64_t blockcount, phyaddr_t pb
     this->blk_count = blockcount;
     this->blk_size = blocksize;
     this->blkdevice_type=blockdevice_id::MEMDISK_V1;
-    if(blocksize){
-        kputsSecure("MemoryDiskv1: pbase not aligned to blocksize");
+    if(blocksize&4096){
+        #ifdef KERNEL_MODE
+        kputsSecure("MemoryDiskv1: blocksize not aligned to 4096");
+        #endif
+        #ifdef USER_MODE
+        printf("MemoryDiskv1: blocksize not aligned to 4096");
+        #endif
     }
     this->pbase = pbase;
     size = blockcount * blocksize;
@@ -23,7 +33,12 @@ MemoryDiskv1::MemoryDiskv1(uint32_t blocksize, uint64_t blockcount, phyaddr_t pb
     vbase=pbase;
 #endif
     if(vbase==0){
+        #ifdef KERNEL_MODE
         kputsSecure("MemoryDiskv1: remap failed");
+        #endif
+        #ifdef USER_MODE
+        printf("MemoryDiskv1: remap failed");
+        #endif
         return;
     }
     meta=(MemoryDiskMetaInfo*)vbase;
@@ -66,6 +81,11 @@ int MemoryDiskv1::readblk(uint64_t blkindex, uint64_t blk_count, void *dest)
     return 0;
 }
 
+int MemoryDiskv1::flush_cache()
+{
+    return 0;
+}
+
 void *MemoryDiskv1::get_vaddr(uint64_t blkindex, uint32_t offset)
 {
     if(blkindex>=this->blk_count)return nullptr;
@@ -74,5 +94,7 @@ void *MemoryDiskv1::get_vaddr(uint64_t blkindex, uint32_t offset)
 
 MemoryDiskv1::~MemoryDiskv1()
 {
+#ifdef KERNEL_MODE
 gKspacePgsMemMgr.pgs_remapped_free(vbase);
+#endif
 }

@@ -1,4 +1,5 @@
-#include "MemoryDisk.h"
+
+#include "init_fs.h"
 #include <cstdio>
 #include <sys/mman.h>
 int main(){
@@ -9,4 +10,6 @@ int main(){
         return -1;
     }
     block_device_t_v1* initramdisk=new MemoryDiskv1(DEFAULT_BLK_SIZE,DEFAULT_BLK_COUNT,ramdisk_base);
+    init_fs_t* fs=new init_fs_t(initramdisk);
+    fs->Create_del_and_Inner_surface_test();
 }

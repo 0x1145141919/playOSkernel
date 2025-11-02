@@ -4,7 +4,27 @@
 #include "MemoryDisk.h"
 
 typedef uint64_t FileID_t;
-
+enum inode_op_type:int{
+    INODE_OP_READ=0,
+    INODE_OP_WRITE=1,
+    DIR_INODE_OP_ACCESS=2,
+    INODE_OP_EXECUTE = 3,
+};
+enum access_check_result:int{
+    ACCESS_PERMITTED=0,
+    ACCESS_DENIED=1,
+};
+struct Visitor_t
+{
+   uint32_t uid;
+   uint32_t gid;
+};
+struct FileOpenType
+{
+    uint8_t read:1;
+    uint8_t write:1;
+    uint8_t append:1;
+};
 // 定义无效的位图索引，用于返回错误状态
 static constexpr uint32_t INVALID_BITMAP_INDEX = static_cast<uint32_t>(-1);
 
@@ -23,6 +43,7 @@ class init_fs_t {//支持卸载后向前移动，不卸载的情况下向后增�
     struct Inode;
     struct FileEntryinDir;
 static constexpr uint64_t LEVLE1_INDIRECT_START_CLUSTER_INDEX = 12;
+static constexpr uint32_t MAX_FILE_NAME_LEN = 56;
 static constexpr uint64_t DIRECT_CLUSTERS =  LEVLE1_INDIRECT_START_CLUSTER_INDEX;
 static constexpr uint64_t LEVEL2_INDIRECT_START_CLUSTER_INDEX =  LEVLE1_INDIRECT_START_CLUSTER_INDEX +512;
 static constexpr uint64_t LEVEL3_INDIRECT_START_CLUSTER_INDEX =  LEVEL2_INDIRECT_START_CLUSTER_INDEX +512*512;
@@ -34,6 +55,8 @@ static constexpr uint64_t DEFAULT_BLOCKS_GROUP_MAX_CLUSTER = 8 * 4096;
 static constexpr uint16_t DIR_TYPE = 1;
 static constexpr uint16_t FILE_TYPE = 0;
 static constexpr uint16_t INDEX_TABLE_TYPE = 0;
+
+
 // Bitmap type constants
 static constexpr uint32_t INODE_BITMAP = 0;
 static constexpr uint32_t CLUSTER_BITMAP = 1;
@@ -54,9 +77,10 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint32_t root_block_group_index;     // 根目录所在块组索引
         uint32_t root_directory_inode_index; // 根目录inode索引
         uint32_t max_block_group_size_in_clusters;     // 块组大小上限(以簇为单位)
-        uint16_t super_cluster_size;         // SuperCluster大小
+        uint16_t super_cluster_size;         // SuperCluster结构体大小
         uint16_t inode_size;                 // Inode大小
         uint16_t block_group_descriptor_size; // 块组描述符大小
+        uint16_t fileEntryinDir_size;
     } __attribute__((packed));
     
     struct BlocksgroupDescriptor {
@@ -71,12 +95,12 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint32_t version;                    // 版本号
         uint32_t cluster_count;              // 簇数量
         uint32_t clusters_bitmap_first_cluster;      // 簇位图的第一个簇索引
+        uint32_t clusters_bitmap_cluster_count;              // 簇位图占用的总共簇数
         uint32_t inodes_count_max;
         uint32_t inodes_array_first_cluster;         // inode数组的第一个簇索引
         uint32_t inodes_bitmap_first_cluster;        // inode位图的第一个簇索引
-        uint8_t inodes_array_cluster_count;          // inode数组占用的簇数
-        uint8_t clusters_bitmap_cluster_count;       // 簇位图占用的簇数
-        uint8_t inodes_bitmap_cluster_count;         // inode位图占用的簇数
+        uint32_t inodes_array_cluster_count;          // inode数组占用的簇数
+        uint32_t inodes_bitmap_cluster_count;         // inode位图占用的簇数
     } __attribute__((packed));
     
     struct file_flags {
@@ -85,6 +109,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t group_access : 3;           // 组权限 (0-7)
         uint64_t other_access : 3;           // 其他权限 (0-7)
         uint64_t extents_or_indextable : 1;  // 0: 索引表, 1: extents
+        uint64_t is_root_inode : 1;        // 是否为根目录inode
     } __attribute__((packed));
     
     struct file_index_table {
@@ -113,21 +138,68 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     {
         uint32_t uid;                        // 用户ID
         uint32_t gid;                        // 组ID
+        uint32_t parent_dir_inode_index;    // 父目录inode索引
+        uint32_t parent_dir_block_group_index;          // 块组索引
         uint64_t file_size;                  // 文件大小
-        file_flags flags;                    // 文件标志
-        uint64_t allocated_clusters;         // 已分配的簇数
+        file_flags flags;                    // 文件标志 
         uint64_t creation_time;              // 创建时间(秒)
         uint64_t last_modification_time;     // 最后修改时间(秒)
-        uint64_t last_access_time;           // 最后访问时间(秒)
+        uint64_t last_access_time;            // 最后访问时间(秒)     
         data_descript data_desc;             // 数据描述符
-    } ;
-    
+    };
+
+    //传给文件系统的文件路径中.是当前目录，..是上级目录
+    //若是根目录则报错，因为可能根据虚拟文件系统层，根目录的父目录在其它文件系统
+    /**
+ * 根据状态机思想以inode为主附带一些其它变量构造一个类解析路径
+ */
+    class FilePathAnalyzer{
+    public:
+    static constexpr int START=0;
+    static constexpr int IN_DIR=1;
+    static constexpr int IN_FILE=2;
+    static constexpr int END=3;
+    static constexpr int ERROR_STATE=4;
+    static constexpr int ROOT_DIR_NEED_OTHER_FILE_SYSTEM=5;
+    static constexpr int ACCESS_DENIED=6;
+protected:
+        Inode current_inode;
+        int state;
+        Visitor_t visitor;
+        char*path;
+        uint32_t pathname_length;
+        uint32_t pathname_scanner;//每次扫描完要移动到下一个目录名/文件名开始的位置
+        uint32_t current_dir_block_group_index;
+        uint32_t current_dir_inode_index;
+        public:
+        FilePathAnalyzer(Inode root_inode,char*path,uint32_t pathname_length,Visitor_t visitor);
+        int the_next(init_fs_t *fs_instance);
+        uint32_t get_current_inode_index();
+        uint32_t get_current_block_group_index();
+        int get_state();
+        Inode get_current_inode();
+    };
+    friend  class FilePathAnalyzer;
     struct FileEntryinDir {
-        uint8_t filename[48];                // 文件名，使用uint8_t避免平台相关的符号扩展问题
-        //显然 最多47个字节
+        uint8_t filename[MAX_FILE_NAME_LEN];                // 文件名，使用uint8_t避免平台相关的符号扩展问题
+        //显然 最多55个字节
         uint32_t inode_index;                // inode索引
         uint32_t block_group_index;          // 块组索引
     } __attribute__((packed));  
+    class FileExtents_in_clusterScanner
+    {
+        FileExtentsEntry_t* extents_array;
+        uint32_t extents_count;
+        uint32_t extents_entry_scanner;
+        uint32_t skipped_clusters_count;
+        uint32_t in_entry_offset;
+        public:
+        int the_next();
+        FileExtents_in_clusterScanner(FileExtentsEntry_t* extents_array,uint32_t extents_count);
+        uint32_t convert_to_logical_cluster_index();
+        uint64_t get_phyclsidx();
+    };
+    
         //此函数返回void*指针，指针处获得了原始的对应块组的对应种类的位图的原始数据
     void* get_bitmap_base(
         uint64_t block_group_index,
@@ -183,7 +255,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     );
     int set_cluster_bitmap_bit(
         uint64_t block_group_index,
-        uint64_t block_index,
+        uint64_t cluster_idx,
         bool value
     );
     int set_cluster_bitmap_bits(
@@ -197,7 +269,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     使用对应块组的接口去设置
     */
         int global_set_cluster_bitmap_bit(
-        uint64_t block_index,
+        uint64_t cluster_idx,
         bool value
     );
     int global_set_cluster_bitmap_bits(
@@ -207,7 +279,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     );
     bool get_cluster_bitmap_bit(
         uint64_t block_group_index,
-        uint64_t block_index,
+        uint64_t cluster_idx,
         int &status
     );
     /**
@@ -215,39 +287,10 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
      *会根据inode指向的文件大小的改变去修改相应bitmap
      */
     int resize_inode(Inode& the_inode, uint64_t new_size);//未完成所有特性
-    int Increase_inode_allocated_clusters(Inode& the_inode, uint64_t Increase_clusters_count);//未完成所有特性
-    //需要增加的对于特定级别引索表分配表并且处理每一个表项的函数
-    //这几个函数基本上是只在增加文件大小的时候调用
-    //由于是创建，所以说必定是从对应段的第一个引索开始
-    //0级表就是对于文件数据进行指定
-    //n级（非0）就是对于n-1级表进行指定
-    int lv2_create_and_fill(
-        uint64_t&lv2_tb_cluster_phyindex,
-        FileExtentsEntry_t *extents_entry,
-        uint64_t extents_entry_count,
-        uint64_t inextens_start_logical_cluster_index,
-        uint32_t to_allocate_clusters_count
-    );
-        int lv1_create_and_fill(
-        uint64_t&lv1_tb_cluster_phyindex,
-        FileExtentsEntry_t *extents_entry,
-        uint64_t extents_entry_count,
-        uint64_t&skipped_clusters_count,//之于extents_entry，inextens_start_logical_cluster_index算出来的extents表跳过的逻辑簇数
-        //不重复计算已经跳过的来优化时间复杂度到O(n)
-        uint64_t&inextens_start_logical_cluster_index,//此参数要参与内部的关于逻辑簇索引的计算，迭代
-        uint32_t&extents_entry_scanner_index,//此参数要参与内部的关于逻辑簇索引的计算，迭代
-        uint32_t to_allocate_clusters_count
-    );
-    int lv0_create_and_fill(
-        uint64_t&lv1_tb_cluster_phyindex,
-        FileExtentsEntry_t *extents_entry,
-        uint64_t extents_entry_count,
-        uint64_t&skipped_clusters_count,
-        uint64_t&inextens_start_logical_cluster_index,
-        uint32_t&extents_entry_scanner_index,
-        uint32_t to_allocate_clusters_count
-    );
+    int Increase_inode_allocated_clusters(Inode& the_inode, uint64_t Increase_clusters_count);
+    int idxtbmode_set_inode_lcluster_phyclsidx(Inode& the_inode, uint64_t lcluster_index, uint64_t phyclsidx);
     int Decrease_inode_allocated_clusters(Inode& the_inode, uint64_t Decrease_clusters_count);//未完成所有特性
+    int idxtbmod_delete_lcluster(Inode& the_inode, uint64_t lcluster_index);
     int write_inode(
         uint64_t block_group_index,
         uint64_t inode_index,
@@ -317,29 +360,53 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t file_cluster_index,
         uint64_t&cluster_index
     );
-        int filecluster_to_fscluster_in_extents(
+    int filecluster_to_fscluster_in_extents(
         Inode the_inode,
         uint64_t file_cluster_index,
         uint64_t&cluster_index,
         FileExtentsEntry_t& extents_entry
     );
-    int path_analyze(char*path,Inode& inode);
+    int dir_content_search_by_name(
+        Inode be_searched_dir_inode,
+        char* filename,
+        FileEntryinDir& result_entry    
+    );
+    int dir_content_append(
+        Inode&dir_inode,
+        FileEntryinDir append_entry    
+    );
+    int dir_content_delete_by_name(
+        Inode&dir_inode,
+        FileEntryinDir&del_entry
+    );
+    access_check_result access_check(
+        Visitor_t visitor,
+        Inode the_inode,
+        inode_op_type op_type
+    );
+    int path_analyze(char*path,Inode& inode,Visitor_t visitor);
     HyperCluster*fs_metainf;
     SuperCluster*SuperClusterArray;
     bool is_valid;
     bool is_memdiskv1;
+    Inode opened_file_inode_table[4096];
 public: 
+
     init_fs_t(block_device_t_v1* phylayer);
     int Mkfs();//格式化
-    int CreateFile(uint64_t user_token, char* filename);
-    int DeleteFile(uint64_t user_token, char* filename);
-    int mvFile(uint64_t user_token, char* oldname, char* newname);
-    int cpFile(uint64_t user_token, char* oldname, char* newname);
-    int CreateDir(uint64_t user_token, char* dirname);
-    int DeleteDir(uint64_t user_token, char* dirname);//删除目录,必须是空目录
-    int WriteFile(uint64_t user_token, FileID_t fileid, void* src, uint64_t size);
-    int ReadFile(uint64_t user_token, FileID_t fileid, void* dest, uint64_t size);
-    FileID_t OpenFile(uint64_t user_token, char* filename);
-    int CloseFile(uint64_t user_token, FileID_t fileid);
+    int CreateFile(Visitor_t executor,char* relative_path);
+    int DeleteFile(Visitor_t executor,char* relative_path);
+    int mvFile(Visitor_t executor, char* oldname, char* newname);
+    int cpFile(Visitor_t executor, char* oldname, char* newname);
+    int CreateDir(Visitor_t executor, char* relative_path);
+    int DeleteDir(Visitor_t executor, char* relative_path);//删除目录,必须是空目录
+    int WriteFile(Visitor_t executor, FileID_t in_fs_id, void* src, uint64_t size);
+    int ReadFile(Visitor_t executor, FileID_t in_fs_id, void* dest, uint64_t size);
+    int OpenFile(Visitor_t executor, char* relative_path, FileID_t& in_fs_id);
+    /**
+     * 这是个测试四个增删函数的函数，以及其它相关用户空间接口的函数，纯用户空间函数，不在内核态编译，可以使用各种用户态工具
+     */
+    int Create_del_and_Inner_surface_test();
+    int CloseFile(Visitor_t executor, FileID_t in_fs_id);
     ~init_fs_t();
 };

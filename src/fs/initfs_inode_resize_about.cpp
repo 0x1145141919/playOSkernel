@@ -35,487 +35,26 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
     uint64_t base_logical_cluster_index=the_inode.file_size / fs_metainf->cluster_size;
     if(status!=OS_SUCCESS)return status;
     if(the_inode.flags.extents_or_indextable == INDEX_TABLE_TYPE){
-        uint8_t start_diresct_lcluster=0;
-        uint8_t end_diresct_lcluster=0;
-        uint16_t start_single_lcluster=0;
-        uint16_t end_single_lcluster=0;
-        uint32_t start_double_lclusters=0;
-        uint32_t end_double_lclusters=0;
-        uint32_t start_triple_lclusters=0;
-        uint32_t end_triple_lclusters=0;
-        //解析上面这些索引
-        uint64_t skipped_clusters_count=0;
-        uint64_t inextens_start_logical_cluster_index=0;
-        uint32_t extents_entry_scanner_index=0;
-
-        // 计算簇数量
-        const uint64_t old_size = the_inode.file_size;
-        const uint64_t new_size = the_inode.file_size + Increase_clusters_count * fs_metainf->cluster_size;
-        const uint64_t old_clusters = (old_size + fs_metainf->cluster_size - 1) / fs_metainf->cluster_size;
-        const uint64_t new_clusters = (new_size + fs_metainf->cluster_size - 1) / fs_metainf->cluster_size;
-
-        // 直接表范围计算
-        uint8_t start_diresct_lcluster = 0;
-        uint8_t end_diresct_lcluster = 0;
-        if (new_clusters > old_clusters) {
-            // 文件扩展时：处理新增的直接表项
-            if (old_clusters < DIRECT_CLUSTERS) {
-                start_diresct_lcluster = static_cast<uint8_t>(old_clusters);
-            }
-            if (new_clusters > DIRECT_CLUSTERS) {
-                end_diresct_lcluster = DIRECT_CLUSTERS - 1;
-            } else {
-                end_diresct_lcluster = static_cast<uint8_t>(new_clusters - 1);
-            }
-        } else {
-            // 文件缩小时：处理被截断的直接表项
-            if (new_clusters < DIRECT_CLUSTERS) {
-                start_diresct_lcluster = static_cast<uint8_t>(new_clusters);
-            }
-            if (old_clusters > DIRECT_CLUSTERS) {
-                end_diresct_lcluster = DIRECT_CLUSTERS - 1;
-            } else {
-                end_diresct_lcluster = static_cast<uint8_t>(old_clusters - 1);
-            }
-        }
-
-        // 一阶间接表范围计算
-        uint16_t start_single_lcluster = 0;
-        uint16_t end_single_lcluster = 0;
-        const uint64_t level1_start = LEVLE1_INDIRECT_START_CLUSTER_INDEX;
-        const uint64_t level2_start = LEVEL2_INDIRECT_START_CLUSTER_INDEX;
-        if (new_clusters > old_clusters) {
-            if (old_clusters >= level1_start) {
-                start_single_lcluster = static_cast<uint16_t>(old_clusters - level1_start);
-            }
-            if (new_clusters > level2_start) {
-                end_single_lcluster = static_cast<uint16_t>(level2_start - level1_start - 1);
-            } else {
-                end_single_lcluster = static_cast<uint16_t>(new_clusters - level1_start - 1);
-            }
-        } else {
-            if (new_clusters >= level1_start) {
-                start_single_lcluster = static_cast<uint16_t>(new_clusters - level1_start);
-            }
-            if (old_clusters > level2_start) {
-                end_single_lcluster = static_cast<uint16_t>(level2_start - level1_start - 1);
-            } else {
-                end_single_lcluster = static_cast<uint16_t>(old_clusters - level1_start - 1);
-            }
-        }
-
-        // 二阶间接表范围计算
-        uint32_t start_double_lclusters = 0;
-        uint32_t end_double_lclusters = 0;
-        const uint64_t level3_start = LEVEL3_INDIRECT_START_CLUSTER_INDEX;
-        if (new_clusters > old_clusters) {
-            if (old_clusters >= level2_start) {
-                start_double_lclusters = static_cast<uint32_t>(old_clusters - level2_start);
-            }
-            if (new_clusters > level3_start) {
-                end_double_lclusters = static_cast<uint32_t>(level3_start - level2_start - 1);
-            } else {
-                end_double_lclusters = static_cast<uint32_t>(new_clusters - level2_start - 1);
-            }
-        } else {
-            if (new_clusters >= level2_start) {
-                start_double_lclusters = static_cast<uint32_t>(new_clusters - level2_start);
-            }
-            if (old_clusters > level3_start) {
-                end_double_lclusters = static_cast<uint32_t>(level3_start - level2_start - 1);
-            } else {
-                end_double_lclusters = static_cast<uint32_t>(old_clusters - level2_start - 1);
-            }
-        }
-
-        // 三阶间接表范围计算
-        uint32_t start_triple_lclusters = 0;
-        uint32_t end_triple_lclusters = 0;
-        const uint64_t triple_limit = level3_start + TRIPLE_INDIRECT_CLUSTERS;
-        if (new_clusters > old_clusters) {
-            if (old_clusters >= level3_start) {
-                start_triple_lclusters = static_cast<uint32_t>(old_clusters - level3_start);
-            }
-            if (new_clusters > triple_limit) {
-                end_triple_lclusters = TRIPLE_INDIRECT_CLUSTERS - 1;
-            } else {
-                end_triple_lclusters = static_cast<uint32_t>(new_clusters - level3_start - 1);
-            }
-        } else {
-            if (new_clusters >= level3_start) {
-                start_triple_lclusters = static_cast<uint32_t>(new_clusters - level3_start);
-            }
-            if (old_clusters > triple_limit) {
-                end_triple_lclusters = TRIPLE_INDIRECT_CLUSTERS - 1;
-            } else {
-                end_triple_lclusters = static_cast<uint32_t>(old_clusters - level3_start - 1);
-            }
-        }
-
-        if(start_diresct_lcluster&&end_diresct_lcluster)//直接表
+        FileExtents_in_clusterScanner scanner(extents_array, extents_entry_count);
+        for(uint64_t i=0;i<Increase_clusters_count;i++)
         {
-            uint64_t cluster_scanner=start_diresct_lcluster; 
-            uint32_t in_extents_offset=0;
-            while (cluster_scanner<=end_diresct_lcluster)
-            {   
-               in_extents_offset=inextens_start_logical_cluster_index - skipped_clusters_count;
-                the_inode.data_desc.index_table.direct_pointers[cluster_scanner]=
-                extents_array[extents_entry_scanner_index].first_cluster_index+in_extents_offset;
-                if(in_extents_offset>=extents_array[extents_entry_scanner_index].length_in_clusters)
-                {
-                    skipped_clusters_count+=extents_array[extents_entry_scanner_index].length_in_clusters;
-                    extents_entry_scanner_index++;
-                    inextens_start_logical_cluster_index=skipped_clusters_count;
-                    in_extents_offset=0;
-                }
-                cluster_scanner++;
-            }
-            
+        status=idxtbmode_set_inode_lcluster_phyclsidx(
+            the_inode,
+            base_logical_cluster_index + i,
+            scanner.convert_to_logical_cluster_index()
+        );
+        if(status!=OS_SUCCESS){
+           delete[] extents_array;
+            return status;
         }
-        if(start_single_lcluster&&end_single_lcluster)//一阶间接表
-        { 
-            if(start_single_lcluster==LEVLE1_INDIRECT_START_CLUSTER_INDEX)
-            {
-                status=lv0_create_and_fill(
-                    the_inode.data_desc.index_table.single_indirect_pointer,
-                    extents_array,
-                    extents_entry_count,
-                    skipped_clusters_count,
-                    inextens_start_logical_cluster_index,
-                    extents_entry_scanner_index,
-                    end_single_lcluster-start_single_lcluster+1
-                );
-                if(status!=OS_SUCCESS)
-                {
-
-                }
-            }
-            else{//不是第一次创建，需要读取已有的表进行修改
-                uint64_t*lv0tb_phycluster=nullptr;
-                if(is_memdiskv1)
-                {
-                    lv0tb_phycluster=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-                        start_single_lcluster*fs_metainf->cluster_block_count
-                    );
-                }else{
-                    lv0tb_phycluster=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-                    status=phylayer->readblk(
-                        the_inode.data_desc.index_table.single_indirect_pointer,
-                        start_single_lcluster,
-                        lv0tb_phycluster
-                    );
-                    if(status!=OS_SUCCESS)
-                    {
-                        delete[] lv0tb_phycluster;
-                        return status;
-                    } 
-                }
-                uint32_t in_extent_offset=inextens_start_logical_cluster_index-skipped_clusters_count;    
-                for(uint16_t i=start_single_lcluster;i<=end_single_lcluster;i++)
-                {
-                    lv0tb_phycluster[i]=extents_array[extents_entry_scanner_index].first_cluster_index+in_extent_offset;
-                    if(in_extent_offset>=extents_array[extents_entry_scanner_index].length_in_clusters)
-                    {
-                        skipped_clusters_count+=extents_array[extents_entry_scanner_index].length_in_clusters;
-                        extents_entry_scanner_index++;
-                        inextens_start_logical_cluster_index=skipped_clusters_count;
-                        in_extent_offset=0;
-                    }
-                }
-                if(!is_memdiskv1)delete[] lv0tb_phycluster;
-                status=phylayer->writeblk(
-                    the_inode.data_desc.index_table.single_indirect_pointer*fs_metainf->cluster_block_count,
-                    fs_metainf->cluster_block_count,
-                    lv0tb_phycluster
-                );
-            }
-        }
-        if(start_double_lclusters&&end_double_lclusters)//二阶间接表
-        {   
-            if(start_double_lclusters==LEVEL2_INDIRECT_START_CLUSTER_INDEX)
-            {
-                status=lv1_create_and_fill(
-                    the_inode.data_desc.index_table.double_indirect_pointer,
-                    extents_array,
-                    extents_entry_count,
-                    skipped_clusters_count,
-                    inextens_start_logical_cluster_index,
-                    extents_entry_scanner_index,
-                    end_double_lclusters-start_double_lclusters+1
-                );
-            }else{//不是第一次创建，需要读取已有的表进行修改
-                uint64_t*lv1tb_phycluster=nullptr;
-                if(is_memdiskv1)
-                {
-                    lv1tb_phycluster=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-                        start_double_lclusters*fs_metainf->cluster_block_count
-                    );
-            }else{
-                lv1tb_phycluster=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-                status=phylayer->readblk(
-                    the_inode.data_desc.index_table.double_indirect_pointer,
-                    start_double_lclusters,
-                    lv1tb_phycluster
-                );
-                if(status!=OS_SUCCESS)
-                {
-                    delete[] lv1tb_phycluster;
-                    return status;
-                }
-            }
-           uint32_t first_cluster_in_lv0tboffset=(start_double_lclusters-LEVEL2_INDIRECT_START_CLUSTER_INDEX)&511;
-           uint16_t first_lv0tb_to_fill=512-first_cluster_in_lv0tboffset;
-              //先处理第一个lv0表
-            uint64_t*lv0tb_to_fill=nullptr;
-            if(is_memdiskv1)
-            {
-                lv0tb_to_fill=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-                    start_double_lclusters*fs_metainf->cluster_block_count
-                );
-            }else{
-                lv0tb_to_fill=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-                status=phylayer->readblk(
-                    lv1tb_phycluster[((start_double_lclusters-LEVEL2_INDIRECT_START_CLUSTER_INDEX)>>9)&511],
-                    start_double_lclusters,
-                    lv0tb_to_fill
-                );
-                if(status!=OS_SUCCESS){
-                    delete[] lv0tb_to_fill;
-                    delete[] lv1tb_phycluster;
-                    return status;   
-                 }
-                 uint32_t in_extent_offset=0;
-                 for(uint16_t i=first_cluster_in_lv0tboffset;
-                     i<512;i++)
-                 {
-                    in_extent_offset=inextens_start_logical_cluster_index-skipped_clusters_count;
-                     lv0tb_to_fill[i]=extents_array[extents_entry_scanner_index].first_cluster_index+in_extent_offset;
-                     if(in_extent_offset>=extents_array[extents_entry_scanner_index].length_in_clusters)
-                     {
-                         skipped_clusters_count+=extents_array[extents_entry_scanner_index].length_in_clusters;
-                         extents_entry_scanner_index++;
-                         inextens_start_logical_cluster_index=skipped_clusters_count;
-                         in_extent_offset=0;
-                     }
-                 }
-            }
-            uint16_t lv1_start=(start_double_lclusters-LEVEL2_INDIRECT_START_CLUSTER_INDEX+511)>>9;
-            uint16_t lv1_end=(end_double_lclusters-LEVEL2_INDIRECT_START_CLUSTER_INDEX)>>9;
-            for(uint16_t i=lv1_start;i<=lv1_end;i++)
-            {
-                status=lv0_create_and_fill(
-                    lv1tb_phycluster[i],
-                    extents_array,
-                    extents_entry_count,
-                    skipped_clusters_count,
-                    inextens_start_logical_cluster_index,
-                    extents_entry_scanner_index,
-                    (i==lv1_end)?((end_double_lclusters&511)+1):512
-                );
-                if(status!=OS_SUCCESS){
-                    delete[] lv0tb_to_fill;
-                    delete[] lv1tb_phycluster;
-                    return status;
-                }
-            } delete[] lv1tb_phycluster;  
-            delete[] lv0tb_to_fill;
-            }
-           
-        }
-        if(start_triple_lclusters&&end_triple_lclusters)//三阶间接表
+        status=scanner.the_next();
+        if (status!=OS_SUCCESS)
         {
-            if(start_triple_lclusters==LEVEL3_INDIRECT_START_CLUSTER_INDEX)
-            {
-                status=lv2_create_and_fill(
-                    the_inode.data_desc.index_table.triple_indirect_pointer,
-                    extents_array,
-                    extents_entry_count,
-                    inextens_start_logical_cluster_index,
-                    end_triple_lclusters-start_triple_lclusters+1
-                );
-            }else{
-                //不是第一次创建，需要读取已有的表进行修改
-                uint32_t in_seg_offset=start_triple_lclusters-LEVEL3_INDIRECT_START_CLUSTER_INDEX;
-                uint64_t*lv2tb_phycluster=nullptr;
-                if(is_memdiskv1)
-                {
-                    lv2tb_phycluster=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-                        start_triple_lclusters*fs_metainf->cluster_block_count
-                    );
-                    if(lv2tb_phycluster==nullptr){
-                        return OS_IO_ERROR;
-                    }
-                }else{
-                    lv2tb_phycluster=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-                    status=phylayer->readblk(
-                        the_inode.data_desc.index_table.triple_indirect_pointer,
-                        fs_metainf->cluster_block_count,
-                        lv2tb_phycluster
-                    );
-                }
-                if(in_seg_offset&511)
-                {
-                                    
-                    uint32_t lv0_start_offset = in_seg_offset & 511;
-                    uint16_t lv1_index = (in_seg_offset >> 9) & 511;
-                    uint16_t lv2_index = in_seg_offset >> 18;
-
-                    uint64_t lv1tb_phys_cluster = lv2tb_phycluster[lv2_index];
-                    uint64_t* lv0tb_to_fill = nullptr;
-
-                    if (is_memdiskv1)
-                    {
-                        lv0tb_to_fill = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
-                            lv1tb_phys_cluster * fs_metainf->cluster_block_count + lv1_index * fs_metainf->cluster_block_count
-                        );
-                    }
-                    else
-                    {
-                        lv0tb_to_fill = new uint64_t[fs_metainf->cluster_size / sizeof(uint64_t)];
-                        status = phylayer->readblk(
-                            lv1tb_phys_cluster,
-                            lv1_index,
-                            lv0tb_to_fill
-                        );
-                        if (status != OS_SUCCESS)
-                        {
-                            delete[] lv0tb_to_fill;
-                            delete[] lv2tb_phycluster;
-                            return status;
-                        }
-                    }
-
-                    uint32_t in_extent_offset = inextens_start_logical_cluster_index - skipped_clusters_count;
-                    for (uint16_t i = lv0_start_offset; i < 512; i++)
-                    {
-                        lv0tb_to_fill[i] = extents_array[extents_entry_scanner_index].first_cluster_index + in_extent_offset;
-                        if (in_extent_offset >= extents_array[extents_entry_scanner_index].length_in_clusters)
-                        {
-                            skipped_clusters_count += extents_array[extents_entry_scanner_index].length_in_clusters;
-                            extents_entry_scanner_index++;
-                            inextens_start_logical_cluster_index = skipped_clusters_count;
-                            in_extent_offset = 0;
-                        }
-                        else
-                        {
-                            in_extent_offset++;
-                        }
-                    }
-
-                    if (!is_memdiskv1)
-                    {
-                        status = phylayer->writeblk(
-                            lv1tb_phys_cluster * fs_metainf->cluster_block_count + lv1_index * fs_metainf->cluster_block_count,
-                            fs_metainf->cluster_block_count,
-                            lv0tb_to_fill
-                        );
-                        delete[] lv0tb_to_fill;
-                        if (status != OS_SUCCESS)
-                        {
-                            delete[] lv2tb_phycluster;
-                            return status;
-                        }
-                    }
-                }//要处理初始0级表
-                in_seg_offset=(in_seg_offset+511)&(~511);
-                if(in_seg_offset>>9)
-                {
-                    uint16_t lv1_start = (in_seg_offset >> 9) & 511;
-                    uint16_t lv2_index = in_seg_offset >> 18;
-
-                    uint64_t lv1tb_phys_cluster = lv2tb_phycluster[lv2_index];
-                    uint64_t* lv1tb_to_fill = nullptr;
-
-                    if (is_memdiskv1)
-                    {
-                        lv1tb_to_fill = (uint64_t*)memdiskv1_blockdevice->get_vaddr(
-                            lv1tb_phys_cluster * fs_metainf->cluster_block_count
-                        );
-                    }
-                    else
-                    {
-                        lv1tb_to_fill = new uint64_t[fs_metainf->cluster_size / sizeof(uint64_t)];
-                        status = phylayer->readblk(
-                            lv1tb_phys_cluster,
-                            0,
-                            lv1tb_to_fill
-                        );
-                        if (status != OS_SUCCESS)
-                        {
-                            delete[] lv1tb_to_fill;
-                            delete[] lv2tb_phycluster;
-                            return status;
-                        }
-                    }
-
-                    for (uint16_t i = lv1_start; i < 512; i++)
-                    {
-                        status = lv0_create_and_fill(
-                            lv1tb_to_fill[i],
-                            extents_array,
-                            extents_entry_count,
-                            skipped_clusters_count,
-                            inextens_start_logical_cluster_index,
-                            extents_entry_scanner_index,
-                            512
-                        );
-                        if (status != OS_SUCCESS)
-                        {
-                            if (!is_memdiskv1)
-                            {
-                                delete[] lv1tb_to_fill;
-                            }
-                            delete[] lv2tb_phycluster;
-                            return status;
-                        }
-                    }
-
-                    if (!is_memdiskv1)
-                    {
-                        status = phylayer->writeblk(
-                            lv1tb_phys_cluster * fs_metainf->cluster_block_count,
-                            fs_metainf->cluster_block_count,
-                            lv1tb_to_fill
-                        );
-                        delete[] lv1tb_to_fill;
-                        if (status != OS_SUCCESS)
-                        {
-                            delete[] lv2tb_phycluster;
-                            return status;
-                        }
-                    }
-                }//要处理初始1级表
-                //in_seg_offset向上取整到512*512的倍数
-                in_seg_offset=(in_seg_offset+512*512-1)/(512*512);
-                uint16_t lv2_start=(in_seg_offset)>>18;
-                uint16_t lv2_end=(end_triple_lclusters-LEVEL3_INDIRECT_START_CLUSTER_INDEX)>>18;
-                for(uint16_t i=lv2_start;i<=lv2_end;i++)
-                {
-                    status=lv1_create_and_fill(
-                        lv2tb_phycluster[i],
-                        extents_array,
-                        extents_entry_count,
-                        skipped_clusters_count,
-                        inextens_start_logical_cluster_index,
-                        extents_entry_scanner_index,
-                        (i==lv2_end)?(end_triple_lclusters&511):512
-                    );
-                    if(status!=OS_SUCCESS){
-                        delete[] lv2tb_phycluster;
-                        return status;
-                    }
-                }
-                if(!is_memdiskv1){
-                    phylayer->writeblk(
-                        the_inode.data_desc.index_table.triple_indirect_pointer*fs_metainf->cluster_block_count,
-                        fs_metainf->cluster_block_count,
-                        lv2tb_phycluster
-                    );
-                    delete[] lv2tb_phycluster;
-                }
-            }
+            delete[] extents_array;
+            return status;
         }
-        //先直接表，后是一阶间接，二阶间接，三阶间接
+        
+        }
     }else{
         FileExtentsEntry_t* old_extents_array = nullptr;
         if(is_memdiskv1)
@@ -584,267 +123,512 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
            delete[] extents_array;
             return status;
         }
-        the_inode.allocated_clusters+=extents_array[i].length_in_clusters;
     }
-    
-}
-int init_fs_t::lv2_create_and_fill(
-    uint64_t &lv2_tb_cluster_phyindex, 
-    FileExtentsEntry_t *extents_entry, 
-    uint64_t extents_entry_count, 
-    uint64_t extents_start_logical_cluster_index, 
-    uint32_t to_allocate_clusters_count
-)
-{   
-    int status=0;
-    uint64_t lv2tb_bg_idx=0;
-    lv2_tb_cluster_phyindex=search_avaliable_cluster_bitmap_bit(lv2tb_bg_idx);
-    status=set_cluster_bitmap_bit(lv2tb_bg_idx,lv2_tb_cluster_phyindex,true);
-    if(status!=0)return status;
-    
-    uint64_t* lv2_tb_phycluster=nullptr;
-    if(is_memdiskv1 ){
-        lv2_tb_phycluster=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-            lv2_tb_cluster_phyindex*fs_metainf->cluster_block_count
-        );
-    }else{
-         lv2_tb_phycluster=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-    }
-    
-    const uint32_t CLUSTERS_PER_LV1_TABLE = 512 * 512;  // 262144
-    uint16_t lv2_max_entry=(to_allocate_clusters_count>>18) & 511;  // 等价于 (to_allocate_clusters_count / CLUSTERS_PER_LV1_TABLE)
-    uint32_t startcluster_extents_idx=0;
-    uint64_t extents_logical_cluster_scanner=0;uint16_t i1=0;
-    uint64_t skipped_clusters=0;
-    for(;i1<extents_entry_count;i1++)
-    {
-        if(extents_logical_cluster_scanner<=extents_start_logical_cluster_index
-        &&extents_start_logical_cluster_index<extents_logical_cluster_scanner+extents_entry[i1].length_in_clusters)
-        {
-            startcluster_extents_idx=i1;
-            break;
-        }else{
-            extents_logical_cluster_scanner+=extents_entry[i1].length_in_clusters;
-        }
-    }
-    if(i1==extents_entry_count){
-        if(!is_memdiskv1 && lv2_tb_phycluster) {
-            delete[] lv2_tb_phycluster;
-        }
-        return OS_IO_ERROR;
-    }
-    skipped_clusters=extents_logical_cluster_scanner;
-    for(uint16_t i=0;i<=lv2_max_entry;i++)
-    {
-        status=lv1_create_and_fill(
-            lv2_tb_phycluster[i],
-            extents_entry,
-            extents_entry_count,
-            skipped_clusters,
-            extents_start_logical_cluster_index,
-            startcluster_extents_idx,
-            i==lv2_max_entry?(to_allocate_clusters_count&0x3FFFF):CLUSTERS_PER_LV1_TABLE
-        );
-        
-        // 检查 lv1_create_and_fill 的返回值
-        if(status != OS_SUCCESS) {
-            if(!is_memdiskv1 && lv2_tb_phycluster) {
-                delete[] lv2_tb_phycluster;
-            }
-            return status;
-        }
-    }
-    if(!is_memdiskv1){
-        phylayer->writeblk(
-            lv2_tb_cluster_phyindex*fs_metainf->cluster_block_count,
-            fs_metainf->cluster_block_count,
-            lv2_tb_phycluster
-        );
-        delete[] lv2_tb_phycluster;
-    }
-    return OS_SUCCESS;
-}
-int init_fs_t::lv1_create_and_fill(
-    uint64_t &lv1_tb_cluster_phyindex, 
-    FileExtentsEntry_t *extents_entry, 
-    uint64_t extents_entry_count, 
-    uint64_t&skipped_clusters_count,
-    uint64_t &extents_start_logical_cluster_index, 
-    uint32_t &extents_entry_scanner_index, 
-    uint32_t to_allocate_clusters_count
-)
-{   
-    int status=0;
-    uint64_t lv1tb_bg_idx=0;
-    lv1_tb_cluster_phyindex=search_avaliable_cluster_bitmap_bit(lv1tb_bg_idx);
-    status=set_cluster_bitmap_bit(lv1tb_bg_idx,lv1_tb_cluster_phyindex,true);
-    if(status!=0)return status;
-    
-    uint64_t* lv1_tb_phycluster=nullptr;
-    if(is_memdiskv1 ){
-        lv1_tb_phycluster=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-            lv1_tb_cluster_phyindex*fs_metainf->cluster_block_count
-        );
-    }else{
-         lv1_tb_phycluster=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-    }
-    
-    const uint32_t CLUSTERS_PER_LV0_TABLE = 512;  // 512
-    uint16_t lv1_max_entry=(to_allocate_clusters_count>>9) & 511;  // 等价于 (to_allocate_clusters_count / CLUSTERS_PER_LV0_TABLE)
-    uint64_t extents_logical_cluster_scanner=0;uint16_t i1=extents_entry_scanner_index;
-    // 调整扫描起始位置
-    for(uint16_t i=0; i<extents_entry_scanner_index; i++) {
-        extents_logical_cluster_scanner += extents_entry[i].length_in_clusters;
-    }
-    
-    for(;i1<extents_entry_count;i1++)
-    {
-        if(extents_logical_cluster_scanner<=extents_start_logical_cluster_index
-        &&extents_start_logical_cluster_index<extents_logical_cluster_scanner+extents_entry[i1].length_in_clusters)
-        {
-            extents_entry_scanner_index=i1;
-            break;
-        }else{
-            extents_logical_cluster_scanner+=extents_entry[i1].length_in_clusters;
-        }
-    }
-    if(i1==extents_entry_count){
-        if(!is_memdiskv1 && lv1_tb_phycluster) {
-            delete[] lv1_tb_phycluster;
-        }
-        return OS_IO_ERROR;
-    }
-    for(uint16_t i=0;i<=lv1_max_entry;i++)
-    {
-        status=lv0_create_and_fill(
-            lv1_tb_phycluster[i],
-            extents_entry,
-            extents_entry_count,
-            skipped_clusters_count,
-            extents_start_logical_cluster_index,
-            extents_entry_scanner_index,
-            i==lv1_max_entry?(to_allocate_clusters_count&0x1FF):CLUSTERS_PER_LV0_TABLE
-        );
-        
-        // 检查 lv0_create_and_fill 的返回值
-        if(status != OS_SUCCESS) {
-            if(!is_memdiskv1 && lv1_tb_phycluster) {
-                delete[] lv1_tb_phycluster;
-            }
-            return status;
-        }
-    }
-    if(!is_memdiskv1){
-        phylayer->writeblk(
-            lv1_tb_cluster_phyindex*fs_metainf->cluster_block_count,
-            fs_metainf->cluster_block_count,
-            lv1_tb_phycluster
-        );
-        delete[] lv1_tb_phycluster;
-    }
-    return OS_SUCCESS;
+    return status;
 }
 /**
- * @brief 创建并填充0级索引表（叶子节点）
- * 
- * 该函数用于创建并填充一个0级索引表，它是最底层的索引表，
- * 直接指向实际的数据簇。函数会分配物理簇用于存储索引表，
- * 并根据文件的extent信息填充索引表内容。
- * 
- * @param lv1_tb_cluster_phyindex 输出参数，返回新分配的0级索引表的物理簇索引
- * @param extents_entry 文件的extent条目数组，描述了文件数据在磁盘上的分布情况
- * @param extents_entry_count extent条目的数量
- * @param skipped_clusters_count 已经跳过的簇计数，用于计算当前extent内的偏移量
- * @param inextens_start_logical_cluster_index 当前处理的逻辑簇索引
- * @param extents_entry_scanner_index extent条目扫描器索引，指示当前正在处理的extent条目
- * @param to_allocate_clusters_count 需要分配的簇数量
- * @return int 返回操作结果，成功返回OS_SUCCESS，失败返回相应错误码
+ * @brief 引索表模式下设置inode的逻辑簇对应的物理簇索引
+ * @param the_inode inode对象
+ * @param lcluster_index 逻辑簇索引
+ * @param phyclsidx 物理簇索引
+ * 此函数只用于从下到上扫描建立，
+ * 若要填写（n-1）级表的首个索引，
+ * 根据上面的逻辑，必然要为其分配相应的簇
+ * 以及对应父表信息填写
  */
-int init_fs_t::lv0_create_and_fill(
-    uint64_t &lv1_tb_cluster_phyindex, 
-    FileExtentsEntry_t *extents_entry, 
-    uint64_t extents_entry_count,
-    uint64_t&skipped_clusters_count,
-    uint64_t &inextens_start_logical_cluster_index,
-    uint32_t &extents_entry_scanner_index,
-    uint32_t to_allocate_clusters_count)
-{
-    int status=0;
-    uint64_t lv0tb_bg_idx=0;
-    
-    // 在位图中查找可用的簇，并标记为已使用
-    lv1_tb_cluster_phyindex=search_avaliable_cluster_bitmap_bit(lv0tb_bg_idx);
-    status=set_cluster_bitmap_bit(lv0tb_bg_idx,lv1_tb_cluster_phyindex,true);
-    if(status!=0)return status;
-    
-    uint64_t* lv0_tb_phycluster=nullptr;
-    
-    // 根据存储类型获取0级索引表的虚拟地址或分配内存
-    if(is_memdiskv1 ){
-        lv0_tb_phycluster=(uint64_t*)memdiskv1_blockdevice->get_vaddr(
-            lv1_tb_cluster_phyindex*fs_metainf->cluster_block_count
-        );
-    }else{
-         lv0_tb_phycluster=new uint64_t[fs_metainf->cluster_size/sizeof(uint64_t)];
-    }
-    
-    // 参数有效性检查：确保分配的簇数量在有效范围内
-    if(to_allocate_clusters_count>512||to_allocate_clusters_count==0)
+int init_fs_t::idxtbmode_set_inode_lcluster_phyclsidx(Inode &the_inode, uint64_t lcluster_index, uint64_t phyclsidx)
+{//要改逻辑，ai夏季把生成一通
+    int status;
+    if(0<=lcluster_index&&lcluster_index<LEVLE1_INDIRECT_START_CLUSTER_INDEX)
     {
-        delete[] lv0_tb_phycluster;
-        return OS_INVALID_PARAMETER;
+        the_inode.data_desc.index_table.direct_pointers[lcluster_index]=phyclsidx;
+        return OS_SUCCESS;
     }
-    
-    // 计算在当前extent中的偏移量
-    uint32_t in_extents_offset=inextens_start_logical_cluster_index - skipped_clusters_count;
-    
-    // 填充0级索引表，将逻辑簇映射到物理簇
-    for(uint32_t i=0;i<to_allocate_clusters_count;i++)
+    if(lcluster_index==LEVLE1_INDIRECT_START_CLUSTER_INDEX)
     {
-        lv0_tb_phycluster[i]=extents_entry[extents_entry_scanner_index].first_cluster_index+in_extents_offset;
-        in_extents_offset++;
-        
-        // 检查是否需要移动到下一个extent条目
-        if(in_extents_offset>=extents_entry[extents_entry_scanner_index].length_in_clusters)
-        {
-            skipped_clusters_count+=extents_entry[extents_entry_scanner_index].length_in_clusters;
-            extents_entry_scanner_index++;
-            in_extents_offset=0;
-            inextens_start_logical_cluster_index=skipped_clusters_count;
-            // 检查extent条目是否用完但还有簇需要分配
-            if(extents_entry_scanner_index>=extents_entry_count&&i!=to_allocate_clusters_count-1)
+        // 需要分配一级间接表
+
+        uint64_t new_cluster;
+        uint64_t block_group_index;
+        int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+        if (ret != OS_SUCCESS) return ret;
+            // 标记簇为已用
+        ret = global_set_cluster_bitmap_bit(new_cluster, true);
+        if (ret != OS_SUCCESS) return ret;
+        the_inode.data_desc.index_table.single_indirect_pointer = new_cluster;        
+        // 获取一级间接表虚拟地址（转换簇索引为块索引）
+        uint64_t block_index = the_inode.data_desc.index_table.single_indirect_pointer * this->fs_metainf->cluster_block_count;
+        uint64_t* level1_table;
+        if (memdiskv1_blockdevice) {
+            // 内存盘模式：直接映射访问
+            level1_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index);
+            level1_table[0] = phyclsidx;
+        } else {
+            
+            level1_table = new uint64_t[this->fs_metainf->block_size / sizeof(uint64_t)];
+            int ret = phylayer->readblk(new_cluster*fs_metainf->cluster_block_count, fs_metainf->cluster_block_count, level1_table);
+            if (ret != OS_SUCCESS) return ret;
+            
+            // 修改索引项
+            level1_table[0] = phyclsidx;
+            
+            ret = phylayer->writeblk(new_cluster*fs_metainf->cluster_block_count, fs_metainf->cluster_block_count, level1_table);
+            if (ret != OS_SUCCESS) return ret;
+        }
+        return OS_SUCCESS;
+    }
+    if(LEVLE1_INDIRECT_START_CLUSTER_INDEX<lcluster_index&&lcluster_index<LEVEL2_INDIRECT_START_CLUSTER_INDEX)
+    {
+        uint32_t offset = lcluster_index - LEVLE1_INDIRECT_START_CLUSTER_INDEX;
+        // 填充一级间接表对应位置
+        uint64_t block_index = the_inode.data_desc.index_table.single_indirect_pointer * this->fs_metainf->cluster_block_count;
+        uint64_t* level1_table;
+        if (memdiskv1_blockdevice) {
+            // 内存盘模式
+             level1_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index*fs_metainf->cluster_block_count);
+            level1_table[offset] = phyclsidx;
+        } else {
+            uint64_t lv1tbblkidx=the_inode.data_desc.index_table.single_indirect_pointer * this->fs_metainf->cluster_block_count;
+            status=phylayer->write(
+                lv1tbblkidx,offset*sizeof(uint64_t),
+                &phyclsidx,
+                sizeof(uint64_t)
+            );
+            if(status!=OS_SUCCESS)
             {
-                if(!is_memdiskv1 && lv0_tb_phycluster) {
-                    delete[] lv0_tb_phycluster;
+                return status;
+            }
+            return OS_SUCCESS;
+        }
+        return OS_SUCCESS;
+    }
+
+    if(LEVEL2_INDIRECT_START_CLUSTER_INDEX<=lcluster_index&&lcluster_index<LEVEL3_INDIRECT_START_CLUSTER_INDEX)
+    {
+        uint32_t in_seg_offset = lcluster_index - LEVEL2_INDIRECT_START_CLUSTER_INDEX;
+        uint32_t second_level_index = in_seg_offset>>9;
+        uint32_t first_level_index = in_seg_offset % 512;
+        
+        // 分配二级间接表（首次访问时）
+        if (in_seg_offset == 0) {
+            uint64_t new_cluster;
+            uint64_t block_group_index;
+            int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+            if (ret != OS_SUCCESS) return ret;
+            ret = global_set_cluster_bitmap_bit(new_cluster, true);
+            if (ret != OS_SUCCESS) return ret;
+            the_inode.data_desc.index_table.double_indirect_pointer = new_cluster;
+        }
+
+        // 分配一级间接表（需要新一级表时）
+        if (in_seg_offset % 512 == 0) {
+            uint64_t block_index2 = the_inode.data_desc.index_table.double_indirect_pointer * this->fs_metainf->cluster_block_count;
+            uint64_t* level2_table=nullptr;
+            if (memdiskv1_blockdevice) {
+                // 内存盘模式
+                level2_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index2);
+                uint64_t new_cluster;
+                uint64_t block_group_index;
+                int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+                if (ret != OS_SUCCESS) return ret;
+                ret = global_set_cluster_bitmap_bit(new_cluster, true);
+                if (ret != OS_SUCCESS) return ret;
+                level2_table[second_level_index] = new_cluster;
+            } else {
+               uint64_t lv2_tb_phyblkidx=the_inode.data_desc.index_table.double_indirect_pointer *fs_metainf->cluster_block_count;
+                uint64_t new_cluster;
+                uint64_t block_group_index;
+                int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+                if (ret != OS_SUCCESS) return ret;
+                ret = global_set_cluster_bitmap_bit(new_cluster, true);
+                if (ret != OS_SUCCESS) return ret;
+                status=phylayer->write(
+                    lv2_tb_phyblkidx,
+                    second_level_index*sizeof(uint64_t),
+                    &new_cluster,
+                    sizeof(uint64_t)
+                );
+                if(status!=OS_SUCCESS)
+                {
+                    return status;
                 }
-                return OS_IO_ERROR;
             }
         }
+        
+        // 逐级解析获取一级间接表并填充
+        uint64_t block_index2 = the_inode.data_desc.index_table.double_indirect_pointer * this->fs_metainf->cluster_block_count;
+        if (memdiskv1_blockdevice) {
+            // 内存盘模式
+            uint64_t* level2_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index2);
+            uint64_t block_index1 = level2_table[second_level_index] * this->fs_metainf->cluster_block_count;
+            uint64_t* level1_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index1);
+            level1_table[first_level_index] = phyclsidx;
+        } else {
+            uint64_t lv2tbblkidx=the_inode.data_desc.index_table.double_indirect_pointer *fs_metainf->cluster_block_count;
+            uint64_t lv1tbclsidx=0;
+            status=phylayer->write(
+                lv2tbblkidx,
+                second_level_index*sizeof(uint64_t),
+                &lv1tbclsidx,
+                sizeof(uint64_t)
+            );
+            if(status!=OS_SUCCESS) return status;
+            uint64_t lv1tbblkidx=fs_metainf->cluster_block_count*lv1tbclsidx;
+            status=phylayer->write(
+                lv1tbblkidx,
+                first_level_index*sizeof(uint64_t),
+                &phyclsidx,
+                sizeof(uint64_t)
+            );if(status!=OS_SUCCESS) return status;
+            return OS_SUCCESS;
+        }
+        return OS_SUCCESS;
     }
-  
-    // 如果不是内存磁盘，则将索引表写入物理存储并释放临时内存
-    if(!is_memdiskv1){
-        phylayer->writeblk(
-            lv1_tb_cluster_phyindex*fs_metainf->cluster_block_count,
-            fs_metainf->cluster_block_count,
-            lv0_tb_phycluster
-        );
-        delete[] lv0_tb_phycluster;
+
+    if(LEVEL3_INDIRECT_START_CLUSTER_INDEX<=lcluster_index&&lcluster_index<LEVEL4_INDIRECT_START_CLUSTER_INDEX)
+    {
+        uint32_t in_seg_offset = lcluster_index - LEVEL3_INDIRECT_START_CLUSTER_INDEX;
+        uint32_t third_level_index = in_seg_offset>>18;
+        uint32_t second_level_index = (in_seg_offset>>9)&511;
+        uint32_t first_level_index = in_seg_offset & 511;
+        
+        // 分配三级间接表（首次访问时）
+        if (in_seg_offset == 0 && the_inode.data_desc.index_table.triple_indirect_pointer == 0) {
+            uint64_t new_cluster;
+            uint64_t block_group_index;
+            int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+            if (ret != OS_SUCCESS) return ret;
+            ret = global_set_cluster_bitmap_bit(new_cluster, true);
+            if (ret != OS_SUCCESS) return ret;
+            the_inode.data_desc.index_table.triple_indirect_pointer = new_cluster;
+        }
+
+        // 分配二级间接表（需要新二级表时）
+        if (in_seg_offset % (512 * 512) == 0) {
+            uint64_t block_index3 = the_inode.data_desc.index_table.triple_indirect_pointer * this->fs_metainf->cluster_block_count;
+            uint64_t* level3_table=nullptr;  
+            if (memdiskv1_blockdevice) {
+                // 内存盘模式
+                level3_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index3);
+                if (level3_table[third_level_index] == 0) {
+                    uint64_t new_cluster;
+                    uint64_t block_group_index;
+                    int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+                    if (ret != OS_SUCCESS) return ret;
+                    ret = global_set_cluster_bitmap_bit(new_cluster, true);
+                    if (ret != OS_SUCCESS) return ret;
+                    level3_table[third_level_index] = new_cluster;
+                }
+            } else {
+                uint64_t lv3_tb_phyblkidx=the_inode.data_desc.index_table.triple_indirect_pointer *fs_metainf->cluster_block_count;
+                uint64_t new_cluster;
+                uint64_t block_group_index;
+                int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+                if (ret != OS_SUCCESS) return ret;
+                ret = global_set_cluster_bitmap_bit(new_cluster, true);
+                if (ret != OS_SUCCESS) return ret;
+                status=phylayer->write(
+                    lv3_tb_phyblkidx,
+                    third_level_index*sizeof(uint64_t),
+                    &new_cluster,
+                    sizeof(uint64_t)
+                );
+            }
+        }
+
+        // 分配一级间接表（需要新一级表时）
+        if (in_seg_offset % 512 == 0) {
+            uint64_t block_index3 = the_inode.data_desc.index_table.triple_indirect_pointer * this->fs_metainf->cluster_block_count;          
+            if (memdiskv1_blockdevice) {
+                // 内存盘模式
+                uint64_t* level3_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index3);
+                uint64_t block_index2 = level3_table[third_level_index] * this->fs_metainf->cluster_block_count;
+                uint64_t* level2_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index2);
+                uint64_t new_cluster;
+                uint64_t block_group_index;
+                int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+                if (ret != OS_SUCCESS) return ret;
+                ret = global_set_cluster_bitmap_bit(new_cluster, true);
+                if (ret != OS_SUCCESS) return ret;
+                level2_table[second_level_index] = new_cluster;
+            } else {
+               uint64_t lv3tbblkidx=the_inode.data_desc.index_table.triple_indirect_pointer *fs_metainf->cluster_block_count;
+               uint64_t lv2tbclsidx=0;
+               status=phylayer->read(
+                    lv3tbblkidx,third_level_index*sizeof(uint64_t),
+                    &lv2tbclsidx,
+                    sizeof(uint64_t)
+               );
+                if(status!=OS_SUCCESS)return status;
+                uint64_t new_cluster;
+                uint64_t block_group_index;
+                int ret = search_avaliable_cluster_bitmap_bits(1, new_cluster, block_group_index);
+                if (ret != OS_SUCCESS) return ret;
+                ret = global_set_cluster_bitmap_bit(new_cluster, true);
+                if (ret != OS_SUCCESS) return ret;
+               status=phylayer->write(
+                    lv2tbclsidx*fs_metainf->cluster_block_count,
+                    second_level_index*sizeof(uint64_t),
+                    &new_cluster,
+                    sizeof(uint64_t)
+               );
+               if (status!=OS_SUCCESS)
+               {
+                   return status;
+               }
+               
+            }
+        }
+        
+        // 逐级解析获取一级间接表并填充
+        uint64_t block_index3 = the_inode.data_desc.index_table.triple_indirect_pointer * this->fs_metainf->cluster_block_count;
+
+        if (memdiskv1_blockdevice) {
+            // 内存盘模式
+            uint64_t* level3_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index3);
+            uint64_t block_index2 = level3_table[third_level_index] * this->fs_metainf->cluster_block_count;
+            uint64_t* level2_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index2);
+            uint64_t block_index1 = level2_table[second_level_index] * this->fs_metainf->cluster_block_count;
+            uint64_t* level1_table = (uint64_t*)memdiskv1_blockdevice->get_vaddr(block_index1);
+            level1_table[first_level_index] = phyclsidx;
+        } else {
+            uint64_t lv3tbblkidx=the_inode.data_desc.index_table.triple_indirect_pointer *fs_metainf->cluster_block_count;
+            uint64_t lv2tbclsidx=0;
+            status=phylayer->read(
+                lv3tbblkidx,third_level_index*sizeof(uint64_t),
+                &lv2tbclsidx,
+                sizeof(uint64_t)
+            );
+            if(status!=OS_SUCCESS)return status;
+            uint64_t lv2tbblkidx=lv2tbclsidx*fs_metainf->cluster_block_count;
+            uint64_t lv1tbclsidx=0;
+            status=phylayer->read(
+                lv2tbblkidx,second_level_index*sizeof(uint64_t),
+                &lv1tbclsidx,
+                sizeof(uint64_t)
+            );
+            if(status!=OS_SUCCESS)return status;
+            uint64_t lv1tbblkidx=lv1tbclsidx*fs_metainf->cluster_block_count;
+            status=phylayer->write(
+                lv1tbblkidx,
+                first_level_index*sizeof(uint64_t),
+                &phyclsidx,
+                sizeof(uint64_t)
+            );
+            if (status!=OS_SUCCESS)
+            {
+                return status;
+            }
+            return OS_SUCCESS;
+        }
     }
-    return OS_SUCCESS;
+    return OS_UNREACHABLE_CODE;
 }
 
 int init_fs_t::Decrease_inode_allocated_clusters(
     Inode &the_inode, uint64_t Decrease_clusters_count)
 {   
     uint64_t start_delete_lcluster=the_inode.file_size/fs_metainf->cluster_size;
-    
+    int status=OS_SUCCESS;
     if(the_inode.flags.extents_or_indextable==INDEX_TABLE_TYPE)
     {
-        
+        for(uint64_t i=0;i<Decrease_clusters_count;i++)
+        {
+            status=idxtbmod_delete_lcluster(
+                the_inode,
+                start_delete_lcluster-i
+            );
+            if(status!=OS_SUCCESS)return status;
+        }
     }
     else{
+        if(is_memdiskv1)
+        {
+            FileExtentsEntry_t* extents_array = (FileExtentsEntry_t*)memdiskv1_blockdevice->get_vaddr(
+                the_inode.data_desc.extents.first_cluster_index_of_extents_array * fs_metainf->cluster_block_count
+            );
+            if(extents_array==nullptr){
+                return OS_BAD_FUNCTION;
+            }
+            uint32_t old_extents_count=the_inode.data_desc.extents.entries_count;
+            uint64_t delete_cls_scanner=Decrease_clusters_count;
+            while(delete_cls_scanner)
+            {
+            if(delete_cls_scanner<extents_array[old_extents_count-1].length_in_clusters)
+            {delete_cls_scanner=0;
+             extents_array[old_extents_count-1].length_in_clusters-=delete_cls_scanner;
+             status=global_set_cluster_bitmap_bits(
+                extents_array[old_extents_count-1].first_cluster_index+
+                extents_array[old_extents_count-1].length_in_clusters,
+                delete_cls_scanner,
+                false
+             );     
+            }else{
+                delete_cls_scanner-=extents_array[old_extents_count-1].length_in_clusters;
+                old_extents_count--;
+                status=global_set_cluster_bitmap_bits(
+                    extents_array[old_extents_count].first_cluster_index,
+                    extents_array[old_extents_count].length_in_clusters,
+                    false
+                );
+                
+            }
+            if(status!=OS_SUCCESS)return status;
+            the_inode.data_desc.extents.entries_count=old_extents_count;
+        }
+    }
+    }
+    return OS_SUCCESS;
+}
+/**
+ * 这里的删除只在对应物理簇的位图中释放写0表示空闲
+ * 此函数只用于从下到上扫描删除，
+ * 若要删除（n-1）级表的首个索引，
+ * 根据上面的逻辑，必然要删除对应(n-1)级表信息
+ */
+int init_fs_t::idxtbmod_delete_lcluster(Inode &the_inode, uint64_t lcluster_index)
+{
+    int status;
+    uint64_t phycluster_index = 0;
+    
+    // 直接指针区域
+    if (0 <= lcluster_index && lcluster_index < LEVLE1_INDIRECT_START_CLUSTER_INDEX) {
+        phycluster_index = the_inode.data_desc.index_table.direct_pointers[lcluster_index];
+        the_inode.data_desc.index_table.direct_pointers[lcluster_index] = 0;
+        return global_set_cluster_bitmap_bit(phycluster_index, false);
+    }   
+    if (LEVLE1_INDIRECT_START_CLUSTER_INDEX <= lcluster_index && 
+        lcluster_index < LEVEL2_INDIRECT_START_CLUSTER_INDEX) {
+        uint32_t offset = lcluster_index - LEVLE1_INDIRECT_START_CLUSTER_INDEX;
+        // 物理设备模式
+        uint64_t lv1tbblkidx = the_inode.data_desc.index_table.single_indirect_pointer * 
+                                   fs_metainf->cluster_block_count;
+            
+            // 读取物理簇索引
+            status = phylayer->read(
+                lv1tbblkidx, 
+                offset * sizeof(uint64_t),
+                &phycluster_index,
+                sizeof(uint64_t)
+            );
+            
+            if (status != OS_SUCCESS) {
+                return status;
+            }        
+        // 释放物理簇
+        status= global_set_cluster_bitmap_bit(phycluster_index, false);
+        if(offset==0)global_set_cluster_bitmap_bit(
+            the_inode.data_desc.index_table.single_indirect_pointer, false);
 
     }
-    return 0;
+    
+    // 二级间接索引区域
+    if (LEVEL2_INDIRECT_START_CLUSTER_INDEX <= lcluster_index && 
+        lcluster_index < LEVEL3_INDIRECT_START_CLUSTER_INDEX) {
+        uint32_t in_seg_offset = lcluster_index - LEVEL2_INDIRECT_START_CLUSTER_INDEX;
+        uint32_t second_level_index = in_seg_offset >> 9;
+        uint32_t first_level_index = in_seg_offset % 512;
+        uint64_t lv2tbblkidx = the_inode.data_desc.index_table.double_indirect_pointer * 
+                                   fs_metainf->cluster_block_count;
+        uint64_t lv1tbclsidx = 0;
+            
+            // 读取二级表中的项
+            status = phylayer->read(
+                lv2tbblkidx,
+                second_level_index * sizeof(uint64_t),
+                &lv1tbclsidx,
+                sizeof(uint64_t)
+            );
+            
+            if (status != OS_SUCCESS) {
+                return status;
+            }
+            
+            // 读取一级表中的物理簇索引
+            uint64_t lv1tbblkidx = fs_metainf->cluster_block_count * lv1tbclsidx;
+            status = phylayer->read(
+                lv1tbblkidx,
+                first_level_index * sizeof(uint64_t),
+                &phycluster_index,
+                sizeof(uint64_t)
+            );
+            
+            if (status != OS_SUCCESS) {
+                return status;
+            }
+        // 释放物理簇
+        status= global_set_cluster_bitmap_bit(phycluster_index, false);
+        if(status != OS_SUCCESS)return status;
+        if(in_seg_offset%512==0)global_set_cluster_bitmap_bit(lv1tbclsidx, false);
+        if(in_seg_offset==(0))global_set_cluster_bitmap_bit(
+            the_inode.data_desc.index_table.double_indirect_pointer, false);
+    }
+    
+    // 三级间接索引区域
+    if (LEVEL3_INDIRECT_START_CLUSTER_INDEX <= lcluster_index && 
+        lcluster_index < LEVEL4_INDIRECT_START_CLUSTER_INDEX) {
+        uint32_t in_seg_offset = lcluster_index - LEVEL3_INDIRECT_START_CLUSTER_INDEX;
+        uint32_t third_level_index = in_seg_offset >> 18;
+        uint32_t second_level_index = (in_seg_offset >> 9) & 511;
+        uint32_t first_level_index = in_seg_offset & 511;
+            // 物理设备模式
+            uint64_t lv3tbblkidx = the_inode.data_desc.index_table.triple_indirect_pointer * 
+                                   fs_metainf->cluster_block_count;
+            uint64_t lv2tbclsidx = 0;
+            
+            // 读取三级表中的项
+            status = phylayer->read(
+                lv3tbblkidx,
+                third_level_index * sizeof(uint64_t),
+                &lv2tbclsidx,
+                sizeof(uint64_t)
+            );
+            
+            if (status != OS_SUCCESS) {
+                return status;
+            }
+            
+            uint64_t lv2tbblkidx = lv2tbclsidx * fs_metainf->cluster_block_count;
+            uint64_t lv1tbclsidx = 0;
+            
+            // 读取二级表中的项
+            status = phylayer->read(
+                lv2tbblkidx,
+                second_level_index * sizeof(uint64_t),
+                &lv1tbclsidx,
+                sizeof(uint64_t)
+            );
+            
+            if (status != OS_SUCCESS) {
+                return status;
+            }
+            
+            // 读取一级表中的物理簇索引
+            uint64_t lv1tbblkidx = lv1tbclsidx * fs_metainf->cluster_block_count;
+            status = phylayer->read(
+                lv1tbblkidx,
+                first_level_index * sizeof(uint64_t),
+                &phycluster_index,
+                sizeof(uint64_t)
+            );
+            
+            if (status != OS_SUCCESS) {
+                return status;
+            }      
+        
+        // 释放物理簇
+        status= global_set_cluster_bitmap_bit(phycluster_index, false);
+        if (status != OS_SUCCESS) {
+            return status;
+        }
+        if(in_seg_offset%512==0)status=global_set_cluster_bitmap_bit(lv1tbclsidx, false);
+        if(status != OS_SUCCESS)return status;
+        if(in_seg_offset%(512*512)==0)status=global_set_cluster_bitmap_bit(lv2tbclsidx, false);
+        if(status != OS_SUCCESS)return status;
+        if(in_seg_offset==0)status=global_set_cluster_bitmap_bit(
+            the_inode.data_desc.index_table.triple_indirect_pointer, false);
+        if(status != OS_SUCCESS)return status;
+    }
+    
+    return OS_SUCCESS;
 }

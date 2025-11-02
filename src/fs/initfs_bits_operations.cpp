@@ -2,7 +2,12 @@
 #include "../memory/includes/kpoolmemmgr.h"
 #include "os_error_definitions.h"
 #include "OS_utils.h"
+#ifdef USER_MODE
 #include <x86intrin.h>
+#endif
+#ifdef KERNEL_MODE 
+#include "kintrin.h"
+#endif
 void* init_fs_t::get_bitmap_base(uint64_t block_group_index, uint32_t bitmap_type) {
     // 内存盘优化路径：直接通过虚拟地址连续特性解析内存
     if (is_memdiskv1) {

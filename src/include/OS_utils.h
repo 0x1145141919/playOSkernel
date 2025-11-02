@@ -99,3 +99,4 @@ extern "C" void __wrap___stack_chk_fail(void);
 uint64_t align_up(uint64_t value, uint64_t alignment);
 extern const uint8_t bit_reverse_table[256];
 uint64_t reverse_perbytes(uint64_t value) ;
+int strcmp(const char *str1, const char *str2,uint32_t max_strlen=4096);

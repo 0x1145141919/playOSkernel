@@ -125,13 +125,12 @@ if (eax >= 0xB) {
     {
      switch(*scannr)
      {
-
     case MADT_entrytype::IOAPIC: 
-    io_apic_structure*structure=(io_apic_structure*)scannr;
+    {io_apic_structure*structure=(io_apic_structure*)scannr;
     io_apic_mgr_array[io_apic_count]=new io_apic_mgr_t(structure->io_apic_id,structure->io_apic_address);
-    scannr+=sizeof(io_apic_structure); 
+    scannr+=sizeof(io_apic_structure); }
     break;
-    case MADT_entrytype::Lx2APIC_NMI: 
+    case (uint8_t)MADT_entrytype::Lx2APIC_NMI: 
     scannr+=sizeof(local_x2apic_nmi_structure);
     break;
      case MADT_entrytype::LAPIC_NMI: 

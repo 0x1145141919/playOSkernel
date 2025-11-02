@@ -298,7 +298,7 @@ class io_apic_mgr_t {
 
     redirection_entry* redirection_entry_array;
     public:
-    typedef enum : uint8_t {
+    typedef enum : uint32_t {//牵扯到寄存器内联汇编，必须使用32位双字格式
         ID_REG=0x0,
         VERSION_REG=0x1,
         ARBIRATION_REG=0x2,

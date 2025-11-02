@@ -12,13 +12,6 @@ add_library(Mem_module OBJECT
     phymemSegsSubMgr.cpp
 )
 
-# 设置目标属性，开启位置无关代码（PIC）支持
-# 使得生成的代码可以在内存中任意位置加载和执行
-set_target_properties(Mem_module PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    OBJECT_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/obj"
-)
-
 # 设置私有包含目录，指定编译时需要的头文件搜索路径
 # 包括上层目录的include目录和当前目录下的includes目录
 target_include_directories(Mem_module PRIVATE
