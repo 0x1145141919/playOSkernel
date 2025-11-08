@@ -49,6 +49,7 @@ set(SRC_COMMON
     src/utils/util.cpp
     src/drivers/VideoDriver.cpp
     src/drivers/PortDriver.cpp
+    src/utils/kintrin.cpp
 )
 
 # 添加gnu-efi作为外部项目
@@ -67,6 +68,8 @@ ExternalProject_Get_Property(gnu-efi SOURCE_DIR)
 set(GNU_EFI_SOURCE_DIR ${SOURCE_DIR})
 add_subdirectory(src/memory)
 add_subdirectory(outsbmodules/tinySTL)
+add_subdirectory(src/fs)
+
 # 内核可执行文件
 add_executable(kernel.elf
     src/efi_about/UefiRunTimeServices.cpp
@@ -79,6 +82,7 @@ add_executable(kernel.elf
         src/panic/panic.cpp
         src/Interrupts/exceptions_handler.cpp
         src/acpi_subsystems/acpimgr.cpp
+        src/Interrupts/io_apic_mgr.cpp
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
@@ -94,15 +98,23 @@ target_include_directories(
 )
 target_compile_options(
     fs_test PRIVATE
- -DUSER_MODE>
+    -DUSER_MODE
+    -fsanitize=address
 )
+
 # 链接gnu-efi库
 target_link_libraries(kernel.elf PRIVATE 
     ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
     tinySTL
+    fs_static
 )
 
+target_link_libraries(fs_test PRIVATE
+    fs_user_test
+    tinySTL
+    -fsanitize=address
+)
 
 target_include_directories(kernel.elf PRIVATE
     "${CMAKE_SOURCE_DIR}/src/include"

@@ -10,15 +10,43 @@
  * @return int 错误码
  
  */
-
+/**
+ * 老版本的inode尺寸重定义接口有几个重大缺陷
+ * 1.未能正确处理逻辑簇为0的初始情况
+ * 2.文件大小为簇整数时边界错误
+ */
 int init_fs_t::resize_inode(Inode &the_inode, uint64_t new_size)
-{   int status=OS_SUCCESS;
-    uint64_t old_logical_end_cluster_index=the_inode.file_size / fs_metainf->cluster_size;
-    uint64_t new_logical_end_cluster_index=new_size / fs_metainf->cluster_size;
+{   
+    int status=OS_SUCCESS;
+    if(new_size&&the_inode.file_size)
+    {uint64_t old_logical_end_cluster_index=(the_inode.file_size-1) / fs_metainf->cluster_size;
+    uint64_t new_logical_end_cluster_index=(new_size-1) / fs_metainf->cluster_size;
     int64_t cluster_shift=new_logical_end_cluster_index-old_logical_end_cluster_index;
-    if(cluster_shift>0)status=Increase_inode_allocated_clusters(the_inode,cluster_shift);
-    if(cluster_shift==0)the_inode.file_size=new_size;
+    if(cluster_shift>0){
+        the_inode.file_size+=fs_metainf->cluster_size;
+        the_inode.file_size--;
+        status=Increase_inode_allocated_clusters(the_inode,cluster_shift);};
     if(cluster_shift<0)status=Decrease_inode_allocated_clusters(the_inode,-cluster_shift);
+    the_inode.file_size=new_size;
+}else{
+    if(the_inode.file_size==0)
+    {
+        the_inode.file_size=1;
+        uint64_t new_cluster_count=(new_size+fs_metainf->cluster_size-1) / fs_metainf->cluster_size;
+        status=Increase_inode_allocated_clusters(the_inode,new_cluster_count);
+        the_inode.file_size=new_size;
+    }
+    if(new_size==0)
+    {
+        uint64_t decrease_count=the_inode.file_size / fs_metainf->cluster_size+1;
+        status=Decrease_inode_allocated_clusters(the_inode,decrease_count);
+        if(status!=OS_SUCCESS)
+        {
+            return status;
+        }
+        the_inode.file_size=0;
+    }
+}
     return status;
 }
 inline int init_fs_t::Increase_inode_allocated_clusters(
@@ -27,7 +55,7 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
     int status;
     FileExtentsEntry_t* extents_array=nullptr;
     uint64_t extents_entry_count;
-    status=clusters_bitmap_alloc(
+    status=clusters_bitmap_alloc(//出现了内存分配问题
         Increase_clusters_count,
         extents_array,
         extents_entry_count
@@ -41,7 +69,7 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
         status=idxtbmode_set_inode_lcluster_phyclsidx(
             the_inode,
             base_logical_cluster_index + i,
-            scanner.convert_to_logical_cluster_index()
+            scanner.get_phyclsidx()
         );
         if(status!=OS_SUCCESS){
            delete[] extents_array;
@@ -83,9 +111,9 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
         {
             return OS_NOT_SUPPORT;
         }
-        if(old_extents_array[old_count-1].first_cluster_index+
+        if(old_extents_array[old_count-1].first_cluster_phyindex+
            old_extents_array[old_count-1].length_in_clusters==
-           extents_array[0].first_cluster_index)
+           extents_array[0].first_cluster_phyindex)
            {
             old_extents_array[old_count-1].length_in_clusters+=extents_array[0].length_in_clusters;
             ksystemramcpy(
@@ -115,7 +143,7 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
     for(uint64_t i=0;i<extents_entry_count;i++)
     {
        status=global_set_cluster_bitmap_bits(
-            extents_array[i].first_cluster_index,
+            extents_array[i].first_cluster_phyindex,
             extents_array[i].length_in_clusters,
             true
         );
@@ -124,6 +152,7 @@ inline int init_fs_t::Increase_inode_allocated_clusters(
             return status;
         }
     }
+    delete[] extents_array;
     return status;
 }
 /**
@@ -458,7 +487,7 @@ int init_fs_t::Decrease_inode_allocated_clusters(
             {delete_cls_scanner=0;
              extents_array[old_extents_count-1].length_in_clusters-=delete_cls_scanner;
              status=global_set_cluster_bitmap_bits(
-                extents_array[old_extents_count-1].first_cluster_index+
+                extents_array[old_extents_count-1].first_cluster_phyindex+
                 extents_array[old_extents_count-1].length_in_clusters,
                 delete_cls_scanner,
                 false
@@ -467,7 +496,7 @@ int init_fs_t::Decrease_inode_allocated_clusters(
                 delete_cls_scanner-=extents_array[old_extents_count-1].length_in_clusters;
                 old_extents_count--;
                 status=global_set_cluster_bitmap_bits(
-                    extents_array[old_extents_count].first_cluster_index,
+                    extents_array[old_extents_count].first_cluster_phyindex,
                     extents_array[old_extents_count].length_in_clusters,
                     false
                 );

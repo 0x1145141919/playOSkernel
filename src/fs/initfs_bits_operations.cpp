@@ -5,9 +5,59 @@
 #ifdef USER_MODE
 #include <x86intrin.h>
 #endif
-#ifdef KERNEL_MODE 
+#ifdef KERNEL_MODE
 #include "kintrin.h"
 #endif
+int init_fs_t::global_set_cluster_bitmap_bit(uint64_t cluster_idx, bool value) {
+    // 检查输入参数有效性
+    if (!is_valid || fs_metainf == nullptr) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    // 检查全局簇索引是否超出范围
+    if (cluster_idx >= fs_metainf->total_clusters) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    for(uint64_t i=0;i<fs_metainf->total_blocks_group_valid ;i++){
+        SuperCluster* sc = get_supercluster(i);
+        if(cluster_idx>=sc->first_cluster_index&&
+           cluster_idx<sc->first_cluster_index+sc->cluster_count){
+               uint64_t local_index=cluster_idx - sc->first_cluster_index;
+               return set_cluster_bitmap_bit(i, local_index, value);
+           }
+    }
+    return OS_INVALID_PARAMETER;
+}
+
+int init_fs_t::global_set_cluster_bitmap_bits(uint64_t base_index, uint64_t bit_count, bool value) {
+    // 检查输入参数有效性
+    if (!is_valid || fs_metainf == nullptr) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    // 检查起始索引是否超出范围
+    if (base_index >= fs_metainf->total_clusters) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    // 检查位数是否为零或导致溢出
+    if (bit_count == 0 || base_index + bit_count > fs_metainf->total_clusters) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+  for(uint64_t i=0;i<fs_metainf->total_blocks_group_valid ;i++){
+        SuperCluster* sc = get_supercluster(i);
+        if(base_index>=sc->first_cluster_index&&
+           base_index<sc->first_cluster_index+sc->cluster_count
+        &&base_index+bit_count<=sc->first_cluster_index+sc->cluster_count){
+               uint64_t local_base_index=base_index - sc->first_cluster_index;
+               set_cluster_bitmap_bits(i, local_base_index, bit_count, value);
+               return OS_SUCCESS;
+           }
+    }
+    return OS_INVALID_PARAMETER;
+}
 void* init_fs_t::get_bitmap_base(uint64_t block_group_index, uint32_t bitmap_type) {
     // 内存盘优化路径：直接通过虚拟地址连续特性解析内存
     if (is_memdiskv1) {
@@ -27,14 +77,13 @@ void* init_fs_t::get_bitmap_base(uint64_t block_group_index, uint32_t bitmap_typ
         }
 
         // 直接返回位图在内存中的虚拟地址（无需任何复制或分配）
-        return memdiskv1_blockdevice->get_vaddr(bitmap_first_cluster * fs_metainf->cluster_size);
+        return memdiskv1_blockdevice->get_vaddr(bitmap_first_cluster * fs_metainf->cluster_block_count);
     }
     int status;
 
 
-    SuperCluster* sc = new SuperCluster();
+    SuperCluster* sc = get_supercluster(block_group_index);
     if (!sc) {
-
         return nullptr;
     }
     
@@ -70,7 +119,6 @@ void* init_fs_t::get_bitmap_base(uint64_t block_group_index, uint32_t bitmap_typ
     status = phylayer->read(bitmap_block_index, 0, bitmap_data, bitmap_size);
     if (status != 0) {
         delete[] reinterpret_cast<uint8_t*>(bitmap_data);
-
         return nullptr;
     }
 
@@ -84,8 +132,8 @@ uint32_t init_fs_t::search_avaliable_inode_bitmap_bit(uint64_t&block_group_index
     // 确定搜索的结束块组
     uint64_t end_group = (block_group_index == 0) ? fs_metainf->total_blocks_group_valid : block_group_index;
     
-    for (uint64_t current_group = start_group; current_group <= end_group; ++current_group) {
-        void* bitmap_base = get_bitmap_base(current_group, INODE_BITMAP);
+    for (uint64_t current_group = start_group; current_group < end_group; ++current_group) {
+        uint64_t* bitmap_base =(uint64_t*) get_bitmap_base(current_group, INODE_BITMAP);
         if (!bitmap_base) continue;
 
         SuperCluster* sc = get_supercluster(current_group);
@@ -98,49 +146,27 @@ uint32_t init_fs_t::search_avaliable_inode_bitmap_bit(uint64_t&block_group_index
         
         // 计算该块组中inode位图的总位数
         uint64_t total_bits = sc->inodes_count_max;
-        uint32_t num_blocks = (total_bits + 511) / 512;
-        
-        for (uint32_t i = 0; i < num_blocks; i++) {
-            bitset512_t* block = reinterpret_cast<bitset512_t*>(
-                reinterpret_cast<uint8_t*>(bitmap_base) + i * sizeof(bitset512_t)
-            );
-            
-            // 处理最后一个块，可能未填满
-            if (i == num_blocks - 1) {
-                uint16_t max_bit_offset = total_bits & 511;
-                int result_offset = get_first_zero_bit_index(block);
-                
-                // 释放位图资源
-                if (!is_memdiskv1) {
-                    delete[] reinterpret_cast<uint8_t*>(bitmap_base);
-                }
-                
-                // 检查找到的位是否在有效范围内
-                if (result_offset != -1 && static_cast<uint16_t>(result_offset) < max_bit_offset) {
-                    block_group_index = current_group; // 更新输出参数
-                    return (i << 9) + result_offset; // 返回全局位索引
-                }
-                // 当前块组无可用位，继续下一个
-                break;
-            }
-            
-            // 处理完整填充的块
-            int index = get_first_zero_bit_index(block);
-            if (index != -1) {
-                if (!is_memdiskv1) {
-                    delete[] reinterpret_cast<uint8_t*>(bitmap_base);
-                }
-                block_group_index = current_group; // 更新输出参数
-                return i * 512 + static_cast<uint32_t>(index); // 返回全局位索引
-            }
-        }
-        
+        uint32_t num_64bits_uint = (total_bits + 63)>>6;
+        for (uint32_t i = 0; i < num_64bits_uint; i++) { 
+            uint64_t real_content=reverse_perbytes(bitmap_base[i]);
+            uint64_t scan_content=real_content;
+            for(uint8_t j = 0; j < 64; j++)
+            {
+                if((scan_content&(1<<j))==0){
+                    if(!is_memdiskv1)
+                    {
+                        delete[] reinterpret_cast<uint8_t*>(bitmap_base);
+                    }
+                    block_group_index=current_group;
+                    return i*64+j;  
+                } 
+            } 
+        } 
         // 释放当前块组的位图资源
         if (!is_memdiskv1) {
             delete[] reinterpret_cast<uint8_t*>(bitmap_base);
         }
     }
-    
     // 所有块组均无可用inode
     return INVALID_BITMAP_INDEX;
 }
@@ -152,7 +178,7 @@ uint32_t init_fs_t::search_avaliable_cluster_bitmap_bit(uint64_t&block_group_ind
     // 确定搜索的结束块组
     uint64_t end_group = (block_group_index == 0) ? fs_metainf->total_blocks_group_valid : block_group_index;
     
-    for (uint64_t current_group = start_group; current_group <= end_group; ++current_group) {
+    for (uint64_t current_group = start_group; current_group < end_group; ++current_group) {
         void* bitmap_base = get_bitmap_base(current_group, CLUSTER_BITMAP);
         if (!bitmap_base) continue;
 
@@ -321,7 +347,7 @@ int init_fs_t::FileExtentsEntry_merger(FileExtentsEntry_t *old_buff,FileExtentsE
     new_buff[new_scanner]=old_buff[0];
     for(uint64_t old_scanner=1;old_scanner<entryies_count;old_scanner++)
     {
-        if(new_buff[new_scanner].first_cluster_index+new_buff[new_scanner].length_in_clusters==old_buff[old_scanner].first_cluster_index){
+        if(new_buff[new_scanner].first_cluster_phyindex+new_buff[new_scanner].length_in_clusters==old_buff[old_scanner].first_cluster_phyindex){
             new_buff[new_scanner].length_in_clusters+=old_buff[old_scanner].length_in_clusters;
         }else{
             new_scanner++;
@@ -338,21 +364,23 @@ int init_fs_t::FileExtentsEntry_merger(FileExtentsEntry_t *old_buff,FileExtentsE
 *返回值：0成功，非0失败
  */
 
-int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsEntry_t *extents_entry, uint64_t&entry_count)
+int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsEntry_t*&extents_entry, uint64_t&entry_count)
 {   uint64_t left_clusters_count = alloc_clusters_count;
     constexpr uint64_t MAX_EXTENTS_ENTRIES = 1024; 
-    FileExtentsEntry_t *buffer_a=new FileExtentsEntry_t[MAX_EXTENTS_ENTRIES];
-    FileExtentsEntry_t *buffer_b=new FileExtentsEntry_t[MAX_EXTENTS_ENTRIES];
+    FileExtentsEntry_t *buffer_a=(FileExtentsEntry_t*)0x1;
+    buffer_a=new FileExtentsEntry_t[MAX_EXTENTS_ENTRIES];
+    FileExtentsEntry_t *buffer_b=nullptr;
+    buffer_b=new FileExtentsEntry_t[MAX_EXTENTS_ENTRIES];
     FileExtentsEntry_t *using_buffer=buffer_a;
     FileExtentsEntry_t *prepared_buffer=buffer_b;
     uint64_t extents_index=0;
     for(int i = 0; i < fs_metainf->total_blocks_group_valid; i++)//遍历所有块组
         {
             SuperCluster* sc = get_supercluster(i);
-            if(sc)
+            if(!sc)
             {
-                delete buffer_a;
-                delete buffer_b;
+                delete[] buffer_a;
+                delete[] buffer_b;
                 return OS_FILE_SYSTEM_DAMAGED;
             }
             uint64_t*clusters_bitmap=(uint64_t*)get_bitmap_base(i,CLUSTER_BITMAP);
@@ -368,7 +396,7 @@ int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsE
                 {
                     if(scanned_content==0){
                         if(is_reversed)break;
-                        using_buffer[extents_index].first_cluster_index=word_cluster_base+64-inword_left_bits;
+                        using_buffer[extents_index].first_cluster_phyindex=word_cluster_base+64-inword_left_bits;
                         using_buffer[extents_index].length_in_clusters=inword_left_bits>left_clusters_count?left_clusters_count:inword_left_bits;
                         left_clusters_count-=inword_left_bits;
                             if(left_clusters_count==0){
@@ -396,10 +424,11 @@ int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsE
                     }
                     uint8_t begin_continual_bits_count=__builtin_ctzll(scanned_content);
                     if(!is_reversed){
-                        using_buffer[extents_index].first_cluster_index=word_cluster_base+64-inword_left_bits;
+                        using_buffer[extents_index].first_cluster_phyindex=word_cluster_base+64-inword_left_bits;
                         using_buffer[extents_index].length_in_clusters=begin_continual_bits_count>left_clusters_count?left_clusters_count:begin_continual_bits_count;
                         extents_index++;
-                        left_clusters_count-=begin_continual_bits_count;
+                        if(left_clusters_count>=begin_continual_bits_count)
+                        {left_clusters_count-=begin_continual_bits_count;}else{left_clusters_count=0;}
                         if(left_clusters_count==0){
                                 extents_entry=new FileExtentsEntry_t[MAX_EXTENTS_ENTRIES];
                                 FileExtentsEntry_merger(using_buffer,extents_entry,extents_index);
@@ -442,7 +471,7 @@ int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsE
 int init_fs_t::set_inode_bitmap_bit(uint64_t block_group_index, uint64_t inode_index, bool value) {
     void* bitmap_base = get_bitmap_base(block_group_index, INODE_BITMAP);
     if (!bitmap_base) {
-        return -1;
+        return OS_OUT_OF_MEMORY;
     }
 
     uint32_t block_idx = inode_index / 512;
@@ -453,14 +482,14 @@ int init_fs_t::set_inode_bitmap_bit(uint64_t block_group_index, uint64_t inode_i
         if (!is_memdiskv1) {
             delete[] reinterpret_cast<uint8_t*>(bitmap_base);
         }
-        return -1;
+        return OS_INVALID_PARAMETER;
     }
     if(inode_index>=sc->inodes_count_max)
     {
         if (!is_memdiskv1) {
             delete[] reinterpret_cast<uint8_t*>(bitmap_base);
         }
-        return -1;
+        return OS_INVALID_PARAMETER;
     }
     bitset512_t* target_block = reinterpret_cast<bitset512_t*>(
         reinterpret_cast<uint8_t*>(bitmap_base) + block_idx * sizeof(bitset512_t)
@@ -561,7 +590,7 @@ int init_fs_t::logical_offset_toindex(
     {
         if(clusters_scanner<=logical_offset&&logical_offset<clusters_scanner+extents_array[i].length_in_clusters)
         {
-            result_index=extents_array[i].first_cluster_index+(logical_offset-clusters_scanner);
+            result_index=extents_array[i].first_cluster_phyindex+(logical_offset-clusters_scanner);
             return 0;
         }
         clusters_scanner+=extents_array[i].length_in_clusters;
