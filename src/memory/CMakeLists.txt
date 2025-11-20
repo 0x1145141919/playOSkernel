@@ -3,13 +3,7 @@
 add_library(Mem_module OBJECT 
     kpoolmemmgr.cpp
     Memory.cpp
-    pgtable_query.cpp
-    phygpsmemmgr_freememmanage.cpp
-    phygpsmemmgr_freememmanage_vaddrmanage.cpp
-    phygpsmemmgr_init.cpp
-    phygpsmemmgr_new_cr3.cpp
-    phygpsmemmgr_print.cpp
-    phymemSegsSubMgr.cpp
+    phygpsmemmgr.cpp
 )
 
 # 设置私有包含目录，指定编译时需要的头文件搜索路径
@@ -17,7 +11,6 @@ add_library(Mem_module OBJECT
 target_include_directories(Mem_module PRIVATE
 "/usr/include/efi/"
 ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/includes
     )
 
     # 设置编译选项，添加-fPIC选项以生成位置无关代码
@@ -42,13 +35,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../include
 add_library(Mem_module_shared SHARED
     kpoolmemmgr.cpp
     Memory.cpp
-    pgtable_query.cpp
-    phygpsmemmgr_freememmanage.cpp
-    phygpsmemmgr_freememmanage_vaddrmanage.cpp
-    phygpsmemmgr_init.cpp
-    phygpsmemmgr_new_cr3.cpp
-    phygpsmemmgr_print.cpp
-    phymemSegsSubMgr.cpp
+    phygpsmemmgr.cpp
 )
 
 # 设置动态库输出名称和位置
@@ -70,5 +57,4 @@ target_compile_options(Mem_module_shared PRIVATE
 target_include_directories(Mem_module_shared PRIVATE
 "/usr/include/efi/"
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/includes
 )

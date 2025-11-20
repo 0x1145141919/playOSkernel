@@ -398,159 +398,6 @@ int init_fs_t::DeleteFile(Visitor_t executor, char *relative_path)
     // 不应执行到这里
     return OS_UNREACHABLE_CODE;
 }
-int init_fs_t::Create_del_and_Inner_surface_test()
-{
-    // 创建测试用的访客身份
-    Visitor_t test_visitor = {0, 0}; // uid=0, gid=0 (root用户)
-    
-    // 测试1: 创建单个目录
-    int status = CreateDir(test_visitor, "/testdir1");//测试时出现了破坏fs_metainf hyperblock的情况
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试2: 在已创建的目录中创建子目录
-    status = CreateDir(test_visitor, "/testdir1/subdir1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试3: 创建多个嵌套目录
-    status = CreateDir(test_visitor, "/testdir2");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = CreateDir(test_visitor, "/testdir2/level1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = CreateDir(test_visitor, "/testdir2/level1/level2");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = CreateDir(test_visitor, "/testdir2/level1/level2/level3");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试4: 创建文件
-    status = CreateFile(test_visitor, "/testfile1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = CreateFile(test_visitor, "/testdir1/testfile2");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试5: 删除空文件
-    status = DeleteFile(test_visitor, "/testfile1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试6: 删除空目录(从最深层开始删除)
-    status = DeleteDir(test_visitor, "/testdir2/level1/level2/level3");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = DeleteDir(test_visitor, "/testdir2/level1/level2");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = DeleteDir(test_visitor, "/testdir2/level1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试7: 删除包含文件的目录中的文件
-    status = DeleteFile(test_visitor, "/testdir1/testfile2");//这里面有错误的把root_inode覆盖的bug
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试8: 删除空的子目录
-    status = DeleteDir(test_visitor, "/testdir1/subdir1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试9: 删除顶层目录和剩余目录
-    status = DeleteDir(test_visitor, "/testdir1");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = DeleteDir(test_visitor, "/testdir2");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 所有基本测试通过，开始更复杂的测试
-    
-    // 测试10: 路径包含连续斜杠
-    status = CreateDir(test_visitor, "/a");//把root_inode的位置给分配了
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试11: 相对路径测试（当前目录）
-    status = CreateDir(test_visitor, "/a/./c");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试12: 上级目录路径
-    status = CreateDir(test_visitor, "/a/../d");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试14: 删除不存在的文件应返回正确错误码
-    status = DeleteFile(test_visitor, "/nonexistent");
-    if (status != OS_FILE_NOT_FOUND) {
-        return OS_EARLY_RETURN;
-    }
-    
-    // 测试15: 特殊字符文件名（空格）
-    status = CreateFile(test_visitor, "/test file");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = DeleteFile(test_visitor, "/test file");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 测试16: 中文文件名
-    status = CreateFile(test_visitor, "/测试文件");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    status = DeleteFile(test_visitor, "/测试文件");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    // 清理非空目录中的文件
-    status = DeleteFile(test_visitor, "/nonempty/file");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-    
-    // 现在可以删除空目录
-    status = DeleteDir(test_visitor, "/nonempty");
-    if (status != OS_SUCCESS) {
-        return status;
-    }
-}
 int init_fs_t::DeleteDir(Visitor_t executor, char* relative_path)
 {
     int status=OS_SUCCESS;
@@ -638,7 +485,137 @@ int init_fs_t::DeleteDir(Visitor_t executor, char* relative_path)
     // 不应执行到这里
     return OS_UNREACHABLE_CODE;
 }
-int init_fs_t::CreateDir(Visitor_t executor, char* relative_path)
+int init_fs_t::WriteFile(FileID_t in_fs_id, void *src, uint64_t size)
+{
+    init_fs_opened_file_entry target_file_entry;
+    int status;
+    status=opened_file_entry_search_by_id(in_fs_id,target_file_entry);
+    if(status!=OS_SUCCESS)
+    {
+
+    }
+    if(target_file_entry.file_flags.is_append_mode)
+    {
+        uint64_t new_size=target_file_entry.inode.file_size+size;
+        uint64_t old_size=target_file_entry.inode.file_size;
+        status=resize_inode(
+            target_file_entry.inode,
+            new_size
+        );
+        status=inode_content_write(target_file_entry.inode,old_size,size,(uint8_t*)src);
+    }else{
+        uint64_t new_size=target_file_entry.offset_ptr+size;
+        uint64_t old_size=target_file_entry.inode.file_size;
+        if(new_size>old_size){
+            status=resize_inode(target_file_entry.inode,new_size);
+            if(status!=OS_SUCCESS){
+
+            }
+        }
+        status=inode_content_write(target_file_entry.inode,target_file_entry.offset_ptr,size,(uint8_t*)src);
+        target_file_entry.offset_ptr+=size;
+    }
+    status=opened_file_entry_set_by_id(in_fs_id,target_file_entry);
+    return OS_SUCCESS;
+}
+int init_fs_t::OpenFile(Visitor_t executor, char *relative_path, FileID_t &in_fs_id, FopenFlags flags)
+{
+    int status=OS_SUCCESS;
+    Inode target_file_inode;
+    Inode root_inode;
+    status=get_inode(
+        fs_metainf->root_block_group_index,
+        fs_metainf->root_directory_inode_index,
+        root_inode
+    );
+    FilePathAnalyzer path_analyzer(
+        root_inode,
+        relative_path,
+        strlen(relative_path),
+        executor
+    );
+    int analyze_status;
+    while (true)
+    {
+        analyze_status=path_analyzer.the_next(this);
+        if(analyze_status==FilePathAnalyzer::END)
+        {
+            break;
+        }
+        if(analyze_status==FilePathAnalyzer::ERROR_STATE||
+        analyze_status==FilePathAnalyzer::ROOT_DIR_NEED_OTHER_FILE_SYSTEM)
+        {
+            return OS_IO_ERROR;
+        }
+        if(analyze_status==FilePathAnalyzer::ACCESS_DENIED)
+        {
+            return OS_PERMISSON_DENIED;
+        }
+    }
+    uint32_t target_file_inode_index=path_analyzer.get_current_inode_index();
+    uint32_t target_file_bgidx=path_analyzer.get_current_block_group_index();
+    if((flags.is_write||flags.is_read)==false)return OS_INVALID_PARAMETER;
+    if(flags.is_write)
+    {
+        access_check_result write_check=access_check(executor,path_analyzer.get_current_inode(),inode_op_type::INODE_OP_WRITE);
+        if(write_check==access_check_result::ACCESS_DENIED)return OS_PERMISSON_DENIED;
+        init_fs_opened_file_entry maybe_same_file;
+        status=opened_file_entry_search_by_bgidx_and_inodeidx(
+                target_file_bgidx,
+                target_file_inode_index,
+                maybe_same_file
+        );
+        if(status==OS_NOT_EXIST){
+
+        }else{
+            if(status==OS_SUCCESS)
+            {
+                if(maybe_same_file.inode.trylock.try_lock()==false)
+                {
+                    if(flags.is_force==false)
+                    {
+                        return OS_TRY_LOCK_FAIL;
+                    }
+                }
+            }else{
+                return OS_IO_ERROR;
+            }
+        }
+    }
+    if(flags.is_read)
+    {
+        access_check_result read_check=access_check(executor,path_analyzer.get_current_inode(),inode_op_type::INODE_OP_READ);
+        if(read_check==access_check_result::ACCESS_DENIED)return OS_PERMISSON_DENIED;
+    }
+    init_fs_opened_file_entry will_poen_entry;
+    will_poen_entry.inode=path_analyzer.get_current_inode();
+    will_poen_entry.block_group_index   =target_file_bgidx;
+    will_poen_entry.inode_idx=target_file_inode_index;
+    will_poen_entry.is_valid_entry=true;
+    will_poen_entry.file_flags=flags;
+    will_poen_entry.offset_ptr=0;
+    status=opened_file_entry_alloc_a_new_entry(will_poen_entry,in_fs_id);
+    if(status!=OS_SUCCESS)return status;
+    return OS_SUCCESS;
+}
+int init_fs_t::SeekFile(FileID_t in_fs_id, uint64_t offset)
+{
+    init_fs_opened_file_entry target_file_entry;
+    int status;
+    status=opened_file_entry_search_by_id(in_fs_id,target_file_entry);
+    target_file_entry.offset_ptr=offset;
+    status=opened_file_entry_set_by_id(in_fs_id,target_file_entry);
+    return OS_SUCCESS;
+}
+int init_fs_t::CloseFile(FileID_t in_fs_id)
+{
+    return opened_file_entry_disable_by_id(in_fs_id);
+}
+init_fs_t::~init_fs_t()
+{
+    delete[] SuperClusterArray;
+}
+int init_fs_t::CreateDir(Visitor_t executor, char *relative_path)
 {
     int status=OS_SUCCESS;
     uint64_t path_len=strlen(relative_path);

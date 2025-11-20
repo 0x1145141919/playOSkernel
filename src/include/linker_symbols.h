@@ -46,6 +46,10 @@ extern uint8_t _stack_lma;
 extern uint8_t _stack_bottom;
 extern uint8_t _stack_top;
 
+//堆位图符号
+extern uint8_t _heap_bitmap_lma;
+extern uint8_t __heap_bitmap_start;
+extern uint8_t __heap_bitmap_end;
 // 堆段符号
 extern uint8_t _heap_lma;
 extern uint8_t __heap_start;

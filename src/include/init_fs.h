@@ -2,7 +2,7 @@
 #include "BlockDevice.h"
 #include <cstdint>
 #include "MemoryDisk.h"
-
+#include "lock.h"
 typedef uint64_t FileID_t;
 enum inode_op_type:int{
     INODE_OP_READ=0,
@@ -27,7 +27,13 @@ struct FileOpenType
 };
 // 定义无效的位图索引，用于返回错误状态
 static constexpr uint32_t INVALID_BITMAP_INDEX = static_cast<uint32_t>(-1);
-
+/**
+ * todo:
+ * inode_content_write的时候要检查自旋锁
+ * 块组描述符数组的读写只有在拓展文件系统拓展的时候才需要
+ * 块组内位图读写的时候要加自旋锁
+ * 优化rootinode在挂载文件系统的时候就加载到类里面，并且优化相应的get_inode函数
+ */
 class init_fs_t {//支持卸载后向前移动，不卸载的情况下向后增加分区大小
     block_device_t_v1* phylayer;
     const uint64_t HYPER_CLUSTER_MAGIC = 0xF0F0F0F0F0F0F0F0;
@@ -125,7 +131,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
     } __attribute__((packed));
     
     struct FileExtentsEntry_t {
-        uint64_t first_cluster_index;
+        uint64_t first_cluster_phyindex;
         uint32_t length_in_clusters;
     } __attribute__((packed));
     
@@ -146,8 +152,10 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t last_modification_time;     // 最后修改时间(秒)
         uint64_t last_access_time;            // 最后访问时间(秒)     
         data_descript data_desc;             // 数据描述符
+        spinwirtelock_cpp_t spinwlock;
+        trylock_cpp_t trylock;
     };
-
+    Inode root_inode;
     //传给文件系统的文件路径中.是当前目录，..是上级目录
     //若是根目录则报错，因为可能根据虚拟文件系统层，根目录的父目录在其它文件系统
     /**
@@ -199,7 +207,127 @@ protected:
         uint32_t convert_to_logical_cluster_index();
         uint64_t get_phyclsidx();
     };
+    struct idx_tb_lclsidx_scanner
+    {
+        /* data */
+    };
     
+    class idxtbmode_file_Iteration
+    { 
+        public:
+        static constexpr int START=0;
+        static constexpr int MID=1;
+        static constexpr int END_CLS=2;
+        static constexpr int ERROR_STATE=3;
+        static constexpr int END=4;
+        protected: Inode file_inode;
+        uint16_t cls_blk_count;
+        uint32_t blk_size;
+        uint32_t cls_size;
+        uint64_t stream_base_offset;
+        uint8_t*buffer;
+        uint64_t offset_ptr;
+        uint64_t left_bytes_to_write;//迭代的时候不调用
+        uint64_t start_lcls;
+        uint32_t start_lcls_startvytes_offset;
+        uint32_t start_lcls_size_to_write;
+        uint64_t midbase_lcls;
+        uint64_t midcls_count;
+        uint64_t midcls_scanner;//从0到midcls_count-1
+        uint64_t end_lcls;
+        uint64_t end_lcls_size_to_write;
+        int state;
+        public:
+        idxtbmode_file_Iteration(
+            Inode file_inode,
+            uint8_t*buffer,
+            uint64_t stream_base_offset,
+            uint16_t cls_blk_count,
+            uint32_t blk_size,
+            uint64_t size_to_write
+        );
+        int wnext(init_fs_t*fs_instance);
+        int rnext(init_fs_t*fs_instance);
+    };
+    
+    friend class idxtbmode_file_Iteration;   
+    class extents_rw_iterator {
+public:
+    /** \brief 迭代器状态枚举 */
+    enum State { START, MID, END_ENTRY, END, ERROR_STATE };
+//迭代器一次处理extents数组的一个项
+private:
+    init_fs_t* fs;                ///< 文件系统上下文指针
+    Inode file_inode;             ///< 目标文件的inode信息
+    uint8_t* buffer;              ///< 数据缓冲区指针（读写操作的数据源/目标）
+    uint64_t stream_offset;       ///< 逻辑流中的起始偏移量
+    uint64_t left_bytes_to_write; ///< 剩余待处理字节数
+    uint64_t cluster_size;        ///< 文件系统簇大小
+    uint64_t accumlate_skipped_bytes; ///< 累计跳过的字节数
+
+    /** \brief 预解析的extent数组（构造时加载）
+     *  用于快速映射逻辑偏移到物理簇位置
+     *  \note 非memdiskv1模式下需手动释放
+     */
+    FileExtentsEntry_t* extents = nullptr;
+    uint32_t extent_count = 0;    ///< 总extent数量
+    uint32_t extent_idx = 0;      ///< 当前处理的extent索引
+
+    /** \brief 当前extent处理状态 */
+    uint64_t clusters_written_in_current_extent = 0;
+    State state;
+
+    /** \brief 起始段处理参数 */
+    uint32_t start_inarray_idx;
+    uint64_t start_seg_offset;
+    uint64_t start_seg_bytes_to;
+
+    /** \brief 中间段批量处理参数 */
+    uint32_t mid_array_count;
+    uint32_t mid_array_baseidx;
+    uint32_t mid_array_scanner;
+
+    /** \brief 结束段处理参数 */
+    uint32_t end_array_idx;
+    uint64_t endseg_to_write_bytes;
+    uint64_t buffer_offset = 0;   ///< 缓冲区当前偏移量
+
+public:
+    /**
+     * @brief 构造函数，初始化迭代器状态
+     * @param fs 文件系统上下文指针
+     * @param inode 目标文件的inode
+     * @param buffer 数据缓冲区指针
+     * @param stream_offset 逻辑流起始偏移量
+     * @param size 需处理的总字节数
+     */
+    extents_rw_iterator(init_fs_t* fs, Inode inode, uint8_t* buffer,
+                           uint64_t stream_offset, uint64_t size);
+
+    /**
+     * @brief 析构函数，释放预加载的extent数组
+     * @note 仅在非memdiskv1模式下释放资源
+     */
+    ~extents_rw_iterator() { if (!fs->is_memdiskv1) delete[] extents; }
+
+    /**
+     * @brief 推进写操作到下一个状态
+     * @return 当前状态，调用方应循环直到END或ERROR_STATE
+     */
+    State wnext();
+
+    /**
+     * @brief 推进读操作到下一个状态
+     * @return 当前状态，调用方应循环直到END或ERROR_STATE
+     */
+    State rnext();
+
+    /**
+     * @brief 获取当前迭代器状态
+     * @return 当前状态枚举值
+     */
+    State get_state();
+};
         //此函数返回void*指针，指针处获得了原始的对应块组的对应种类的位图的原始数据
     void* get_bitmap_base(
         uint64_t block_group_index,
@@ -227,11 +355,8 @@ protected:
         uint64_t&block_group_index
     );
     int FileExtentsEntry_merger(FileExtentsEntry_t *old_buff, FileExtentsEntry_t *new_buff, uint64_t &entryies_count);
-    int clusters_bitmap_alloc(
-        uint64_t alloc_clusters_count,
-        FileExtentsEntry_t *extents_entry,
-        uint64_t&entry_count);
     SuperCluster*get_supercluster(uint32_t block_group_index);
+    int clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsEntry_t*&extents_entry, uint64_t &entry_count);
     int set_inode_bitmap_bit(
         uint64_t block_group_index,
         uint64_t inode_index,
@@ -304,28 +429,7 @@ protected:
     int inode_content_write(//从特定偏移量上覆写，若超出大小会报错
         Inode the_inode,
         uint64_t stream_base_offset,
-        uint64_t size,
-        uint8_t*buffer
-    );
-        int inode_level1_idiwrite(//从一级索引表上读取
-        uint64_t rootClutser_of_lv1_index,
-        uint64_t fsize,
-        uint64_t start_cluster_index_of_datastream,
-        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
-        uint8_t*buffer
-    );
-        int inode_level2_idiwrite(//从一级索引表上读取
-        uint64_t rootClutser_of_lv1_index,
-        uint64_t fsize,
-        uint64_t start_cluster_index_of_datastream,
-        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
-        uint8_t*buffer
-    );
-        int inode_level3_idiwrite(//从一级索引表上读取
-        uint64_t rootClutser_of_lv3_index,
-        uint64_t fsize,
-        uint64_t datastream_start_logical_clst,
-        uint64_t datastream_end_logical_clst,//从start到end_cluster_index-1引索的簇读取
+        uint64_t data_stream_size,
         uint8_t*buffer
     );
     int inode_content_read(//从特定偏移量上读取，若超出大小会报错
@@ -334,31 +438,10 @@ protected:
         uint64_t size,
         uint8_t*buffer
     );
-    int inode_level1_idiread(//从一级索引表上读取
-        uint64_t rootClutser_of_lv1_index,
-        uint64_t fsize,
-        uint64_t start_cluster_index_of_datastream,
-        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
-        uint8_t*buffer
-    );
-        int inode_level2_idiread(//从一级索引表上读取
-        uint64_t rootClutser_of_lv1_index,
-        uint64_t fsize,
-        uint64_t start_cluster_index_of_datastream,
-        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
-        uint8_t*buffer
-    );
-        int inode_level3_idiread(//从一级索引表上读取
-        uint64_t rootClutser_of_lv3_index,
-        uint64_t fsize,
-        uint64_t start_cluster_index_of_datastream,
-        uint64_t end_cluster_index_of_datastream,//从start到end_cluster_index-1引索的簇读取
-        uint8_t*buffer
-    );
     int filecluster_to_fscluster_in_idxtb(
         Inode the_inode,
-        uint64_t file_cluster_index,
-        uint64_t&cluster_index
+        uint64_t file_lcluster_index,
+        uint64_t&phyidx
     );
     int filecluster_to_fscluster_in_extents(
         Inode the_inode,
@@ -389,7 +472,45 @@ protected:
     SuperCluster*SuperClusterArray;
     bool is_valid;
     bool is_memdiskv1;
-    Inode opened_file_inode_table[4096];
+    struct FopenFlags{
+        uint16_t is_write:1;
+        uint16_t is_read:1;
+        uint16_t is_force:1;//突破尝试写锁还是要建立写句柄
+        uint16_t is_append_mode:1;//追加模式，所有写入时都从文件末尾开始写入，但是可以移动文件指针读取前面的内容
+    };
+    FopenFlags read_only_falgs={
+1,0,0,0
+    };
+    FopenFlags read_write_falgs={
+1,1,0,0
+    };
+
+    FopenFlags read_write_force_falgs={
+1,1,1,0
+    };
+    FopenFlags read_write_append_falgs={
+1,1,0,1
+    };
+    struct init_fs_opened_file_entry {
+        Inode inode;
+        uint64_t offset_ptr;
+        uint32_t inode_idx;
+        uint32_t block_group_index;
+        FopenFlags file_flags;
+        uint8_t is_valid_entry;
+    };
+    init_fs_opened_file_entry *opened_file_table;
+    uint32_t opened_file_count;
+    uint32_t opened_file_array_max_count;
+    int opened_file_entry_search_by_id(FileID_t in_fs_id,init_fs_opened_file_entry& result_entry);
+    int opened_file_entry_set_by_id(FileID_t in_fs_id,init_fs_opened_file_entry& result_entry);
+    int opened_file_entry_disable_by_id(FileID_t in_fs_id);
+    int opened_file_entry_search_by_bgidx_and_inodeidx(
+        uint32_t bgidx,
+        uint32_t inode_idx,
+        init_fs_opened_file_entry& result_entry
+    );
+    int opened_file_entry_alloc_a_new_entry(init_fs_opened_file_entry&new_entry,FileID_t&alloced_entry);
 public: 
 
     init_fs_t(block_device_t_v1* phylayer);
@@ -400,13 +521,14 @@ public:
     int cpFile(Visitor_t executor, char* oldname, char* newname);
     int CreateDir(Visitor_t executor, char* relative_path);
     int DeleteDir(Visitor_t executor, char* relative_path);//删除目录,必须是空目录
-    int WriteFile(Visitor_t executor, FileID_t in_fs_id, void* src, uint64_t size);
-    int ReadFile(Visitor_t executor, FileID_t in_fs_id, void* dest, uint64_t size);
-    int OpenFile(Visitor_t executor, char* relative_path, FileID_t& in_fs_id);
+    int WriteFile(FileID_t in_fs_id, void* src, uint64_t size);
+    int ReadFile(FileID_t in_fs_id, void* dest, uint64_t size);
+    int OpenFile(Visitor_t executor, char* relative_path, FileID_t& in_fs_id,FopenFlags flags);
+    int SeekFile(FileID_t in_fs_id, uint64_t offset);
     /**
      * 这是个测试四个增删函数的函数，以及其它相关用户空间接口的函数，纯用户空间函数，不在内核态编译，可以使用各种用户态工具
      */
     int Create_del_and_Inner_surface_test();
-    int CloseFile(Visitor_t executor, FileID_t in_fs_id);
+    int CloseFile(FileID_t in_fs_id);
     ~init_fs_t();
 };
