@@ -348,3 +348,87 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
     // 计算对齐后的值
     return (value + alignment - 1) & ~(alignment - 1);
 }
+/* 带写屏障的8位原子写入 */
+static inline void atomic_write8_wmb(volatile void *addr, uint8_t val)
+{
+    asm volatile("sfence\n\t"
+                 "movb %1, %0"
+                 : "=m" (*(volatile uint8_t *)addr)
+                 : "q" (val)
+                 : "memory");
+}
+
+/* 带写屏障的16位原子写入 */
+static inline void atomic_write16_wmb(volatile void *addr, uint16_t val)
+{
+    asm volatile("sfence\n\t"
+                 "movw %1, %0"
+                 : "=m" (*(volatile uint16_t *)addr)
+                 : "r" (val)
+                 : "memory");
+}
+
+/* 带写屏障的32位原子写入 */
+static inline void atomic_write32_wmb(volatile void *addr, uint32_t val)
+{
+    asm volatile("sfence\n\t"
+                 "movl %1, %0"
+                 : "=m" (*(volatile uint32_t *)addr)
+                 : "r" (val)
+                 : "memory");
+}
+/* 带写屏障的64位原子写入 */
+static inline void atomic_write64_wmb(volatile void *addr, uint64_t val)
+{
+    asm volatile("sfence\n\t"
+                 "movq %1, %0"
+                 : "=m" (*(volatile uint64_t *)addr)
+                 : "r" (val)
+                 : "memory");
+}
+/* 带读屏障的8位原子读取 */
+static inline uint8_t atomic_read8_rmb(volatile void *addr)
+{
+    uint8_t val;
+    asm volatile("movb %1, %0\n\t"
+                 "lfence"
+                 : "=q" (val)
+                 : "m" (*(volatile uint8_t *)addr)
+                 : "memory");
+    return val;
+}
+
+/* 带读屏障的16位原子读取 */
+static inline uint16_t atomic_read16_rmb(volatile void *addr)
+{
+    uint16_t val;
+    asm volatile("movw %1, %0\n\t"
+                 "lfence"
+                 : "=r" (val)
+                 : "m" (*(volatile uint16_t *)addr)
+                 : "memory");
+    return val;
+}
+
+/* 带读屏障的32位原子读取 */
+static inline uint32_t atomic_read32_rmb(volatile void *addr)
+{
+    uint32_t val;
+    asm volatile("movl %1, %0\n\t"
+                 "lfence"
+                 : "=r" (val)
+                 : "m" (*(volatile uint32_t *)addr)
+                 : "memory");
+    return val;
+}
+/* 带读屏障的64位原子读取 */
+static inline uint64_t atomic_read64_rmb(volatile void *addr)
+{
+    uint64_t val;
+    asm volatile("movq %1, %0\n\t"
+                 "lfence"
+                 : "=r" (val)
+                 : "m" (*(volatile uint64_t *)addr)
+                 : "memory");
+    return val;
+}

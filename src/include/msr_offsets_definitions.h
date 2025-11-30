@@ -130,6 +130,7 @@ namespace msr {
         constexpr uint32_t IA32_MTRR_FIX4K_E8000 = 0x26D;   // Fixed Range MTRR for 4K ranges at E8000H // 固定范围MTRR(4K, 起始于E8000H)
         constexpr uint32_t IA32_MTRR_FIX4K_F0000 = 0x26E;   // Fixed Range MTRR for 4K ranges at F0000H // 固定范围MTRR(4K, 起始于F0000H)
         constexpr uint32_t IA32_MTRR_FIX4K_F8000 = 0x26F;   // Fixed Range MTRR for 4K ranges at F8000H // 固定范围MTRR(4K, 起始于F8000H)
+        constexpr uint32_t IA32_PAT = 0x277;
     }
     
     // 虚拟化技术相关寄存器(VTX)

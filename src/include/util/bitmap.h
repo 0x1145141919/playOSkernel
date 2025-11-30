@@ -6,7 +6,7 @@
 //以每64bit为单元存储
 //内核态常用数据结构
 //私有接口不加锁,但提供自旋锁，自行在外部接口中使用
-class bitmap { 
+class bitmap_t { 
     protected:
     spinrwlock_cpp_t bitmap_rwlock;
     spinlock_cpp_t used_bit_count_lock;
@@ -24,7 +24,6 @@ class bitmap {
 public:    
     void bit_set(uint64_t bit_idx,bool value);
     bool bit_get(uint64_t bit_idx);
-
     void bits_set(uint64_t start_bit_idx,uint64_t bit_count,bool value);
     void bytes_set(uint64_t start_byte_idx,uint64_t byte_count,bool value);
     void u64s_set(uint64_t start_u64_idx,uint64_t u64_count,bool value);
@@ -37,4 +36,7 @@ public:
 
     int get_bitmap_used_bit();
     void count_bitmap_used_bit();
+    
+    int used_bit_count_add(uint64_t add_count);//这操作是加锁的
+    int used_bit_count_sub(uint64_t sub_count);//这操作是加锁的
 };

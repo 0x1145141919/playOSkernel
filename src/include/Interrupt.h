@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include "os_error_definitions.h"
-#include "../memory/includes/kpoolmemmgr.h"
-#include "../memory/includes/phygpsmemmgr.h"
-#include "OS_utils.h"
+#include "memory/kpoolmemmgr.h"
+#include "memory/phygpsmemmgr.h"
+#include "util/OS_utils.h"
 typedef uint16_t u16;
 /**
  * 中断管理器，管理着每个cpu的中断描述符表和本地apic

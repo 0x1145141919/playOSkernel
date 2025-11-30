@@ -65,6 +65,8 @@ extern uint8_t _klog_lma;
 extern uint8_t __klog_start;
 extern uint8_t __klog_end;
 
+extern uint8_t _pml4_lma;
+extern uint8_t _kspace_uppdpt_lma;
 // 获取地址的宏定义，方便使用
 #define GET_SYMBOL_ADDR(symbol) ((void*)&symbol)
 

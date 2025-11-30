@@ -1,6 +1,6 @@
 #pragma once
 #include "stdint.h"
-#include "bitmap.h"
+#include "util/bitmap.h"
 //#include <new>
 typedef uint64_t size_t;
 typedef uint64_t phyaddr_t;
@@ -24,7 +24,7 @@ private:
             // 活跃分配魔数（推荐）
         uint32_t belonged_to_cpu_apicid=0;//只考虑x2apic的32位apic_id
         static constexpr uint64_t MAGIC_ALLOCATED    = 0xDEADBEEFCAFEBABEull;
-        class HCB_bitmap:public bitmap
+        class HCB_bitmap:public bitmap_t
         { 
             public:
             int Init();

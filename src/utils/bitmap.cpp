@@ -1,6 +1,6 @@
 #include "bitmap.h"
 
-void bitmap::bit_set(uint64_t bit_idx, bool value)
+void bitmap_t::bit_set(uint64_t bit_idx, bool value)
 {
     if (value)
     {
@@ -12,12 +12,12 @@ void bitmap::bit_set(uint64_t bit_idx, bool value)
     }
 }
 
-bool bitmap::bit_get(uint64_t bit_idx)
+bool bitmap_t::bit_get(uint64_t bit_idx)
 {
     return bitmap[bit_idx>>6] & (1ULL << (bit_idx & 63));
 }
 
-void bitmap::bits_set(uint64_t start_bit_idx, uint64_t bit_count, bool value)
+void bitmap_t::bits_set(uint64_t start_bit_idx, uint64_t bit_count, bool value)
 {
     for(uint64_t i = start_bit_idx; i < start_bit_idx + bit_count; i++)
     {
@@ -25,14 +25,14 @@ void bitmap::bits_set(uint64_t start_bit_idx, uint64_t bit_count, bool value)
     }
 }
 
-void bitmap::bytes_set(uint64_t start_byte_idx, uint64_t byte_count, bool value)
+void bitmap_t::bytes_set(uint64_t start_byte_idx, uint64_t byte_count, bool value)
 {
     uint8_t to_fill_value= value ? BYTE_FULL : 0x00;
     for(uint64_t i = start_byte_idx; i < start_byte_idx + byte_count; i++)
     byte_bitmap_base[i]= to_fill_value;
 }
 
-void bitmap::u64s_set(uint64_t start_u64_idx, uint64_t u64_count, bool value)
+void bitmap_t::u64s_set(uint64_t start_u64_idx, uint64_t u64_count, bool value)
 {
     uint64_t to_fill_value= value ? U64_FULL_UNIT : 0x00;
     for(uint64_t i = start_u64_idx; i < start_u64_idx + u64_count; i++)
@@ -43,7 +43,7 @@ void bitmap::u64s_set(uint64_t start_u64_idx, uint64_t u64_count, bool value)
  * 扫描的时候可以通过uit64_t U64_FULL_UNIT跳过64个字节
  * 
  */
-int bitmap::continual_avaliable_bits_search(uint64_t bit_count, uint64_t &result_base_idx)
+int bitmap_t::continual_avaliable_bits_search(uint64_t bit_count, uint64_t &result_base_idx)
 {
     uint64_t bit_scanner_end = bitmap_size_in_64bit_units << 6;
     uint64_t seg_base_bit_idx = 0;
@@ -114,7 +114,7 @@ int bitmap::continual_avaliable_bits_search(uint64_t bit_count, uint64_t &result
     return OS_NOT_EXIST;
 }
 
-int bitmap::continual_avaliable_bytes_search(uint64_t byte_count, uint64_t &result_base_idx)
+int bitmap_t::continual_avaliable_bytes_search(uint64_t byte_count, uint64_t &result_base_idx)
 {
     const uint64_t total_bytes = bitmap_size_in_64bit_units * 8; // 每个u64含8字节
     uint64_t seg_base_byte_idx = 0;
@@ -176,7 +176,7 @@ int bitmap::continual_avaliable_bytes_search(uint64_t byte_count, uint64_t &resu
     return OS_NOT_EXIST;
 }
 
-int bitmap::continual_avaliable_u64s_search(uint64_t u64_count, uint64_t &result_base_idx)
+int bitmap_t::continual_avaliable_u64s_search(uint64_t u64_count, uint64_t &result_base_idx)
 {
     const uint64_t total_u64s = bitmap_size_in_64bit_units;
     uint64_t seg_base_u64_idx = 0;
@@ -212,11 +212,25 @@ int bitmap::continual_avaliable_u64s_search(uint64_t u64_count, uint64_t &result
     return OS_NOT_EXIST;
 }
 
-int bitmap::get_bitmap_used_bit()
+int bitmap_t::get_bitmap_used_bit()
 {
     return bitmap_used_bit;
 }
-void bitmap::count_bitmap_used_bit()
+int bitmap_t::used_bit_count_add(uint64_t add_count)
+{
+    used_bit_count_lock.lock();
+    bitmap_used_bit += add_count;
+    used_bit_count_lock.unlock();
+    return OS_SUCCESS;
+}
+int bitmap_t::used_bit_count_sub(uint64_t sub_count)
+{
+    used_bit_count_lock.lock();
+    sub_count>=bitmap_used_bit ? bitmap_used_bit=0 : bitmap_used_bit-=sub_count;
+    used_bit_count_lock.unlock();
+    return OS_SUCCESS;
+}
+void bitmap_t::count_bitmap_used_bit()
 {
     uint64_t used = 0;
     for (uint64_t i = 0; i < bitmap_size_in_64bit_units; ++i) {
