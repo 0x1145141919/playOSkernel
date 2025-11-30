@@ -42,7 +42,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++23")    # C++ 标准
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_KEEP_BUILD_FILES ON)
-
 # 定义通用源文件
 set(SRC_COMMON
  #USERMODE需要替换成对应的标准库
@@ -86,6 +85,30 @@ add_executable(kernel.elf
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
+add_executable(mkinitramfs
+    src/tests/fs_test_main.cpp
+    src/drivers/MemoryDisk.cpp
+     ${SRC_COMMON}
+)
+target_include_directories(
+    mkinitramfs PRIVATE
+    "/usr/include/efi"
+     "${CMAKE_SOURCE_DIR}/src/include"
+)
+target_compile_options(
+    mkinitramfs PRIVATE
+    -DUSER_MODE
+    -fsanitize=address
+)
+
+# 链接gnu-efi库
+target_link_libraries(mkinitramfs PRIVATE
+    fs_user_test
+    tinySTL
+    -fsanitize=address
+)
+
+
 add_executable(fs_test
     src/tests/fs_test_main.cpp
     src/drivers/MemoryDisk.cpp
@@ -101,8 +124,6 @@ target_compile_options(
     -DUSER_MODE
     -fsanitize=address
 )
-
-# 链接gnu-efi库
 target_link_libraries(kernel.elf PRIVATE 
     ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
@@ -110,11 +131,7 @@ target_link_libraries(kernel.elf PRIVATE
     fs_static
 )
 
-target_link_libraries(fs_test PRIVATE
-    fs_user_test
-    tinySTL
-    -fsanitize=address
-)
+
 
 target_include_directories(kernel.elf PRIVATE
     "${CMAKE_SOURCE_DIR}/src/include"

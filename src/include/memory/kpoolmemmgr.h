@@ -28,6 +28,9 @@ private:
         { 
             public:
             int Init();
+            int second_stage_Init(
+                uint32_t entries_count
+            );
             HCB_bitmap();
             ~HCB_bitmap();
 
@@ -56,6 +59,7 @@ private:
         int first_linekd_heap_Init();//只能由first_linekd_heap调用的初始化
         //用指针检验是不是那个特殊堆
         HCB_v2(uint32_t apic_id);//给某个逻辑处理器初始化一个HCB
+        int second_stage_Init();
         ~HCB_v2();
         //分配之后对于数据区的清零操作
         //必须是魔数有效才会操作

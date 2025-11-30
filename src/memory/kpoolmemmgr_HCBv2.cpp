@@ -1,7 +1,11 @@
-#include "kpoolmemmgr.h"
+#include "memory/kpoolmemmgr.h"
+#include "memory/phygpsmemmgr.h"
+#include "memory/AddresSpace.h"
 #include "linker_symbols.h"
 #include "os_error_definitions.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
+#include "panic.h"
+#include "kpoolmemmgr.h"
 constexpr uint64_t MIN_VIR_ADDR=0xff00000000000000;
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 {
@@ -18,6 +22,42 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
     return OS_SUCCESS;
 }
 
+int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
+{
+    bitmap_size_in_64bit_units=entries_count/64;
+    phyaddr_t bitmap_phybase=gPhyPgsMemMgr.pages_alloc(
+        (bitmap_size_in_64bit_units*8)/4096,
+        phygpsmemmgr_t::KERNEL
+    );
+    if(bitmap_phybase==0)
+    {
+        return OS_OUT_OF_MEMORY;
+    }
+    this->bitmap=(uint64_t*)gKspacePgsMemMgr.pgs_remapp(bitmap_phybase,bitmap_size_in_64bit_units*8,KSPACE_RW_ACCESS);
+    if(this->bitmap==nullptr)return OS_MEMRY_ALLOCATE_FALT;
+    byte_bitmap_base=(uint8_t*)this->bitmap;
+    return OS_SUCCESS;
+}
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
+{
+    byte_bitmap_base=nullptr;
+    phyaddr_t bitmap_phyaddr;
+    int status=gKspacePgsMemMgr.v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
+    status=gKspacePgsMemMgr.pgs_remapped_free((vaddr_t)this->bitmap);
+    
+    if(status!=OS_SUCCESS){
+        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
+    }
+    status=gPhyPgsMemMgr.pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
+    if(status!=OS_SUCCESS){
+        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
+    }
+    this->bitmap=nullptr;
+}
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::HCB_bitmap()
+{
+    bitmap_used_bit=0;
+}
 bool kpoolmemmgr_t::HCB_v2::HCB_bitmap::target_bit_seg_is_avaliable(uint64_t bit_idx, uint64_t bit_count)
 {
     if (bit_count == 0) return true;
@@ -140,6 +180,37 @@ int kpoolmemmgr_t::HCB_v2::first_linekd_heap_Init()
     return status;   
 }
 
+kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t apic_id)
+{
+  total_size_in_bytes=0x200000;
+  belonged_to_cpu_apicid=apic_id;
+}
+int kpoolmemmgr_t::HCB_v2::second_stage_Init()
+{
+    phybase=gPhyPgsMemMgr.pages_alloc(total_size_in_bytes/4096,phygpsmemmgr_t::KERNEL);
+    if(phybase==0)return OS_OUT_OF_MEMORY;
+    vbase=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
+    if(vbase==0){
+        gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
+        return OS_MEMRY_ALLOCATE_FALT;
+    }
+    int status=bitmap_controller.second_stage_Init(
+        (total_size_in_bytes/bytes_per_bit+63)/64
+    );
+    return status;
+}
+kpoolmemmgr_t::HCB_v2::~HCB_v2()
+{
+    bitmap_controller.~HCB_bitmap();
+    int status=gKspacePgsMemMgr.pgs_remapped_free(vbase);
+    if(status!=OS_SUCCESS){
+        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
+    }
+    status=gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
+    if(status!=OS_SUCCESS){
+        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
+    }
+}
 int kpoolmemmgr_t::HCB_v2::clear(void *ptr)
 {
     if (!ptr) return OS_INVALID_PARAMETER;

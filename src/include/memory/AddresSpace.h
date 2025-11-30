@@ -41,6 +41,14 @@ struct pgaccess
     uint8_t is_global:1;
     cache_strategy_t cache_strategy;
 };
+constexpr pgaccess KSPACE_RW_ACCESS={
+    .is_kernel=1,
+    .is_writeable=1,
+    .is_readable=1,
+    .is_executable=0,
+    .is_global=1,
+    .cache_strategy=WB
+};
 struct VM_DESC
 {
     vaddr_t start;    // inclusive
