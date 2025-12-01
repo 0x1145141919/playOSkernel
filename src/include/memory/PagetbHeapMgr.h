@@ -6,6 +6,7 @@
 #include <lock.h>
 class PagetbHeapMgr_t { 
     private:
+    spinrwlock_cpp_t Module_lock;
     class PgtbHCB{
         private:
         vaddr_t heapvbase;//2m对齐
@@ -25,6 +26,7 @@ class PagetbHeapMgr_t {
         public:
         PgtbHCB(bool is_init);//静态初始化使用
         PgtbHCB();//后面默认的构造函数，动态注册使用，未完成
+        int second_stage_init();
         ~PgtbHCB();//后面默认的析构函数，动态注销使用，未完成
         void* alloc(phyaddr_t&phybase);    
         int free(void*vaddr);
@@ -35,7 +37,7 @@ class PagetbHeapMgr_t {
     };
     static constexpr uint64_t MAX_PGTBHEAP_COUNT=4096;
     PgtbHCB*first_static_Pgtb_HCB;
-    PgtbHCB* next_Pgtb_HCB[MAX_PGTBHEAP_COUNT];
+    PgtbHCB* Pgtb_HCB_ARRAY[MAX_PGTBHEAP_COUNT];
     bool is_extensible;
     bool is_inited;
     public:

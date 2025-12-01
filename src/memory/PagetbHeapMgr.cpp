@@ -1,4 +1,6 @@
 #include "memory/PagetbHeapMgr.h"
+#include "memory/phygpsmemmgr.h"
+#include "memory/AddresSpace.h"
 #include "linker_symbols.h"
 PagetbHeapMgr_t gPgtbHeapMgr;
 constexpr uint64_t _2MB_SIZE=2*1024*1024;
@@ -82,7 +84,7 @@ bool PagetbHeapMgr_t::PgtbHCB::is_empty()
 int PagetbHeapMgr_t::Init()
 {
     if(is_inited)return OS_BAD_FUNCTION;
-    for(int i=0;i<MAX_PGTBHEAP_COUNT;i++)next_Pgtb_HCB[i]=nullptr;
+    for(int i=0;i<MAX_PGTBHEAP_COUNT;i++)Pgtb_HCB_ARRAY[i]=nullptr;
     first_static_Pgtb_HCB=new PgtbHCB(true);
     is_extensible=false;
     is_inited=true;
@@ -92,43 +94,61 @@ int PagetbHeapMgr_t::Init()
 void *PagetbHeapMgr_t::alloc_pgtb(phyaddr_t &phybase)
 {
     void* result=nullptr;
+    uint8_t unfull_PgtbHCB_count=0;
+    constexpr uint8_t min_unfull_PgtbHCB_count=3;
+    Module_lock.write_lock();
     result=first_static_Pgtb_HCB->alloc(phybase);
-    if(result!=nullptr)return result;
+    if(result!=nullptr){
+        Module_lock.write_unlock();
+        return result;
+    }
+    PgtbHCB*candidate=nullptr;
     if(is_extensible){
         for(int i=0;i<MAX_PGTBHEAP_COUNT;i++){
-            if(next_Pgtb_HCB[i]!=nullptr){
-                if(next_Pgtb_HCB[i]->is_full())continue;
-                else{
-                    result=next_Pgtb_HCB[i]->alloc(phybase);
-                    if(result!=nullptr)return result;
+            if(Pgtb_HCB_ARRAY[i]!=nullptr){
+                if(!Pgtb_HCB_ARRAY[i]->is_full()){
+                    if(candidate==nullptr)candidate=Pgtb_HCB_ARRAY[i];
+                unfull_PgtbHCB_count++;
+                if(unfull_PgtbHCB_count>=min_unfull_PgtbHCB_count)break;
                 }
             }else{
-                next_Pgtb_HCB[i]=new PgtbHCB();
-                result=next_Pgtb_HCB[i]->alloc(phybase);
-                if(result!=nullptr)return result;
+                Pgtb_HCB_ARRAY[i]=new PgtbHCB();
+                result=Pgtb_HCB_ARRAY[i]->alloc(phybase);
+                if(candidate==nullptr)candidate=Pgtb_HCB_ARRAY[i];
+                unfull_PgtbHCB_count++;
+                if(unfull_PgtbHCB_count>=min_unfull_PgtbHCB_count)break;
             }
         }
     }
-    return nullptr;
+    Module_lock.write_unlock();
+    return candidate->alloc(phybase);
 }
 
 int PagetbHeapMgr_t::free_pgtb_by_vaddr(void *vaddr)
 {
     vaddr_t vaddr_base=(vaddr_t)vaddr;
-    if(first_static_Pgtb_HCB->free(vaddr)==OS_SUCCESS)return OS_SUCCESS;
+    Module_lock.write_lock();
+    if(first_static_Pgtb_HCB->free(vaddr)==OS_SUCCESS){
+        Module_lock.write_unlock();
+        return OS_SUCCESS;
+    }
     if(is_extensible){
         for(int i=0;i<MAX_PGTBHEAP_COUNT;i++){
-            if(next_Pgtb_HCB[i]!=nullptr){
-                int status=next_Pgtb_HCB[i]->free(vaddr);
+            if(Pgtb_HCB_ARRAY[i]!=nullptr){
+                int status=Pgtb_HCB_ARRAY[i]->free(vaddr);
                 if(status==OS_SUCCESS){
-                    if(next_Pgtb_HCB[i]->is_empty()){
-                        delete next_Pgtb_HCB[i];
-                        next_Pgtb_HCB[i]=nullptr;
+                    if(Pgtb_HCB_ARRAY[i]->is_empty()){
+                        delete Pgtb_HCB_ARRAY[i];
+                        Pgtb_HCB_ARRAY[i]=nullptr;
                     }
+                    Module_lock.write_unlock();
                     return OS_SUCCESS;
                 }else{
                     if(status==OS_OUT_OF_RANGE)continue;
-                    else return status;
+                    else {
+                        Module_lock.write_unlock();
+                        return status;
+                    }
                 }
                 
             }else{
@@ -136,24 +156,33 @@ int PagetbHeapMgr_t::free_pgtb_by_vaddr(void *vaddr)
             }
         }
     }
+    Module_lock.write_unlock();
     return OS_OUT_OF_RANGE;
 }
 int PagetbHeapMgr_t::free_pgtb_by_phyaddr(phyaddr_t phybase)
 {
-    if(first_static_Pgtb_HCB->free(phybase)==OS_SUCCESS)return OS_SUCCESS;
+    Module_lock.write_lock();
+    if(first_static_Pgtb_HCB->free(phybase)==OS_SUCCESS){
+        Module_lock.write_unlock();
+        return OS_SUCCESS;
+    }
     if(is_extensible){
         for(int i=0;i<MAX_PGTBHEAP_COUNT;i++){
-            if(next_Pgtb_HCB[i]!=nullptr){
-                int status=next_Pgtb_HCB[i]->free(phybase);
+            if(Pgtb_HCB_ARRAY[i]!=nullptr){
+                int status=Pgtb_HCB_ARRAY[i]->free(phybase);
                 if(status==OS_SUCCESS){
-                    if(next_Pgtb_HCB[i]->is_empty()){
-                        delete next_Pgtb_HCB[i];
-                        next_Pgtb_HCB[i]=nullptr;
+                    if(Pgtb_HCB_ARRAY[i]->is_empty()){
+                        delete Pgtb_HCB_ARRAY[i];
+                        Pgtb_HCB_ARRAY[i]=nullptr;
                     }
+                    Module_lock.write_unlock();
                     return OS_SUCCESS;
                 }else{
                     if(status==OS_OUT_OF_RANGE)continue;
-                    else return status;
+                    else {
+                        Module_lock.write_unlock();
+                        return status;
+                    }
                 }
                 
             }else{
@@ -161,6 +190,7 @@ int PagetbHeapMgr_t::free_pgtb_by_phyaddr(phyaddr_t phybase)
             }
         }
     }
+    Module_lock.write_unlock();
     return OS_OUT_OF_RANGE;
 }
 
@@ -172,17 +202,44 @@ int PagetbHeapMgr_t::enable_extensible()
 
 void *PagetbHeapMgr_t::phyaddr_to_vaddr(phyaddr_t phybase)
 {
+    Module_lock.read_lock();
     vaddr_t result=first_static_Pgtb_HCB->phyaddr_to_vaddr(phybase);
-    if(result)return (void*)result;
+    if(result){
+        Module_lock.read_unlock();
+        return (void*)result;
+    }
     if(is_extensible){
         for(int i=0;i<MAX_PGTBHEAP_COUNT;i++){
-            if(next_Pgtb_HCB[i]!=nullptr){
-                result=next_Pgtb_HCB[i]->phyaddr_to_vaddr(phybase);
-                if(result)return (void*)result;
+            if(Pgtb_HCB_ARRAY[i]!=nullptr){
+                result=Pgtb_HCB_ARRAY[i]->phyaddr_to_vaddr(phybase);
+                if(result){
+                    Module_lock.read_unlock();
+                    return (void*)result;
+                }
             }else{
                 continue;
             }
         }
     }
+    Module_lock.read_unlock();
     return nullptr;
+}
+PagetbHeapMgr_t::PgtbHCB::PgtbHCB()
+{
+    heapsize=0x400000;
+}
+int PagetbHeapMgr_t::PgtbHCB::second_stage_init()
+{
+    heapphybase=gPhyPgsMemMgr.pages_alloc(heapsize/(_4KB_SIZE),phygpsmemmgr_t::KERNEL,21);
+    if(heapphybase==0)return OS_OUT_OF_MEMORY;
+    heapvbase=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(heapphybase,heapsize,KSPACE_RW_ACCESS);
+    if(heapvbase==0)return OS_MEMRY_ALLOCATE_FALT;
+    bitmap=new PgthHCB_bitmap_t(heapsize);
+    return OS_SUCCESS;
+}
+PagetbHeapMgr_t::PgtbHCB::~PgtbHCB()
+{
+    gKspacePgsMemMgr.pgs_remapped_free(heapvbase);
+    delete bitmap;
+    gPhyPgsMemMgr.pages_recycle(heapphybase,heapsize/(_4KB_SIZE));
 }

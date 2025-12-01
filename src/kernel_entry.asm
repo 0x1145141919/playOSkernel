@@ -37,6 +37,25 @@ global _kernel_Init
 SECTION .boottext
 _kernel_Init:
 bits 64
+mov eax, 1
+xor ecx, ecx
+cpuid
+test ecx, (1<<21)
+jz .skip_x2apic
+
+; 检测到 x2APIC
+mov ecx,1BH
+rdmsr
+or eax, 1 << 10
+wrmsr
+
+;验证是否开启x2apic
+rdmsr
+test eax, 1 << 10
+jz .skip_x2apic
+.falt_and_halt:
+hlt
+.skip_x2apic:
 %ifdef PG5LV_ENABLE
 ; 检查是否支持五级分页
     mov eax, 7           ; CPUID 功能 7
@@ -64,7 +83,6 @@ bits 64
 
 %else
     ; 使用四级分页
-    
     mov rax, pml4_table
     mov cr3, rax
 

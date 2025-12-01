@@ -1,6 +1,7 @@
 #pragma once
 #include "stdint.h"
 #include "util/bitmap.h"
+#include <lock.h>
 //#include <new>
 typedef uint64_t size_t;
 typedef uint64_t phyaddr_t;
@@ -18,6 +19,7 @@ class kpoolmemmgr_t
 {
 private:
     static constexpr uint64_t HCB_ARRAY_MAX_COUNT = 0x1000;
+    static constexpr uint64_t MAX_TRY_TIME = 0x10;
     class HCB_v2//堆控制块，必须是连续物理地址空间的连续内存
     {
         private:
@@ -47,6 +49,9 @@ private:
             uint32_t is_longtime_alloc:1;//是否是长时间分配的变量
             uint32_t is_crucial_variable:1;//是否是关键变量,如果是，在free，in_heap_realloc的时候检查到魔数被篡改，会触发内核恐慌
         };
+        
+        static constexpr uint8_t bytes_per_bit = 0x10;//一个bit控制16字节数
+        public: 
         struct alignas(16) data_meta{//每个被分配的都有元信息以及相应魔数
             //是分配在堆内，后面紧接着就是数据
             uint16_t data_size;
@@ -54,8 +59,6 @@ private:
             data_flags flags;
             uint64_t magic;
         };
-        static constexpr uint8_t bytes_per_bit = 0x10;//一个bit控制16字节数
-        public: 
         int first_linekd_heap_Init();//只能由first_linekd_heap调用的初始化
         //用指针检验是不是那个特殊堆
         HCB_v2(uint32_t apic_id);//给某个逻辑处理器初始化一个HCB
@@ -91,14 +94,16 @@ private:
         /**
          * @brief 重新分配内存
          * 思路：
-         * 1.先检查元信息表项，若魔数被篡改，则根据魔数判断是否是关键变量，若是则返回应该触发内核恐慌的返回值，反之则返回另外的返回值
+         * 1.先检查元信息表项，若魔数被篡改，则返回应该触发内核恐慌的返回值
          * 2.先尝试原地拓展
          * 3.若失败则尝试in_heap_alloc，释放原始数据，进行复制
          * 4.实在不行这个堆内存空间无法使用，返回错误码
          * 5.返回管理器的realloc接口的时候根据返回值尝试新堆alloc,释放原堆，或者内核恐慌，并且报告相关错误信息
          * */
         int in_heap_realloc(void*&ptr,uint32_t new_size,bool vaddraquire=true,uint8_t alignment=4);
+        uint32_t get_belonged_cpu_apicid();
         uint64_t get_used_bytes_count();
+        bool is_full();
         void count_used_bytes();
         bool is_addr_belong_to_this_hcb(void* addr);
     };
@@ -106,6 +111,7 @@ private:
     //这个位开启后会优先在cpu专属堆里面操作，再尝试first_linekd_heap
     void enable_new_hcb_alloc();
     class HCB_v2*HCB_ARRAY[HCB_ARRAY_MAX_COUNT];
+    trylock_cpp_t HCB_LOCK_ARR[HCB_ARRAY_MAX_COUNT];//这个锁只有在尝试分配新的指针的时候才会用
     HCB_v2 first_linekd_heap;
 public:
 /**
@@ -133,6 +139,7 @@ void operator delete(void* ptr) noexcept;
 void operator delete(void* ptr, size_t) noexcept;
 void operator delete[](void* ptr) noexcept;
 void operator delete[](void* ptr, size_t) noexcept;
+
 
 // 放置 new 操作符
 void* operator new(size_t, void* ptr) noexcept;

@@ -1,6 +1,6 @@
 #include "UefiRunTimeServices.h"
 #include "OS_utils.h"
-#include  "../memory/includes/Memory.h"
+#include  "memory/Memory.h"
 EFI_SYSTEM_TABLE*global_gST;
 runtime_services_t gRuntimeServices;
 runtime_services_t::runtime_services_t()

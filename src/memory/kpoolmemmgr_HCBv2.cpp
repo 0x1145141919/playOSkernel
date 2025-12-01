@@ -5,7 +5,6 @@
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
 #include "panic.h"
-#include "kpoolmemmgr.h"
 constexpr uint64_t MIN_VIR_ADDR=0xff00000000000000;
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 {
@@ -24,6 +23,7 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
 {
+    if(this==&gKpoolmemmgr.first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
     bitmap_size_in_64bit_units=entries_count/64;
     phyaddr_t bitmap_phybase=gPhyPgsMemMgr.pages_alloc(
         (bitmap_size_in_64bit_units*8)/4096,
@@ -187,6 +187,7 @@ kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t apic_id)
 }
 int kpoolmemmgr_t::HCB_v2::second_stage_Init()
 {
+    if(this==&gKpoolmemmgr.first_linekd_heap)return OS_BAD_FUNCTION;
     phybase=gPhyPgsMemMgr.pages_alloc(total_size_in_bytes/4096,phygpsmemmgr_t::KERNEL);
     if(phybase==0)return OS_OUT_OF_MEMORY;
     vbase=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
@@ -482,6 +483,13 @@ uint64_t kpoolmemmgr_t::HCB_v2::get_used_bytes_count()
     return this->bitmap_controller.bitmap_used_bit*this->bytes_per_bit;
 }
 
+bool kpoolmemmgr_t::HCB_v2::is_full()
+{
+    bitmap_controller.used_bit_count_lock.lock();
+    uint64_t used_bit_count=bitmap_controller.bitmap_used_bit;
+    bitmap_controller.used_bit_count_lock.unlock();
+    return used_bit_count==bitmap_controller.bitmap_size_in_64bit_units*64 ;
+}
 void kpoolmemmgr_t::HCB_v2::count_used_bytes()
 {
     bitmap_controller.count_bitmap_used_bit();
@@ -501,4 +509,8 @@ bool kpoolmemmgr_t::HCB_v2::is_addr_belong_to_this_hcb(void *addr)
 
     }
     return true;
+}
+uint32_t kpoolmemmgr_t::HCB_v2::get_belonged_cpu_apicid()
+{
+    return this->belonged_to_cpu_apicid;
 }
