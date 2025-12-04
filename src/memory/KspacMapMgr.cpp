@@ -45,7 +45,6 @@ int KernelSpacePgsMemMgr::VM_add(VM_DESC &vmentry){
 
 
 int KernelSpacePgsMemMgr::VM_del(VM_DESC&entry){
-    
     return kspace_vm_table->remove(&entry);
 }
 
@@ -110,36 +109,45 @@ int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry)
 
     return OS_SUCCESS;
 }
-void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess access, vaddr_t vbase)
+void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess access, vaddr_t vbase,bool is_protective)
 {
     if(addr%_4KB_SIZE||size%_4KB_SIZE||vbase%_4KB_SIZE)return nullptr;
-    VM_DESC vmentry={
+    VM_DESC*vmentry=new VM_DESC{
         .start=0,
         .end=0,
         .access=access,
         .phys_start=addr,
         .map_type=VM_DESC::MAP_PHYSICAL,//内核的内存你敢随便分配吗，必须第一时间分配映射
-        .committed=1,
+        .committed_full=0,
         .user_tag=0
     };
     GMlock.lock();
     int status;
     if(vbase==0){
-        vaddr_t new_base=kspace_vm_table->alloc_available_space(size);
+        vmentry->is_vaddr_alloced=1;
+        if(is_protective){
+        vaddr_t new_base=kspace_vm_table->alloc_available_space(size+_4KB_SIZE*2, (addr-_4KB_SIZE)%_1GB_SIZE);
+        GMlock.unlock();  
+        vmentry->start=new_base;
+        vmentry->end=new_base+size+_4KB_SIZE*2;  
+    }else
+        {
+        vaddr_t new_base=kspace_vm_table->alloc_available_space(size, addr%_1GB_SIZE);
         GMlock.unlock();
-        vmentry.start=new_base;
-        vmentry.end=new_base+size;
+        vmentry->start=new_base;
+        vmentry->end=new_base+size;
+    }
     }else{
         if(pglv_4_or_5){
             if(size+vbase-PAGELV4_KSPACE_BASE>PAGELV4_KSPACE_SIZE){
             GMlock.unlock();
             return nullptr;
             }
-            vmentry.start=vbase;
-            vmentry.end=vbase+size;
+            vmentry->start=vbase;
+            vmentry->end=vbase+size;
         }
     }
-    status=VM_add(vmentry);
+    status=VM_add(*vmentry);
     if (status!=OS_SUCCESS)
     {
         GMlock.unlock();
@@ -148,12 +156,16 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess a
         }
         return nullptr;
     }
-    
-    status=enable_VMentry(vmentry);
+    VM_DESC vmentry_copy=*vmentry;
+    if(vmentry->is_vaddr_alloced&&vmentry->is_out_bound_protective){
+        
+        vmentry_copy.start+=_4KB_SIZE;
+        vmentry_copy.end-=_4KB_SIZE;
+    }
+    status=enable_VMentry(vmentry_copy);    
     GMlock.unlock();
-    if(status==OS_SUCCESS)return(void*)vmentry.start; 
+    if(status==OS_SUCCESS)return(void*)vmentry_copy.start; 
     return nullptr;
-    
 }
 static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 int KernelSpacePgsMemMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC &vmentry)
@@ -315,19 +327,76 @@ int VM_vaddr_cmp(VM_DESC *a, VM_DESC *b)
     if(a->start > b->start&&a->start >= b->end)return 1;
     return 0;
 }
-vaddr_t KernelSpacePgsMemMgr::kspace_vm_table_t::alloc_available_space(uint64_t size)
+/**
+ * 这个接口有大问题，至少需要传入一个参数表示原有物理地址余1GB的偏移，虚拟地址必须与这个偏移对应
+ *选取起始虚拟地址也有讲究，不能一刀切必须与物理地址1gb同余，这样要造成虚拟地址浪费
+ *根据穿来的物理地址便宜和大小判断应该采取分配虚拟地址策略，如果对应物理段合并了2mb大页，那么虚拟地址，物理地址要2mb同余
+*如果对应物理段合并了1gb大页，那么虚拟地址，物理地址要1gb同余
+    *没有合并则最简单
+ */
+/**
+ * 所以需要把起始虚拟地址向上调整操作，鉴定物理段使用的大页操作这些拿出来做成函数
+ */
+vaddr_t KernelSpacePgsMemMgr::kspace_vm_table_t::alloc_available_space(uint64_t size,uint32_t target_vaddroffset)
 {
-    if(size==0||size%4096)return 0;
+    if(size==0||size%_4KB_SIZE||target_vaddroffset>=_1GB_SIZE||target_vaddroffset%_4KB_SIZE)return 0;
+    enum PHY_SEG_MAX_PAGE:uint8_t{
+        PHY_SEG_MAX_PAGE_4KB=0,
+        PHY_SEG_MAX_PAGE_2MB,
+        PHY_SEG_MAX_PAGE_1GB
+    };
+    auto max_type_identifier=[size,target_vaddroffset]()->PHY_SEG_MAX_PAGE{
+        phyaddr_t phybase=target_vaddroffset;
+        phyaddr_t phyend=phybase+size;
+
+        uint64_t base_1GB=align_up(phybase,_1GB_SIZE);
+        uint64_t end_1GB=align_down(phyend,_1GB_SIZE);
+        if(base_1GB<end_1GB){
+            return PHY_SEG_MAX_PAGE_1GB;
+        }
+        uint64_t base_2MB=align_up(phybase,_2MB_SIZE);
+        uint64_t end_2MB=align_down(phyend,_2MB_SIZE);
+        if(base_2MB<end_2MB){
+            return PHY_SEG_MAX_PAGE_2MB;
+        }
+        return PHY_SEG_MAX_PAGE_4KB;
+    };
+    PHY_SEG_MAX_PAGE max_page_type=max_type_identifier();
+    auto base_addr_modifier=[max_page_type,target_vaddroffset](vaddr_t base)->vaddr_t{ 
+        switch (max_page_type)
+        {
+            case PHY_SEG_MAX_PAGE_4KB:
+                return base;
+            case PHY_SEG_MAX_PAGE_2MB:
+                {
+                    uint32_t lower_offset=base%_2MB_SIZE;
+                    uint64_t basebase=base-lower_offset;
+                    uint32_t upper_offset=target_vaddroffset%_2MB_SIZE;
+                    if(upper_offset<lower_offset)return basebase+upper_offset+_2MB_SIZE;
+                    else return basebase+upper_offset;
+                }
+            case PHY_SEG_MAX_PAGE_1GB:
+                {
+                    uint32_t lower_offset=base%_1GB_SIZE;
+                    uint64_t basebase=base-lower_offset;
+                    uint32_t upper_offset=target_vaddroffset%_1GB_SIZE;
+                    if(upper_offset<lower_offset)return basebase+upper_offset+_1GB_SIZE;
+                    else return basebase+upper_offset;
+                }
+            default:
+                    return 0;
+        }
+    };
     Node* maxnode=this->subtree_max(this->root);
     VM_DESC*maxentry=(VM_DESC*)(maxnode->data);
-    if(~(maxentry->end)>=size){
-        return maxentry->end;
-    }
+    vaddr_t upper_alloc_base=base_addr_modifier(maxentry->end);
+    uint64_t upper_top_avaliable=~upper_alloc_base+1;
+    if(upper_top_avaliable>size)return upper_alloc_base;
     Node* minnode=this->subtree_min(this->root);
     Node*backnode=minnode;
     Node*front_node=successor(minnode);
     do{
-        vaddr_t gap_start=((VM_DESC*)(backnode->data))->end;
+        vaddr_t gap_start=base_addr_modifier(((VM_DESC*)(backnode->data))->end);
         vaddr_t gap_end=((VM_DESC*)(front_node->data))->start;
         if(gap_end>gap_start&&gap_end-gap_start>=size){
             return gap_start;

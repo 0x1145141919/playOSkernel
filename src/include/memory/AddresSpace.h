@@ -49,6 +49,14 @@ constexpr pgaccess KSPACE_RW_ACCESS={
     .is_global=1,
     .cache_strategy=WB
 };
+struct vphypair_t
+{//三个参数至少4k对齐
+    vaddr_t vaddr;
+    phyaddr_t paddr;
+    uint32_t size;
+};
+
+constexpr uint64_t DESC_SMALL_SEG_MAX=0x3200000;//32mb以上为大段，懒加载，以下为小段，直接全部加载
 struct VM_DESC
 {
     vaddr_t start;    // inclusive
@@ -57,33 +65,76 @@ struct VM_DESC
     // 映射物理页的模式
     enum map_type_t : uint8_t {
         MAP_NONE = 0,     // 未分配物理页（仅占位）
-        MAP_PHYSICAL,     // 连续物理页
-        MAP_MMIO,         // MMIO 区域
+        MAP_PHYSICAL,     // 连续物理页,只有内核因为立即要求而使用，用户空间不能用
         MAP_FILE,         // 文件映射
-        MAP_ANON          // 匿名映射（默认用户空间）
+        MAP_ANON,          // 匿名映射（默认用户空间）
     } map_type;
     phyaddr_t phys_start;  // 当 map_type=MAP_PHYSICAL 时有效
-                           // MAP_NONE / MAP_DEMAND 没有意义
+                           // MAP_NONE 没有意义
     pgaccess access;       // 页权限/缓存策略
-    uint8_t committed:1;   // 物理页是否已经分配（lazy allocation 用）
+    uint8_t is_bigseg:1;        // 是否为大段映射（延迟加载）
+    uint8_t committed_full:1;   // 物理页是否完全已经分配（lazy allocation 用）
+    uint8_t is_vaddr_alloced:1;    // 虚拟地址是否由地址空间管理器分配（否则为固定映射）
+    uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
+    //此位为1上下界各有4kb区域捕获越界页错误，也就是说明[start+4k,end-4k)才是实际可用区域
+    //start+4k映射的才是phys_start这个物理地址
+    //反之则没有
     uint8_t user_tag;      // 用户空间可以用来标记用途，如堆/栈/文件段等
+    vphypair_t*vphypair;    //指向一个vphypair_t[16]数组,数组vaddr单增，vaddr=0代表无效
 };
 int VM_vaddr_cmp(VM_DESC* a,VM_DESC* b);
 /**
  * 此类的职责就是创建虚拟地址空间，管理虚拟地址空间，
  * 此类的职责有且仅一个功能，就是管理相应的低128t虚拟地址空间，
+ * 本类接口不接受低于64k的虚拟地址空间
  */
 class AddressSpace//到时候进程管理器可以用这个类创建，但是内核空间还是受内核空间管理器管理
 { private:
     PML4Entry *pml4;//这个是虚拟地址
     phyaddr_t kspace_pml4_phyaddr;
     void sharing_kernel_space();//直接使用KernelSpacePgsMemMgr的全局单例
+    class vm_RBtree_t:public RBTree_t
+    {
+    private:    
+    using RBTree_t::root;
+    using RBTree_t::cmp;
+    using RBTree_t::left_rotate;
+    using RBTree_t::right_rotate;
+    using RBTree_t::fix_insert;
+    using RBTree_t::subtree_min;
+    using RBTree_t::fix_remove;
+    using RBTree_t::subtree_max;
+    using RBTree_t::successor;
+    public:
+    vm_RBtree_t():RBTree_t((int (*)(const void*, const void*))VM_vaddr_cmp){
+        
+    }
+    using RBTree_t::search;
+    using RBTree_t::insert;
+    using RBTree_t::remove;
+    vaddr_t alloc_available_space(uint64_t size);
+    };
+    vm_RBtree_t vm_RBtree;
+    spinlock_cpp_t lock;
+    int enable_VM_desc(VM_DESC&desc);//可以是任何段，只要填好物理地址虚拟地址，权限即可，但是大段里面的小段需要自己构造
+    int vaddr_to_VM_DESC(vaddr_t vaddr,VM_DESC&result);
+    public:
+    AddressSpace();
+    int declare_space(vaddr_t vaddr,uint64_t size,pgaccess access);
+    int undeclare_space(vaddr_t vaddr);
+    int map_physical_pages(vaddr_t vaddr,phyaddr_t paddr,uint64_t size);//这里是直接把一段物理地址映射到虚拟地址，不论大小
+    //不建议大段使用这个
+    //传入的size必须与之前的size一致
+    int unmap_physical_pages(vaddr_t vaddr,uint64_t size);
+    int enable_AddressSpace();
+    phyaddr_t vaddr_to_paddr(vaddr_t vaddr);
+    ~AddressSpace();
 };
     /**
  * 这个类的职责有且仅有一个功能，就是管理内核空间，
  * 通过kspacePML4暴露给AddressSpace::sharing_kernel_space()强制复制高一半pml4e
  * 以及类内的kspaceUPpdpt同步所有进程空间的内核结构
- * 此类全局唯一，只管理高128tb虚拟地址空间，
+ * 此类全局唯一，只管理高128tb虚拟地址空间
  */
 class KernelSpacePgsMemMgr//使用上面的位域结构体，在初始化函数中直接用，但在后续正式外部暴露接口中对页表项必须用原子操作函数
 {
@@ -130,7 +181,7 @@ class kspace_vm_table_t:public RBTree_t
     using RBTree_t::search;
     using RBTree_t::insert;
     using RBTree_t::remove;
-    vaddr_t alloc_available_space(uint64_t size);
+    vaddr_t alloc_available_space(uint64_t size,uint32_t target_vaddroffset);
 };
 kspace_vm_table_t*kspace_vm_table;
 spinlock_cpp_t GMlock;
@@ -192,7 +243,13 @@ int pgs_remapped_free(vaddr_t addr);
 /**
  * 暴露在外面的接口，其中addr，size必须4k对齐
  */
-void*pgs_remapp(phyaddr_t addr,uint64_t size,pgaccess access,vaddr_t vbase=0);//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
+void*pgs_remapp(
+    phyaddr_t addr,
+    uint64_t size,
+    pgaccess access,
+    vaddr_t vbase=0,
+    bool is_protective=false
+);//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
     int Init();
     int v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
 

@@ -231,7 +231,10 @@ int KernelSpacePgsMemMgr::pgs_remapped_free(vaddr_t addr)
     }
     shared_inval_kspace_VMentry_info.is_package_valid = true;
     shared_inval_kspace_VMentry_info.completed_processors_count = 0;
+    
     status=invalidate_tlb_entry();
+    status=VM_del(vmentry);
+    delete &vmentry;
     if (status != OS_SUCCESS)return status;
     //todo:广播其他处理器失效tlb以及等待校验，若超时要用其它手段跳出直接panic
     
