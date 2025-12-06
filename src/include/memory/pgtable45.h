@@ -216,7 +216,7 @@ struct PML4Entry
         uint64_t large:1;
         uint64_t global:1;
         uint64_t reserved:3;
-        uint64_t PD_addr_or_1GBPAGE:36;
+        uint64_t PD_addr:36;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -247,7 +247,7 @@ struct PML4Entry
         uint64_t PCD:1;
         uint64_t accessed:1;
         uint64_t reserved:6;
-        uint64_t pt_addr_or_2MB_PG:36;
+        uint64_t pt_addr:36;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));

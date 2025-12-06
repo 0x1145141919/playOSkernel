@@ -8,7 +8,7 @@
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
 bool pglv_4_or_5=PAGE_TBALE_LV::LV_4;//true代表4级页表，false代表5级页表
-cache_table_idx_struct_t KernelSpacePgsMemMgr::cache_strategy_to_idx(cache_strategy_t cache_strategy)
+cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy)
 {   
     uint8_t i=0;
     for(;i<8;i++){

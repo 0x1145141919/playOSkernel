@@ -87,17 +87,15 @@ struct VM_DESC
     uint8_t committed_full:1;   // 物理页是否完全已经分配（lazy allocation 用）
     uint8_t is_vaddr_alloced:1;    // 虚拟地址是否由地址空间管理器分配（否则为固定映射）
     uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
-    //此位为1上下界各有4kb区域捕获越界页错误，也就是说明[start+4k,end-4k)才是实际可用区域
-    //start+4k映射的才是phys_start这个物理地址
-    //反之则没有
-    uint8_t user_tag;      // 用户空间可以用来标记用途，如堆/栈/文件段等
-    vphypair_t*vphypair;    //指向一个vphypair_t[16]数组,数组vaddr单增，vaddr=0代表无效
 };
 int VM_vaddr_cmp(VM_DESC* a,VM_DESC* b);
 /**
  * 此类的职责就是创建虚拟地址空间，管理虚拟地址空间，
- * 此类的职责有且仅一个功能，就是管理相应的低128t虚拟地址空间，
+ * 此类的职责有且仅一个功能，就是管理相应的低一般虚拟地址空间，
  * 本类接口不接受低于64k的虚拟地址空间
+ * 此类的职责只有映射虚拟地址空间，不提供虚拟地址空间管理功能
+ * 若使用此类请自行实现虚拟地址空间的管理
+ * 最多提供一个打印实际映射表的接口
  */
 class AddressSpace//到时候进程管理器可以用这个类创建，但是内核空间还是受内核空间管理器管理
 { private:
@@ -109,45 +107,19 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     static constexpr uint32_t _2MB_SIZE=1ULL<<21;
     static constexpr uint32_t _1GB_SIZE=1ULL<<30;
     void sharing_kernel_space();//直接使用KernelSpacePgsMemMgr的pml4高一半
-    class vm_RBtree_t:public RBTree_t
-    {
-    private:    
-    using RBTree_t::root;
-    using RBTree_t::cmp;
-    using RBTree_t::left_rotate;
-    using RBTree_t::right_rotate;
-    using RBTree_t::fix_insert;
-    using RBTree_t::subtree_min;
-    using RBTree_t::fix_remove;
-    using RBTree_t::subtree_max;
-    using RBTree_t::successor;
-    public:
-    vm_RBtree_t():RBTree_t((int (*)(const void*, const void*))VM_vaddr_cmp){
-        
-    }
-    using RBTree_t::search;
-    using RBTree_t::insert;
-    using RBTree_t::remove;
-    };
-    vm_RBtree_t vm_RBtree;
-    spinlock_cpp_t lock;
-    int enable_VM_desc(VM_DESC desc,bool is_pagetballoc_reserved);//可以是任何段，只要填好物理地址虚拟地址，权限即可，但是大段里面的小段需要自己构造
+    spinrwlock_cpp_t lock;
     
-    int vaddr_to_VM_DESC_ref(vaddr_t vaddr,VM_DESC&result);
-    int vaddr_to_VM_DESC_copy(vaddr_t vaddr,VM_DESC result);
     public:
     AddressSpace();
-    int declare_space(vaddr_t vaddr,uint64_t size,pgaccess access);
-    int undeclare_space(vaddr_t vaddr);
-    int map_physical_pages(vaddr_t vaddr,phyaddr_t paddr,uint64_t size);//这里是直接把一段物理地址映射到虚拟地址，不论大小
-    //不建议大段使用这个
-    //传入的size必须与之前的size一致
-    int unmap_physical_pages(vaddr_t vaddr,uint64_t size);
-    int enable_AddressSpace();
+    int enable_VM_desc(VM_DESC desc);
+    int disable_VM_desc(VM_DESC desc);
+    int Init();
+    int second_stage_init();
     phyaddr_t vaddr_to_paddr(vaddr_t vaddr);
     void load_pml4_to_cr3();//这个接口会直接把当前页表加载到cr3寄存器
     ~AddressSpace();
 };
+extern AddressSpace gKernelSpace;
 constexpr ia32_pat_t DEFAULT_PAT_CONFIG={
     .value=0x407050600070106
 };
