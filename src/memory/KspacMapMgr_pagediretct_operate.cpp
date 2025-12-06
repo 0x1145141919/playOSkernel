@@ -40,7 +40,13 @@ void nonleaf_pgtbentry_flagsset(PageTableEntryUnion&entry){//内核态的是全�
 /**
  * 锁在外部接口中持有
  */
-int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base, uint16_t count, pgaccess access)
+int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
+    phyaddr_t phybase,
+    vaddr_t vaddr_base,
+    uint16_t count,
+    pgaccess access,
+    bool is_pagetballoc_reserved
+    )
 {
     uint64_t highoffset=vaddr_base-PAGELV4_KSPACE_BASE;
     uint32_t pdpte_index=(highoffset>>30)&((1<<17)-1);
@@ -63,7 +69,8 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vad
     }else{//presentBit==0说明要新建
         PDPTEEntry&_1=kspaceUPpdpt[pdpte_index].pdpte;
         phyaddr_t _1_subphy=0;
-        PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_1_subphy);
+        if(is_pagetballoc_reserved)PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_1_subphy);
+        else PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(_1_subphy);
         if(!PDEvbase)return OS_OUT_OF_RESOURCE;
         nonleaf_pgtbentry_flagsset(kspaceUPpdpt[pdpte_index]);
         _1.PD_addr_or_1GBPAGE=_1_subphy>>12;
@@ -78,7 +85,8 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vad
         PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr_or_2MB_PG<<12);
     }else{
         phyaddr_t _2_subphy=0;
-        PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_2_subphy);
+        if(is_pagetballoc_reserved)PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_2_subphy);
+        else PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(_2_subphy);
         if(!PTEvbase)return OS_OUT_OF_RESOURCE;
         nonleaf_pgtbentry_flagsset(PDEvbase[pde_index]);
         PDEvbase[pde_index].pde.pt_addr_or_2MB_PG=_2_subphy>>12;
@@ -103,10 +111,12 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vad
 // 2MB 大页映射（PDE 级别）
 // 要求：不能跨 PDPT 边界（即一次最多映射 512 个 2MB 页，覆盖 1GB）
 // ====================================================================
-int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set(phyaddr_t phybase,
+int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set(
+                                                phyaddr_t phybase,
                                                   vaddr_t vaddr_base,
                                                   uint16_t count,
-                                                  pgaccess access)
+                                                  pgaccess access,
+                                                  bool is_pagetballoc_reserved)
 {
     if (count == 0 || count > 512) [[unlikely]] {
         kputsSecure("KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set: count invalid\n");
@@ -136,7 +146,12 @@ int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set(phyaddr_t phybase,
             kspaceUPpdpt[pdpt_index].pdpte.PD_addr_or_1GBPAGE << 12);
     } else {
         phyaddr_t pd_phy = 0;
-        PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(pd_phy);
+        if(is_pagetballoc_reserved)
+        {
+            PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(pd_phy);
+        }else{
+            PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(pd_phy);
+        }
         if (!PD_vbase) return OS_OUT_OF_RESOURCE;
 
         nonleaf_pgtbentry_flagsset(kspaceUPpdpt[pdpt_index]);
@@ -233,8 +248,7 @@ int KernelSpacePgsMemMgr::pgs_remapped_free(vaddr_t addr)
     shared_inval_kspace_VMentry_info.completed_processors_count = 0;
     
     status=invalidate_tlb_entry();
-    status=VM_del(vmentry);
-    delete &vmentry;
+    status=VM_del(&vmentry);
     if (status != OS_SUCCESS)return status;
     //todo:广播其他处理器失效tlb以及等待校验，若超时要用其它手段跳出直接panic
     

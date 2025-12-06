@@ -7,8 +7,8 @@
 #include "linker_symbols.h"
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
-
-KernelSpacePgsMemMgr::cache_table_idx_struct_t KernelSpacePgsMemMgr::cache_strategy_to_idx(cache_strategy_t cache_strategy)
+bool pglv_4_or_5=PAGE_TBALE_LV::LV_4;//true代表4级页表，false代表5级页表
+cache_table_idx_struct_t KernelSpacePgsMemMgr::cache_strategy_to_idx(cache_strategy_t cache_strategy)
 {   
     uint8_t i=0;
     for(;i<8;i++){
@@ -37,18 +37,20 @@ int KernelSpacePgsMemMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
 }
 
 
-int KernelSpacePgsMemMgr::VM_add(VM_DESC &vmentry){
+int KernelSpacePgsMemMgr::VM_add(VM_DESC vmentry){
     // 假定调用者持有 GMlock，且参数已校验（不做重复/越界检查）
-
-    return kspace_vm_table->insert(&vmentry);
+    VM_DESC*vmentry_in_heap = new VM_DESC(vmentry);
+    return kspace_vm_table->insert(vmentry_in_heap);
 }
 
 
-int KernelSpacePgsMemMgr::VM_del(VM_DESC&entry){
-    return kspace_vm_table->remove(&entry);
+int KernelSpacePgsMemMgr::VM_del(VM_DESC*entry){
+    int status = kspace_vm_table->remove(entry);
+    delete entry;
+    return status;
 }
 
-int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry)
+int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry, bool is_pagetballoc_reserved)
 {
     // basic alignment checks (4KB)
     if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE)
@@ -90,12 +92,12 @@ int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry)
             }
             case _2MB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pde_2MB_entries_set(e.base, e.vbase, count, vmentry.access);
+                rc = _4lv_pde_2MB_entries_set(e.base, e.vbase, count, vmentry.access, is_pagetballoc_reserved);
                 break;
             }
             case _4KB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pte_4KB_entries_set(e.base, e.vbase, count, vmentry.access);
+                rc = _4lv_pte_4KB_entries_set(e.base, e.vbase, count, vmentry.access, is_pagetballoc_reserved);
                 break;
             }
             default:
@@ -109,10 +111,17 @@ int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry)
 
     return OS_SUCCESS;
 }
-void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess access, vaddr_t vbase,bool is_protective)
+void *KernelSpacePgsMemMgr::pgs_remapp(
+    phyaddr_t addr, 
+    uint64_t size, 
+    pgaccess access, 
+    vaddr_t vbase,
+    bool is_protective,
+    bool is_pagetballoc_reserved
+)
 {
     if(addr%_4KB_SIZE||size%_4KB_SIZE||vbase%_4KB_SIZE)return nullptr;
-    VM_DESC*vmentry=new VM_DESC{
+    VM_DESC vmentry={
         .start=0,
         .end=0,
         .access=access,
@@ -124,18 +133,18 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess a
     GMlock.lock();
     int status;
     if(vbase==0){
-        vmentry->is_vaddr_alloced=1;
+        vmentry.is_vaddr_alloced=1;
         if(is_protective){
         vaddr_t new_base=kspace_vm_table->alloc_available_space(size+_4KB_SIZE*2, (addr-_4KB_SIZE)%_1GB_SIZE);
         GMlock.unlock();  
-        vmentry->start=new_base;
-        vmentry->end=new_base+size+_4KB_SIZE*2;  
+        vmentry.start=new_base;
+        vmentry.end=new_base+size+_4KB_SIZE*2;  
     }else
         {
         vaddr_t new_base=kspace_vm_table->alloc_available_space(size, addr%_1GB_SIZE);
         GMlock.unlock();
-        vmentry->start=new_base;
-        vmentry->end=new_base+size;
+        vmentry.start=new_base;
+        vmentry.end=new_base+size;
     }
     }else{
         if(pglv_4_or_5){
@@ -143,11 +152,11 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess a
             GMlock.unlock();
             return nullptr;
             }
-            vmentry->start=vbase;
-            vmentry->end=vbase+size;
+            vmentry.start=vbase;
+            vmentry.end=vbase+size;
         }
     }
-    status=VM_add(*vmentry);
+    status=VM_add(vmentry);
     if (status!=OS_SUCCESS)
     {
         GMlock.unlock();
@@ -156,13 +165,13 @@ void *KernelSpacePgsMemMgr::pgs_remapp(phyaddr_t addr, uint64_t size, pgaccess a
         }
         return nullptr;
     }
-    VM_DESC vmentry_copy=*vmentry;
-    if(vmentry->is_vaddr_alloced&&vmentry->is_out_bound_protective){
+    VM_DESC vmentry_copy=vmentry;
+    if(vmentry.is_vaddr_alloced&&vmentry.is_out_bound_protective){
         
         vmentry_copy.start+=_4KB_SIZE;
         vmentry_copy.end-=_4KB_SIZE;
     }
-    status=enable_VMentry(vmentry_copy);    
+    status=enable_VMentry(vmentry_copy,is_pagetballoc_reserved);    
     GMlock.unlock();
     if(status==OS_SUCCESS)return(void*)vmentry_copy.start; 
     return nullptr;
@@ -398,7 +407,7 @@ vaddr_t KernelSpacePgsMemMgr::kspace_vm_table_t::alloc_available_space(uint64_t 
     do{
         vaddr_t gap_start=base_addr_modifier(((VM_DESC*)(backnode->data))->end);
         vaddr_t gap_end=((VM_DESC*)(front_node->data))->start;
-        if(gap_end>gap_start&&gap_end-gap_start>=size){
+        if(gap_end>gap_start&&(gap_end-gap_start)>=size){
             return gap_start;
         }
         backnode=front_node;

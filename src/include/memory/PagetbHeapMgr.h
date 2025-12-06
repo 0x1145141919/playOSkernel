@@ -43,7 +43,8 @@ class PagetbHeapMgr_t {
     public:
     int Init();
     void* alloc_pgtb(phyaddr_t&phybase);
-    int free_pgtb_by_vaddr(void*vaddr);
+    void *alloc_pgtb_no_reserve(phyaddr_t &phybase);
+    int free_pgtb_by_vaddr(void *vaddr);
     int free_pgtb_by_phyaddr(phyaddr_t phybase);
     int enable_extensible();
     void*phyaddr_to_vaddr(phyaddr_t phybase);

@@ -4,6 +4,11 @@
 #include "memory/pgtable45.h"
 #include <lock.h>
 #include "util/RB_btree.h"
+namespace PAGE_TBALE_LV{
+    constexpr bool LV_4=true;
+    constexpr bool LV_5=false;
+}
+extern bool pglv_4_or_5;//true代表4级页表，false代表5级页表,在KspacMapMgr.cpp存在
 enum cache_strategy_t:uint8_t
 {
     UC=0,
@@ -12,6 +17,12 @@ enum cache_strategy_t:uint8_t
     WP=5,
     WB=6,
     UC_minus=7
+};
+struct cache_table_idx_struct_t
+{
+    uint8_t PWT:1;
+    uint8_t PCD:1;
+    uint8_t PAT:1;
 };
 struct seg_to_pages_info_pakage_t{
         struct pages_info_t{
@@ -92,7 +103,12 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
 { private:
     PML4Entry *pml4;//这个是虚拟地址
     phyaddr_t kspace_pml4_phyaddr;
-    void sharing_kernel_space();//直接使用KernelSpacePgsMemMgr的全局单例
+    constexpr static uint64_t PAGE_LV4_USERSPACE_SIZE=0x00007FFFFFFFFFFF+1;
+    constexpr static uint64_t PAGE_LV5_USERSPACE_SIZE=0x00FFFFFFFFFFFFFF+1;
+    static constexpr uint32_t _4KB_SIZE=0x1000;
+    static constexpr uint32_t _2MB_SIZE=1ULL<<21;
+    static constexpr uint32_t _1GB_SIZE=1ULL<<30;
+    void sharing_kernel_space();//直接使用KernelSpacePgsMemMgr的pml4高一半
     class vm_RBtree_t:public RBTree_t
     {
     private:    
@@ -112,12 +128,13 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     using RBTree_t::search;
     using RBTree_t::insert;
     using RBTree_t::remove;
-    vaddr_t alloc_available_space(uint64_t size);
     };
     vm_RBtree_t vm_RBtree;
     spinlock_cpp_t lock;
-    int enable_VM_desc(VM_DESC&desc);//可以是任何段，只要填好物理地址虚拟地址，权限即可，但是大段里面的小段需要自己构造
-    int vaddr_to_VM_DESC(vaddr_t vaddr,VM_DESC&result);
+    int enable_VM_desc(VM_DESC desc,bool is_pagetballoc_reserved);//可以是任何段，只要填好物理地址虚拟地址，权限即可，但是大段里面的小段需要自己构造
+    
+    int vaddr_to_VM_DESC_ref(vaddr_t vaddr,VM_DESC&result);
+    int vaddr_to_VM_DESC_copy(vaddr_t vaddr,VM_DESC result);
     public:
     AddressSpace();
     int declare_space(vaddr_t vaddr,uint64_t size,pgaccess access);
@@ -128,9 +145,14 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     int unmap_physical_pages(vaddr_t vaddr,uint64_t size);
     int enable_AddressSpace();
     phyaddr_t vaddr_to_paddr(vaddr_t vaddr);
+    void load_pml4_to_cr3();//这个接口会直接把当前页表加载到cr3寄存器
     ~AddressSpace();
 };
-    /**
+constexpr ia32_pat_t DEFAULT_PAT_CONFIG={
+    .value=0x407050600070106
+};
+cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy);
+/**
  * 这个类的职责有且仅有一个功能，就是管理内核空间，
  * 通过kspacePML4暴露给AddressSpace::sharing_kernel_space()强制复制高一半pml4e
  * 以及类内的kspaceUPpdpt同步所有进程空间的内核结构
@@ -149,18 +171,10 @@ static constexpr uint64_t PAGELV5_KSPACE_SIZE=1ULL<<(57-1);
 static constexpr uint32_t _4KB_SIZE=0x1000;
 static constexpr uint32_t _2MB_SIZE=1ULL<<21;
 static constexpr uint32_t _1GB_SIZE=1ULL<<30;
-static constexpr ia32_pat_t DEFAULT_PAT_CONFIG={
-    .value=0x407050600070106
-};
-bool pglv_4_or_5=true;//true代表4级页表，false代表5级页表
+
 bool is_default_pat_config_enabled=false;
-struct cache_table_idx_struct_t
-{
-    uint8_t PWT:1;
-    uint8_t PCD:1;
-    uint8_t PAT:1;
-};
-cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy);
+
+
 //这个数组按照虚拟地址从小到大排序,规定虚拟地址是主键
 class kspace_vm_table_t:public RBTree_t
 {
@@ -191,13 +205,13 @@ spinlock_cpp_t GMlock;
  * 内部接口默认外部调用函数持有锁，
  * 不对参数合法性进行校验
  */
-int VM_add(VM_DESC& vmentry);
+int VM_add(VM_DESC vmentry);
 /**
  * 往kspace_vm_table删除虚拟地址为vaddr的VM_DESC项，
  * 遵守虚拟地址从小到大排序，
  * 内部接口默认外部调用函数持有锁
  */
-int VM_del(VM_DESC&entry);
+int VM_del(VM_DESC*entry);
 /**
  * 搜索虚拟地址为vaddr的VM_DESC项，
  * 建议采取二分查找
@@ -206,9 +220,9 @@ int VM_search_by_vaddr(vaddr_t vaddr,VM_DESC&result);
 
 int _4lv_pdpte_1GB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨父页表项指针边界
 
-int _4lv_pde_2MB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨页目录指针边界
+int _4lv_pde_2MB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access,bool is_pagetballoc_reserved);//这里要求的是不能跨页目录指针边界
 
-int _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨页目录边界
+int _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access,bool is_pagetballoc_reserved);//这里要求的是不能跨页目录边界
 
 
 /**
@@ -216,7 +230,7 @@ int _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count
  */
 int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC& vmentry);
 
-int enable_VMentry(VM_DESC& vmentry);
+int enable_VMentry(VM_DESC& vmentry,bool is_pagetballoc_reserved);
 //这个函数的职责是根据vmentry的内容撤销对应的页表项映射，只对对应的页表结构进行操作
 //失效对应tlb项目在函数外部完成
 //以及顺便使用共享信息包填充shared_inval_kspace_VMentry_info
@@ -248,7 +262,8 @@ void*pgs_remapp(
     uint64_t size,
     pgaccess access,
     vaddr_t vbase=0,
-    bool is_protective=false
+    bool is_protective=false,
+    bool is_pagetballoc_reserved=true
 );//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
     int Init();
     int v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
