@@ -101,6 +101,7 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
 { private:
     PML4Entry *pml4;//这个是虚拟地址
     phyaddr_t kspace_pml4_phyaddr;
+    uint64_t occupyied_size;
     constexpr static uint64_t PAGE_LV4_USERSPACE_SIZE=0x00007FFFFFFFFFFF+1;
     constexpr static uint64_t PAGE_LV5_USERSPACE_SIZE=0x00FFFFFFFFFFFFFF+1;
     static constexpr uint32_t _4KB_SIZE=0x1000;
@@ -115,6 +116,9 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     int disable_VM_desc(VM_DESC desc);
     int Init();
     int second_stage_init();
+    uint64_t get_occupyied_size(){
+        return occupyied_size;
+    }
     phyaddr_t vaddr_to_paddr(vaddr_t vaddr);
     void load_pml4_to_cr3();//这个接口会直接把当前页表加载到cr3寄存器
     ~AddressSpace();
@@ -133,6 +137,7 @@ cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy);
 class KernelSpacePgsMemMgr//使用上面的位域结构体，在初始化函数中直接用，但在后续正式外部暴露接口中对页表项必须用原子操作函数
 {
 private://后面五级页表的时候考虑选择编译
+PageTableEntryUnion*roottbv;
 phyaddr_t root_pml4_phyaddr;
 phyaddr_t kspace_uppdpt_phyaddr;
 static constexpr uint64_t PAGELV4_KSPACE_BASE=0xFFFF800000000000;
@@ -171,6 +176,8 @@ class kspace_vm_table_t:public RBTree_t
 };
 kspace_vm_table_t*kspace_vm_table;
 spinlock_cpp_t GMlock;
+friend int AddressSpace::Init();
+friend AddressSpace::AddressSpace();
 /**
  * 往kspace_vm_table插入vmentry，
  * 遵守虚拟地址从小到大排序，

@@ -288,6 +288,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
                 goto page_size_invalid;
             }
         }
+        occupyied_size+=(desc.end-desc.start);
         goto success;
     }else{
         return OS_NOT_SUPPORT;
@@ -672,7 +673,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_inval
                 goto page_size_invalid;
             }
         }
-
+        occupyied_size-=(desc.end-desc.start);
         //todo:广播所有核心重新
         goto success;
     } else {
@@ -691,6 +692,51 @@ sub_step_invalid:
 }
 phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr)
 {
-    
+    uint16_t pml5_idx = (vaddr >> 48)&511;
+    uint16_t pml4_idx = (vaddr >> 39)&511;
+    uint16_t pdpte_idx = (vaddr >> 30)&511;
+    uint16_t pde_idx = (vaddr >> 21)&511;
+    uint16_t pte_idx = (vaddr >> 12)&511;
+    lock.read_lock();
+    if(pglv_4_or_5 == PAGE_TBALE_LV::LV_4){
+        if(pml4_idx>255)goto ret0;// 高一半是内核空间,这里无权限访问
+        PML4Entry pml4_entry=pml4[pml4_idx];
+        if(!pml4_entry.present)goto ret0;
+        PageTableEntryUnion*pdpte_base=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(pml4_entry.pdpte_addr<<12);  
+        PageTableEntryUnion pdpte=pdpte_base[pdpte_idx];
+        if(!pdpte.pdpte.present)goto ret0;
+        else if(pdpte.pdpte.large)goto pdpte_end;
+        PageTableEntryUnion*pde_base=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(pdpte.pdpte.PD_addr<<12);
+        PageTableEntryUnion pde=pde_base[pde_idx];
+        if(!pde.pde.present)goto ret0;
+        else if(pde.raw&PDE::PS_MASK)goto pde_end;
+        PageTableEntryUnion*pte_base=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(pde.pde.pt_addr<<12);
+        PageTableEntryUnion pte=pte_base[pte_idx];
+        goto pte_end;
+    }else{
+        return 0;
+    }
+
+
+    ret0:
+    lock.read_unlock();
+    return 0;
+    pdpte_end:
+    lock.read_unlock();
+    return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pdpte_idx)<<30)+(vaddr&(_1GB_SIZE-1));
+    pde_end:
+    lock.read_unlock();
+    return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pde_idx)<<21)+(vaddr&(_2MB_SIZE-1));
+    pte_end:
+    lock.read_unlock();
+    return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pde_idx)<<21)+(uint64_t(pte_idx)<<12)+(vaddr&(_4KB_SIZE-1));
 }
 
+int AddressSpace::Init()
+{
+    if(this!=&gKernelSpace)return OS_BAD_FUNCTION;
+    pml4=&gKspacePgsMemMgr.roottbv->pml4;
+    kspace_pml4_phyaddr=gKspacePgsMemMgr.root_pml4_phyaddr;
+    occupyied_size=0;
+    return OS_SUCCESS;
+}
