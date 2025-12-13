@@ -26,21 +26,21 @@ private:
 public:
     KernelPanicManager();
     ~KernelPanicManager();
-    void Init(uint64_t delay_sec);  
+    static void Init(uint64_t delay_sec);  
     // 设置关机前等待时间
-    void setShutdownDelay(int seconds);
+    static void setShutdownDelay(int seconds);
     
     // 打印寄存器信息
-    void dumpRegisters(const pt_regs& regs) const;
+    static void dumpRegisters(const pt_regs& regs);
     
     // 触发内核恐慌，打印错误信息并停机（无额外信息）
-    void panic(const char* message) const;
+    static void panic(const char* message);
     
     // 触发内核恐慌，打印错误信息和寄存器信息并停机
-    void panic(const char* message, const pt_regs& regs) const;
+    static void panic(const char* message, const pt_regs& regs);
     
     
     // 带信息包的内核恐慌函数
-    void panic(const char* message, const panic_info_t& info) const;
+    static void panic(const char* message, const panic_info_t& info);
 };
 extern KernelPanicManager gkernelPanicManager;

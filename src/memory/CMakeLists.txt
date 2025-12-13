@@ -1,9 +1,17 @@
 # 创建内存管理模块的对象文件，用于内核空间
 # 包含内核池内存管理、物理内存段管理等相关功能的实现文件
 add_library(Mem_module OBJECT 
+    AddresSpace.cpp
     kpoolmemmgr.cpp
+    kpoolmemmgr_HCBv2.cpp
     Memory.cpp
     phygpsmemmgr.cpp
+    phypgsmemmgr_alloc.cpp
+    phygpsmemmgr_init.cpp
+    phygpsmemmgr_pgcount_modify.cpp
+    KspacMapMgr.cpp
+    KspacMapMgr_pagediretct_operate.cpp
+    PagetbHeapMgr.cpp
 )
 
 # 设置私有包含目录，指定编译时需要的头文件搜索路径
@@ -22,7 +30,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../include
         -fno-exceptions
         -fno-builtin
         -fno-rtti
-            -fno-PIC
+        -fno-PIC
          -fno-stack-protector
         #-fno-asynchronous-unwind-tables
          -DKERNEL_MODE
@@ -31,30 +39,3 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../include
          
     )
 
-# 创建用于用户空间测试的动态库
-add_library(Mem_module_shared SHARED
-    kpoolmemmgr.cpp
-    Memory.cpp
-    phygpsmemmgr.cpp
-)
-
-# 设置动态库输出名称和位置
-set_target_properties(Mem_module_shared PROPERTIES
-    OUTPUT_NAME "Mem_module"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-)
-
-# 设置用户空间动态库的编译选项
-target_compile_options(Mem_module_shared PRIVATE
-    -fPIC
-    -shared
-    -DTEST_MODE
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3>
-)
-
-# 设置用户空间动态库的包含目录
-target_include_directories(Mem_module_shared PRIVATE
-"/usr/include/efi/"
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-)

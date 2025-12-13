@@ -26,3 +26,8 @@ uint32_t query_x2apicid(){
     cpuid(&eax, &ebx, &ecx, &edx);
     return edx;
 }
+bool is_x2apic_supported(){
+    uint32_t eax=1, ebx, ecx=0, edx;
+    cpuid(&eax, &ebx, &ecx, &edx);
+    return ecx & (1 << 21);
+}

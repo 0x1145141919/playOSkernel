@@ -1,10 +1,11 @@
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 #include "stdint.h"
 #ifdef USER_MODE
 #include <x86intrin.h>
 #endif
 #ifdef KERNEL_MODE 
 #include "kintrin.h"
+#include "OS_utils.h"
 #endif
 typedef uint64_t size_t;
 const uint8_t masks_entry1bit_width[8]={128,64,32,16,8,4,2,1};
@@ -431,4 +432,23 @@ static inline uint64_t atomic_read64_rmb(volatile void *addr)
                  : "m" (*(volatile uint64_t *)addr)
                  : "memory");
     return val;
+}
+
+uint64_t rdmsr(uint32_t offset)
+{
+    uint32_t value_high, value_low; 
+    asm volatile("rdmsr"
+                 : "=a" (value_low),
+                   "=d" (value_high)
+                 : "c" (offset));
+    return ((uint64_t)value_high << 32) | value_low;
+}
+void wrmsr(uint32_t offset, uint64_t value)
+{
+    uint32_t value_high=(value>>32)&0xffffffff, value_low=value&0xffffffff; 
+    asm volatile("wrmsr"
+                 :
+                 : "c" (offset),
+                   "a" (value_low),
+                   "d" (value_high));
 }

@@ -2,6 +2,7 @@
 #include "os_error_definitions.h"
 #include "memory/kpoolmemmgr.h"
 #include "memory/phygpsmemmgr.h"
+#include "memory/AddresSpace.h"
 #include "util/OS_utils.h"
 typedef uint16_t u16;
 typedef uint32_t x2apicid_t;
@@ -40,6 +41,7 @@ __attribute__((interrupt)) void exception_handler_page_fault(interrupt_frame* fr
 __attribute__((interrupt)) void exception_handler_invalid_tss(interrupt_frame* frame, uint64_t error_code);        // #TS
 __attribute__((interrupt)) void exception_handler_simd_floating_point(interrupt_frame* frame);    // #XM
 __attribute__((interrupt)) void exception_handler_virtualization(interrupt_frame* frame, uint64_t error_code);     // #VE
+__attribute__((interrupt)) void invalid_kspace_VMentry_handler(interrupt_frame* frame, uint64_t error_code);
 /**
  * 中断管理器
 *管理全局中断资源(GDT,异常处理)，通过一个表管理每个核心的中断处理函数
@@ -137,6 +139,7 @@ static constexpr uint8_t CONTROL_PROTECTION_EXCEPTION = 21;
 static constexpr uint8_t HYPERVISOR_INJECTION_EXCEPTION = 28;
 static constexpr uint8_t VMM_COMMUNICATION_EXCEPTION = 29;
 static constexpr uint8_t SECURITY_EXCEPTION = 30; 
+static constexpr uint8_t LAPIC_TIMER = 32;
 };
 
 static constexpr uint8_t normal_exception_ist_index= 1;
@@ -245,7 +248,7 @@ static constexpr uint64_t base2_mask = 0xFFULL;
 static constexpr uint64_t base3_mask = 0xFFFFFFFFULL;
 struct TSSDescriptorEntry
 {
-    uint16_t limit=sizeof(TSSentry)+1;
+    uint16_t limit;
     uint16_t base0;
     uint8_t base1;
     uint8_t type : 4, zero : 1, dpl : 2, p : 1;
@@ -265,7 +268,7 @@ struct IDTR
     uint16_t limit;
     uint64_t base;
 }__attribute__((packed));
-static constexpr uint8_t gdt_headcount = 0x10;
+static constexpr uint8_t gdt_headcount = 0x6;
 struct x64GDT
 {
     x64_gdtentry entries[gdt_headcount];
@@ -273,13 +276,38 @@ struct x64GDT
 }__attribute__((packed));
 class local_processor {
     private:
+    static constexpr uint8_t K_cs_idx = 0x1;
+    static constexpr uint8_t K_ds_ss_idx = 0x2;
+    static constexpr uint8_t U_cs_idx = 0x3;
+    static constexpr uint8_t U_ds_ss_idx = 0x4;
+    static constexpr uint32_t  DEFAULT_KERNEL_STACK_SIZE= 0x4000;
     x64GDT gdt;
     TSSentry tss;
     x2apicid_t apic_id;
+    spinlock_cpp_t  lock;
+    AddressSpace** pcid_table;
+    //x2apic下的lapic配置相关函数
+    //比如计时器相关配置，优先级相关配置，核间中断相关配置
+    //pcid管理相关接口，给某某cr3注册/注销pcid
     public:
-    int register_handler(uint8_t interrupt_number,void* handler);
-    int unregister_handler(uint8_t interrupt_number);
-    local_processor(uint32_t apic_id);
+    local_processor();
+
+    /**
+     * x2apic相关接口，操作时必须确认本核心
+     * 使用头文件里写死的偏移量
+     * 1.init_x2apic
+     * 2.config_timer
+     * 3.set_priority
+     * 4.send_ipi
+     * 5.ack_interrupt
+     * pcid管理相关接口，操作时必须确认本核心
+     * 先使用AddressSpace*table[4096]
+     * 后续做好调度器后改用位图
+     * 1.int enable_pcid()
+     * 2.uint16_t allocate_pcid(AddressSpace space)
+     * 3.int free_pcid(uint16_t pcid)
+     * 4.AddressSpace* get_pcid_space(uint16_t pcid)
+     */
 };
 /**
  * 全局单例作为所有cpu的资源管理器，主要行为靠各个核心的Local_processor_Interrupt_mgr_t实现
@@ -288,12 +316,22 @@ class local_processor {
 class  ProccessorsManager_t { 
     private:
     static constexpr uint32_t max_processor_count=4096;
+    IDTEntry idt[256];
     uint32_t total_processor_count=0;
     x2apicid_t bsp_apic_id;
     local_processor *local_processor_interrupt_mgr_array[max_processor_count]={0};
-public:
+    spinlock_cpp_t lock;
+    public:
     local_processor*get_currunt_mgr();//cpuid可以在内部查询apicid作为唯一标识，不需要额外参数
+    local_processor*get_processor_mgr(x2apicid_t apic_id);//也允许拿别人的，但是注意锁，以及慎用
+    /**
+     * 初始化函数，必须由bsp调用，大体思路有：
+     * 解析madt表，注册bsp,
+     */
     int Init();
     int regist_core();
     int unregist_core();    
+    int regist_handler(uint8_t interrupt_id,void*function);//注意，idt全局共享，慎用
+    void*get_idt_readonly_ptr();//返回idt只读指针
 };
+extern ProccessorsManager_t gProccessorsManager;

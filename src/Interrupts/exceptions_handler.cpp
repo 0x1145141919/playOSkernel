@@ -295,7 +295,7 @@ __attribute__((interrupt)) void invalid_kspace_VMentry_handler(interrupt_frame* 
     
     if (shared_inval_kspace_VMentry_info.is_package_valid == false) {
         kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid\n");
-        gkernelPanicManager.panic("invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
+        gkernelPanicManager.panic("invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
         return;
     }
     

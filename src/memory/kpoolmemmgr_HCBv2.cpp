@@ -5,6 +5,9 @@
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
 #include "panic.h"
+#ifdef USER_MODE
+#include "stdlib.h"
+#endif  
 constexpr uint64_t MIN_VIR_ADDR=0xff00000000000000;
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 {

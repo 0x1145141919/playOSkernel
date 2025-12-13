@@ -165,7 +165,7 @@ int phygpsmemmgr_t::phymemseg_to_pacage(
 
     return OS_SUCCESS;
 }
-phyaddr_t phygpsmemmgr_t::pages_alloc(uint64_t numof_4kbpgs, page_state_t state, uint8_t align_log2)
+phyaddr_t phygpsmemmgr_t::pages_alloc(uint64_t numof_4kbpgs, phygpsmemmgr_t::page_state_t state, uint8_t align_log2)
 {
     if(state==KERNEL||state==USER_ANONYMOUS||state==USER_FILE)
     {

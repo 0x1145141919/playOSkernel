@@ -1,3 +1,4 @@
+#pragma once
 #include "stdint.h"
 #include "memory/Memory.h"
 #include <lock.h>

@@ -13,6 +13,7 @@ shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info={0};
 
 int KernelSpacePgsMemMgr::Init()
 {
+    roottbv=&kspace_root_pml4tb[0];
     root_pml4_phyaddr=(phyaddr_t)&_pml4_lma;
     kspace_uppdpt_phyaddr=(phyaddr_t)&_kspace_uppdpt_lma;
     kspace_vm_table=new kspace_vm_table_t();
@@ -65,7 +66,7 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set:PDPTE attempt to dispatch existing 1GB page into 4kb PAGE\n");
             return OS_BAD_FUNCTION;//一个1GB大页面下面居然要4KB小页面
         }
-        PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr_or_1GBPAGE<<12);
+        PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr<<12);
     }else{//presentBit==0说明要新建
         PDPTEEntry&_1=kspaceUPpdpt[pdpte_index].pdpte;
         phyaddr_t _1_subphy=0;
@@ -73,7 +74,7 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
         else PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(_1_subphy);
         if(!PDEvbase)return OS_OUT_OF_RESOURCE;
         nonleaf_pgtbentry_flagsset(kspaceUPpdpt[pdpte_index]);
-        _1.PD_addr_or_1GBPAGE=_1_subphy>>12;
+        _1.PD_addr=_1_subphy>>12;
     }
     if(PDEvbase[pde_index].raw&PageTableEntry::P_MASK)
     {
@@ -82,14 +83,14 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set:PDE attempt to dispatch existing 2MB page into 4kb PAGE\n");
             return OS_BAD_FUNCTION;//一个2MB大页面下面居然要4KB小页面
         }
-        PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr_or_2MB_PG<<12);
+        PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr<<12);
     }else{
         phyaddr_t _2_subphy=0;
         if(is_pagetballoc_reserved)PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_2_subphy);
         else PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(_2_subphy);
         if(!PTEvbase)return OS_OUT_OF_RESOURCE;
         nonleaf_pgtbentry_flagsset(PDEvbase[pde_index]);
-        PDEvbase[pde_index].pde.pt_addr_or_2MB_PG=_2_subphy>>12;
+        PDEvbase[pde_index].pde.pt_addr=_2_subphy>>12;
     }
     cache_table_idx_struct_t cache_table_idx=cache_strategy_to_idx(access.cache_strategy);
     for (uint16_t i=0;i<count;i++)
@@ -143,7 +144,7 @@ int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set(
             return OS_BAD_FUNCTION;
         }
         PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(
-            kspaceUPpdpt[pdpt_index].pdpte.PD_addr_or_1GBPAGE << 12);
+            kspaceUPpdpt[pdpt_index].pdpte.PD_addr << 12);
     } else {
         phyaddr_t pd_phy = 0;
         if(is_pagetballoc_reserved)
@@ -155,7 +156,7 @@ int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set(
         if (!PD_vbase) return OS_OUT_OF_RESOURCE;
 
         nonleaf_pgtbentry_flagsset(kspaceUPpdpt[pdpt_index]);
-        kspaceUPpdpt[pdpt_index].pdpte.PD_addr_or_1GBPAGE = pd_phy >> 12;
+        kspaceUPpdpt[pdpt_index].pdpte.PD_addr= pd_phy >> 12;
     }
 
     cache_table_idx_struct_t idx = cache_strategy_to_idx(access.cache_strategy);
@@ -338,7 +339,7 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_clear: PDPTE is existing 1GB page\n");
             return OS_BAD_FUNCTION;
         }
-        PDEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr_or_1GBPAGE << 12);
+        PDEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr << 12);
         if (!PDEvbase) return OS_INVALID_ADDRESS;  // 加 NULL 检查
     } else {
         return OS_INVALID_ADDRESS;
@@ -349,7 +350,7 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_clear: PDE is existing 2MB page\n");
             return OS_BAD_FUNCTION;
         }
-        PTEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr_or_2MB_PG << 12);
+        PTEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr << 12);
         if (!PTEvbase) return OS_INVALID_ADDRESS;
     } else {
         return OS_INVALID_ADDRESS;
@@ -370,7 +371,7 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_
     }
 
     if (is_full_del) {
-        phyaddr_t pt_phy = (phyaddr_t)(PDEvbase[pde_index].pde.pt_addr_or_2MB_PG << 12);
+        phyaddr_t pt_phy = (phyaddr_t)(PDEvbase[pde_index].pde.pt_addr << 12);
         gPgtbHeapMgr.free_pgtb_by_phyaddr(pt_phy);
         PDEvbase[pde_index].raw = 0;
         // 可选：递归检查 PD 是否空，回收 PD
@@ -451,7 +452,7 @@ int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_
     }
 
     PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(
-        kspaceUPpdpt[pdpt_index].pdpte.PD_addr_or_1GBPAGE << 12);
+        kspaceUPpdpt[pdpt_index].pdpte.PD_addr << 12);
     if (!PD_vbase) return OS_INVALID_ADDRESS;
 
     // 清除指定范围的 2MB PDE 条目
@@ -478,7 +479,7 @@ int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_
     }
 
     if (pd_empty) {
-        phyaddr_t pd_phy = kspaceUPpdpt[pdpt_index].pdpte.PD_addr_or_1GBPAGE << 12;
+        phyaddr_t pd_phy = kspaceUPpdpt[pdpt_index].pdpte.PD_addr<< 12;
         gPgtbHeapMgr.free_pgtb_by_phyaddr(pd_phy);
         kspaceUPpdpt[pdpt_index].raw = 0;  // 清上级 PDPTE
         // 注意：这里不需要递归检查 PDPTE 是否全空，因为内核空间一般不回收整个 512GB 块
@@ -503,7 +504,7 @@ int KernelSpacePgsMemMgr::v_to_phyaddrtraslation_entry
             result=kspaceUPpdpt[pdpte_index];
             return OS_SUCCESS;
         }
-        PDEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr_or_1GBPAGE << 12);
+        PDEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr << 12);
         page_size=_1GB_SIZE;
         if (!PDEvbase) return OS_INVALID_ADDRESS;  // 加 NULL 检查
     } else {
@@ -515,7 +516,7 @@ int KernelSpacePgsMemMgr::v_to_phyaddrtraslation_entry
             result=PDEvbase[pde_index];
             return OS_SUCCESS;
         }
-        PTEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr_or_2MB_PG << 12);
+        PTEvbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr << 12);
         page_size=_2MB_SIZE;
         if (!PTEvbase) return OS_INVALID_ADDRESS;
     } else {

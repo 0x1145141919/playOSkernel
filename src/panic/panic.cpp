@@ -3,8 +3,6 @@
 #include <efi.h>
 #include <efilib.h>
 #include "UefiRunTimeServices.h"
-// 延时函数，简单的忙等待
-KernelPanicManager gkernelPanicManager;
 void delay(uint64_t milliseconds)
 {
     for (size_t i = 0; i < (milliseconds << 20); i++)
@@ -17,6 +15,7 @@ void delay(uint64_t milliseconds)
  * 私有构造函数
  */
 KernelPanicManager::KernelPanicManager() : shutdownDelay(5) {
+    
     // 默认等待5秒
 }
 
@@ -41,7 +40,7 @@ void KernelPanicManager::setShutdownDelay(int seconds) {
 /**
  * 打印寄存器信息
  */
-void KernelPanicManager::dumpRegisters(const pt_regs& regs) const {
+void KernelPanicManager::dumpRegisters(const pt_regs& regs){
     kputsSecure((char*)"Register dump:");
     kputsSecure((char*)"");
 
@@ -103,7 +102,7 @@ void KernelPanicManager::dumpRegisters(const pt_regs& regs) const {
 /**
  * 触发内核恐慌，打印错误信息并停机（无额外信息）
  */
-void KernelPanicManager::panic(const char* message) const {
+void KernelPanicManager::panic(const char* message){
     kputsSecure((char*)"======= KERNEL PANIC =======");
     kputsSecure((char*)message);
 
@@ -117,7 +116,7 @@ void KernelPanicManager::panic(const char* message) const {
 /**
  * 触发内核恐慌，打印错误信息和寄存器信息并停机
  */
-void KernelPanicManager::panic(const char* message, const pt_regs& regs) const {
+void KernelPanicManager::panic(const char* message, const pt_regs& regs){
     kputsSecure((char*)"\n======= KERNEL PANIC =======\n");
     kputsSecure((char*)message);
     kputsSecure((char*)"");
@@ -134,7 +133,7 @@ void KernelPanicManager::panic(const char* message, const pt_regs& regs) const {
 /**
  * 带信息包的内核恐慌函数
  */
-void KernelPanicManager::panic(const char* message, const panic_info_t& info) const {
+void KernelPanicManager::panic(const char* message, const panic_info_t& info){
     kputsSecure((char*)"\n======= KERNEL PANIC =======\n");
     kputsSecure((char*)message);
     kputsSecure((char*)"\n");

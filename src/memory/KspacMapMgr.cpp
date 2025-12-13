@@ -128,7 +128,6 @@ void *KernelSpacePgsMemMgr::pgs_remapp(
         .phys_start=addr,
         .map_type=VM_DESC::MAP_PHYSICAL,//内核的内存你敢随便分配吗，必须第一时间分配映射
         .committed_full=0,
-        .user_tag=0
     };
     GMlock.lock();
     int status;

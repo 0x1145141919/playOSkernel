@@ -5,7 +5,7 @@
 #include "panic.h"
 #include "memory/kpoolmemmgr.h"
 #include "util/cpuid_intel.h"
-#ifdef TEST_MODE
+#ifdef USER_MODE
 #include "stdlib.h"
 #endif  
 
