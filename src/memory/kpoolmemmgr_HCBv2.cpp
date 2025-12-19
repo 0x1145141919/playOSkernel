@@ -8,15 +8,28 @@
 #ifdef USER_MODE
 #include "stdlib.h"
 #endif  
-constexpr uint64_t MIN_VIR_ADDR=0xff00000000000000;
+#ifdef USER_MODE
+    constexpr uint64_t FIRST_STATIC_HEAP_SIZE=1ULL<<24;
+    kpoolmemmgr_t::HCB_v2::HCB_v2()
+{
+    bitmap_controller.Init();
+}
+#endif
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 {
-    if(this!=&gKpoolmemmgr.first_linekd_heap.bitmap_controller)
+    if(this!=&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)
     {
         return OS_BAD_FUNCTION;
     }
+    uint32_t bitmap_size_in_byte=0;
+#ifdef KERNEL_MODE
     this->bitmap=(uint64_t*)&__heap_bitmap_start;
-    uint32_t bitmap_size_in_byte=((uint64_t)&__heap_bitmap_end-(uint64_t)&__heap_bitmap_start);
+    bitmap_size_in_byte=((uint64_t)&__heap_bitmap_end-(uint64_t)&__heap_bitmap_start);
+#endif
+#ifdef USER_MODE
+    this->bitmap=(uint64_t*)malloc(FIRST_STATIC_HEAP_SIZE/128);
+    bitmap_size_in_byte=FIRST_STATIC_HEAP_SIZE/128;
+#endif
     bitmap_size_in_64bit_units=bitmap_size_in_byte/8;
     byte_bitmap_base=(uint8_t*)this->bitmap;
     setmem(this->bitmap,bitmap_size_in_byte,0);
@@ -26,8 +39,9 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
 {
-    if(this==&gKpoolmemmgr.first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
+    if(this==&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
     bitmap_size_in_64bit_units=entries_count/64;
+#ifdef KERNEL_MODE
     phyaddr_t bitmap_phybase=gPhyPgsMemMgr.pages_alloc(
         (bitmap_size_in_64bit_units*8)/4096,
         phygpsmemmgr_t::KERNEL
@@ -36,31 +50,102 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
     {
         return OS_OUT_OF_MEMORY;
     }
-    this->bitmap=(uint64_t*)gKspacePgsMemMgr.pgs_remapp(bitmap_phybase,bitmap_size_in_64bit_units*8,KSPACE_RW_ACCESS);
+    this->bitmap=(uint64_t*)KernelSpacePgsMemMgr::pgs_remapp(bitmap_phybase,bitmap_size_in_64bit_units*8,KSPACE_RW_ACCESS);
+#endif
+#ifdef USER_MODE
+    this->bitmap=(uint64_t*)malloc((bitmap_size_in_64bit_units*8));
+#endif
     if(this->bitmap==nullptr)return OS_MEMRY_ALLOCATE_FALT;
+
     byte_bitmap_base=(uint8_t*)this->bitmap;
     return OS_SUCCESS;
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
 {
     byte_bitmap_base=nullptr;
-    phyaddr_t bitmap_phyaddr;
-    int status=gKspacePgsMemMgr.v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
-    status=gKspacePgsMemMgr.pgs_remapped_free((vaddr_t)this->bitmap);
+    #ifdef KERNEL_MODE
+   phyaddr_t bitmap_phyaddr;
+    int status=KernelSpacePgsMemMgr::v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
+    status=KernelSpacePgsMemMgr::pgs_remapped_free((vaddr_t)this->bitmap);
     
     if(status!=OS_SUCCESS){
-        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
+        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
     }
     status=gPhyPgsMemMgr.pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
     if(status!=OS_SUCCESS){
-        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
+        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
     }
+    #endif
+    #ifdef USER_MODE
+    std::free(this->bitmap);
+#endif
     this->bitmap=nullptr;
 }
-kpoolmemmgr_t::HCB_v2::HCB_bitmap::HCB_bitmap()
+int kpoolmemmgr_t::HCB_v2::HCB_bitmap::
+continual_avaliable_u64s_search_higher_alignment(
+    uint64_t u64idx_align_log2,
+    uint64_t u64_count,
+    uint64_t &result_base_idx
+)
 {
-    bitmap_used_bit=0;
+    if (u64_count == 0)
+        return OS_NOT_EXIST;
+
+    const uint64_t total_u64s = bitmap_size_in_64bit_units;
+
+    // 用完即弃的对齐计算
+    auto align_u64_idx = [&](uint64_t idx) -> uint64_t {
+        if (u64idx_align_log2 == 0)
+            return idx;
+        const uint64_t align = 1ULL << u64idx_align_log2;
+        return (idx + align - 1) & ~(align - 1);
+    };
+
+    uint64_t seg_base_u64_idx = 0;
+    bool seg_value = !!bitmap[0];
+    uint64_t seg_length = 1;
+
+    while (seg_base_u64_idx + seg_length < total_u64s) {
+        uint64_t cur_idx = seg_base_u64_idx + seg_length;
+        bool new_value = !!bitmap[cur_idx];
+
+        if (new_value == seg_value) {
+            seg_length++;
+        } else {
+            // 完整 free 段处理
+            if (!seg_value) {
+                uint64_t seg_end = seg_base_u64_idx + seg_length;
+                uint64_t aligned_base = align_u64_idx(seg_base_u64_idx);
+
+                if (aligned_base >= seg_base_u64_idx &&
+                    aligned_base + u64_count <= seg_end) {
+                    result_base_idx = aligned_base;
+                    return OS_SUCCESS;
+                }
+            }
+
+            // 切换段
+            seg_base_u64_idx = cur_idx;
+            seg_value = new_value;
+            seg_length = 1;
+        }
+    }
+
+    // 最后一个段
+    if (!seg_value) {
+        uint64_t seg_end = seg_base_u64_idx + seg_length;
+        uint64_t aligned_base = align_u64_idx(seg_base_u64_idx);
+
+        if (aligned_base >= seg_base_u64_idx &&
+            aligned_base + u64_count <= seg_end) {
+            result_base_idx = aligned_base;
+            return OS_SUCCESS;
+        }
+    }
+
+    return OS_NOT_EXIST;
 }
+
 bool kpoolmemmgr_t::HCB_v2::HCB_bitmap::target_bit_seg_is_avaliable(uint64_t bit_idx, uint64_t bit_count)
 {
     if (bit_count == 0) return true;
@@ -175,12 +260,22 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::bit_seg_set(uint64_t bit_idx, uint64_t bi
 
 int kpoolmemmgr_t::HCB_v2::first_linekd_heap_Init()
 {
-    if(this!=&gKpoolmemmgr.first_linekd_heap)return OS_BAD_FUNCTION;
+    if(this!=&kpoolmemmgr_t::first_linekd_heap)return OS_BAD_FUNCTION;
+    #ifdef KERNEL_MODE
     int status=this->bitmap_controller.Init();
     phybase=(phyaddr_t)&_heap_lma;
     vbase=(vaddr_t)&__heap_start;
     total_size_in_bytes=(uint64_t)&__heap_end-(uint64_t)&__heap_start;
-    return status;   
+    return status;  
+    #endif
+     
+    #ifdef USER_MODE
+    vbase=(vaddr_t)malloc(FIRST_STATIC_HEAP_SIZE);
+    phybase=vbase;
+    total_size_in_bytes=FIRST_STATIC_HEAP_SIZE;
+    if(vbase==NULL)return OS_OUT_OF_MEMORY;
+    return OS_SUCCESS;
+#endif
 }
 
 kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t apic_id)
@@ -190,14 +285,23 @@ kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t apic_id)
 }
 int kpoolmemmgr_t::HCB_v2::second_stage_Init()
 {
-    if(this==&gKpoolmemmgr.first_linekd_heap)return OS_BAD_FUNCTION;
+    if(this==&kpoolmemmgr_t::first_linekd_heap)return OS_BAD_FUNCTION;
+    #ifdef KERNEL_MODE
     phybase=gPhyPgsMemMgr.pages_alloc(total_size_in_bytes/4096,phygpsmemmgr_t::KERNEL);
     if(phybase==0)return OS_OUT_OF_MEMORY;
-    vbase=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
+    vbase=(vaddr_t)KernelSpacePgsMemMgr::pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
     if(vbase==0){
         gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
         return OS_MEMRY_ALLOCATE_FALT;
     }
+    #endif
+    
+    #ifdef USER_MODE
+    
+    vbase=(vaddr_t)malloc(total_size_in_bytes);
+    if(vbase==NULL)return OS_OUT_OF_MEMORY;
+    phybase=vbase;
+    #endif
     int status=bitmap_controller.second_stage_Init(
         (total_size_in_bytes/bytes_per_bit+63)/64
     );
@@ -206,13 +310,20 @@ int kpoolmemmgr_t::HCB_v2::second_stage_Init()
 kpoolmemmgr_t::HCB_v2::~HCB_v2()
 {
     bitmap_controller.~HCB_bitmap();
-    int status=gKspacePgsMemMgr.pgs_remapped_free(vbase);
+    int status=OS_SUCCESS;
+    #ifdef KERNEL_MODE
+    status=KernelSpacePgsMemMgr::pgs_remapped_free(vbase);
+    #endif
+    #ifdef USER_MODE
+    std::free((void*)vbase);
+    return;
+    #endif
     if(status!=OS_SUCCESS){
-        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
+        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
     }
     status=gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
     if(status!=OS_SUCCESS){
-        gkernelPanicManager.panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
+        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
     }
 }
 int kpoolmemmgr_t::HCB_v2::clear(void *ptr)
@@ -251,12 +362,12 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     uint32_t size,
     bool is_longtime,
     bool vaddraquire,
-    uint8_t alignment)
+    uint8_t alignment_log2)
 {
     // -----------------------------
     // 基本参数与边界检查
     // -----------------------------
-    if (alignment > 10)
+    if (alignment_log2 >=32)
         return OS_INVALID_PARAMETER;
     if (size == 0)
         return OS_INVALID_PARAMETER;
@@ -281,9 +392,9 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         size_alignment = 10;   // 1024B 对齐
 
     // 根据 alignment 参数映射档次
-    if (alignment <= 4)
+    if (alignment_log2 <= 4)
         aquire_alignment = 4;
-    else if (alignment <= 7)
+    else if (alignment_log2 <= 7)
         aquire_alignment = 7;
     else
         aquire_alignment = 10;
@@ -357,7 +468,80 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         break;
     }
     default:
+    {
+    if (final_alignment_aquire <= 10)
         return OS_INVALID_PARAMETER;
+
+    // ------------------------------------
+    // 对齐参数（u64 粒度）
+    // ------------------------------------
+    const uint8_t u64_align_log2 = final_alignment_aquire - 10;
+    const uint64_t u64_align = 1ULL << u64_align_log2;
+
+    // ------------------------------------
+    // 真实 payload 需要的 u64 数量
+    // ------------------------------------
+    const uint32_t payload_u64_count =
+        (align_up(size, LARGE_UNIT_BYTES)) >> 10;
+
+    // 最坏情况下需要的搜索长度（payload + padding）
+    const uint32_t search_u64_count =
+        align_up(payload_u64_count, u64_align)+ u64_align;
+
+    uint64_t base_u64_idx = 0;
+
+    // ------------------------------------
+    // 搜索（只保证：有一个对齐起点能放下 payload）
+    // ------------------------------------
+    bitmap_controller.bitmap_rwlock.read_lock();
+    status = bitmap_controller.continual_avaliable_u64s_search_higher_alignment(
+        u64_align_log2,
+        search_u64_count,
+        base_u64_idx
+    );
+    bitmap_controller.bitmap_rwlock.read_unlock();
+
+    if (status != OS_SUCCESS)
+        return OS_INHEAP_NOT_ENOUGH_MEMORY;
+
+    // ------------------------------------
+    // 计算真正的对齐起点
+    // ------------------------------------
+    uint64_t real_base_u64 =
+        base_u64_idx+u64_align ;
+
+    uint64_t real_base_bit = real_base_u64 << 6;
+
+    // ------------------------------------
+    // 标记 bitmap
+    // sentinel: real_base_bit - 1
+    // ------------------------------------
+    bitmap_controller.bit_set(real_base_bit - 1, true);
+
+    bitmap_controller.used_bit_count_lock.lock();
+    bitmap_controller.bitmap_used_bit++;
+
+    const uint32_t total_bitcount =
+        (size + SMALL_UNIT_BYTES - 1) >> 4;
+
+    bitmap_controller.bit_seg_set(
+        real_base_bit,
+        total_bitcount,
+        true
+    );
+
+    bitmap_controller.bitmap_used_bit += total_bitcount;
+    bitmap_controller.used_bit_count_lock.unlock();
+
+    // ------------------------------------
+    // 返回地址（与 real_base_u64 严格一致）
+    // ------------------------------------
+    uintptr_t offset = bytes_per_bit * real_base_bit;
+    addr = (void *)(base_addr + offset);
+
+    break;
+    }
+
     }
 
     // -----------------------------
@@ -377,7 +561,17 @@ int kpoolmemmgr_t::HCB_v2::free(void *ptr)
 {
     if(uint64_t(ptr)&15)return OS_INVALID_ADDRESS;  //本堆的内存至少16字节对齐
     uint32_t in_heap_offset;
-    if((uint64_t)ptr<MIN_VIR_ADDR)
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if((uint64_t)ptr<MIN_KVADDR)
     {//物理地址
         if((uint64_t)ptr<phybase+sizeof(data_meta)||
     phybase+total_size_in_bytes<=(uint64_t)ptr
@@ -413,7 +607,17 @@ int kpoolmemmgr_t::HCB_v2::in_heap_realloc(void *&ptr, uint32_t new_size, bool v
 {
     if(uint64_t(ptr)&15)return OS_INVALID_ADDRESS;  //本堆的内存至少16字节对齐
     uint32_t in_heap_offset;
-    if((uint64_t)ptr<MIN_VIR_ADDR)
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if((uint64_t)ptr<MIN_KVADDR)
     {//物理地址
         if((uint64_t)ptr<phybase+sizeof(data_meta)||
     phybase+total_size_in_bytes<=(uint64_t)ptr
@@ -500,18 +704,65 @@ void kpoolmemmgr_t::HCB_v2::count_used_bytes()
 
 bool kpoolmemmgr_t::HCB_v2::is_addr_belong_to_this_hcb(void *addr)
 {
-        if((uint64_t)addr<MIN_VIR_ADDR)
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if((uint64_t)addr<MAX_PHYADDR)
     {//物理地址
         if((uint64_t)addr<phybase+sizeof(data_meta)||
     phybase+total_size_in_bytes<=(uint64_t)addr
     )return false;
 
     }else{
+        if(MAX_PHYADDR<=(uint64_t)addr&&(uint64_t)addr<MIN_KVADDR)return false;
         if((uint64_t)addr<vbase+sizeof(data_meta)||
     vbase+total_size_in_bytes<=(uint64_t)addr)return false;
 
     }
     return true;
+}
+phyaddr_t kpoolmemmgr_t::HCB_v2::tran_to_phy(void *addr)
+{
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if((uint64_t)addr<MAX_PHYADDR)return (phyaddr_t)addr;
+    if(is_addr_belong_to_this_hcb(addr)){
+        return (phyaddr_t)((uint64_t)addr-vbase+phybase);
+    }
+    return 0;
+}
+vaddr_t kpoolmemmgr_t::HCB_v2::tran_to_virt(phyaddr_t addr)
+{
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if(MIN_KVADDR<=addr)return (vaddr_t)addr;
+    if(is_addr_belong_to_this_hcb((void*)addr)){
+        return (vaddr_t)((uint64_t)addr-phybase+vbase);
+    }
+    return 0;
 }
 uint32_t kpoolmemmgr_t::HCB_v2::get_belonged_cpu_apicid()
 {

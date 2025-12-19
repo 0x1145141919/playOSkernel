@@ -1,7 +1,7 @@
 #include "init_fs.h"
-#include "../memory/includes/kpoolmemmgr.h"
+#include "memory/kpoolmemmgr.h"
 #include "os_error_definitions.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 #ifdef USER_MODE
 #include <cstdio>
 #endif

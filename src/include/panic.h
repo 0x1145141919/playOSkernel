@@ -17,7 +17,7 @@ typedef struct {
  */
 class KernelPanicManager {
 private:
-    int shutdownDelay; // 关机前等待时间（秒）
+    static int shutdownDelay; // 关机前等待时间（秒）
     
     // 私有构造函数，防止外部实例化
     
@@ -43,4 +43,3 @@ public:
     // 带信息包的内核恐慌函数
     static void panic(const char* message, const panic_info_t& info);
 };
-extern KernelPanicManager gkernelPanicManager;

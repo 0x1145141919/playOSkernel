@@ -3,6 +3,12 @@
 #include <efi.h>
 #include <efilib.h>
 #include "UefiRunTimeServices.h"
+#ifdef USER_MODE
+#include <unistd.h>
+#endif 
+
+int KernelPanicManager::shutdownDelay = 5; // 静态成员变量定义及初始化
+
 void delay(uint64_t milliseconds)
 {
     for (size_t i = 0; i < (milliseconds << 20); i++)
@@ -14,9 +20,8 @@ void delay(uint64_t milliseconds)
 /**
  * 私有构造函数
  */
-KernelPanicManager::KernelPanicManager() : shutdownDelay(5) {
-    
-    // 默认等待5秒
+KernelPanicManager::KernelPanicManager(){
+    // shutdownDelay已经作为静态成员初始化为5
 }
 
 KernelPanicManager::~KernelPanicManager()
@@ -105,11 +110,15 @@ void KernelPanicManager::dumpRegisters(const pt_regs& regs){
 void KernelPanicManager::panic(const char* message){
     kputsSecure((char*)"======= KERNEL PANIC =======");
     kputsSecure((char*)message);
-
-    // 等待一段时间
+#ifdef USER_MODE
+ _exit(1);
+#endif 
+   #ifdef KERNEL_MODE
+// 等待一段时间
     delay(shutdownDelay * 1000);
 
-    gRuntimeServices.rt_shutdown();    // 停机
+    EFI_RT_SVS::rt_shutdown();
+#endif 
 
 }
 
@@ -122,11 +131,15 @@ void KernelPanicManager::panic(const char* message, const pt_regs& regs){
     kputsSecure((char*)"");
 
     dumpRegisters(regs);
-
-    // 等待一段时间
+    #ifdef USER_MODE
+ _exit(1);
+#endif 
+    #ifdef KERNEL_MODE
+// 等待一段时间
     delay(shutdownDelay * 1000);
 
-    gRuntimeServices.rt_shutdown();
+    EFI_RT_SVS::rt_shutdown();
+#endif 
 }
 
 
@@ -142,9 +155,14 @@ void KernelPanicManager::panic(const char* message, const panic_info_t& info){
     if (info.has_regs) {
         dumpRegisters(info.regs);
     }
-
-    // 等待一段时间
+    #ifdef USER_MODE
+ _exit(1);
+#endif 
+#ifdef KERNEL_MODE
+// 等待一段时间
     delay(shutdownDelay * 1000);
 
-    gRuntimeServices.rt_shutdown();
+    EFI_RT_SVS::rt_shutdown();
+#endif 
+    
 }

@@ -124,9 +124,9 @@ void *KernelSpacePgsMemMgr::pgs_remapp(
     VM_DESC vmentry={
         .start=0,
         .end=0,
-        .access=access,
-        .phys_start=addr,
         .map_type=VM_DESC::MAP_PHYSICAL,//内核的内存你敢随便分配吗，必须第一时间分配映射
+        .phys_start=addr,
+        .access=access,        
         .committed_full=0,
     };
     GMlock.lock();

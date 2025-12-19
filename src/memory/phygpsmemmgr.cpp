@@ -3,6 +3,7 @@
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
+#include "VideoDriver.h"
 int phygpsmemmgr_t::compare_atom_page(atom_page_ptr ptr1, atom_page_ptr ptr2)
 {
     // compare 1GB index
@@ -19,7 +20,7 @@ int phygpsmemmgr_t::compare_atom_page(atom_page_ptr ptr1, atom_page_ptr ptr2)
     return 0;
 }
 void phygpsmemmgr_t::phy_to_indices(phyaddr_t p, uint64_t &idx_1gb, uint64_t &idx_2mb, uint64_t &idx_4kb)
-{
+{//建议修改为匿名函数
     int64_t off = p - base; // base 是 segment base
     idx_1gb = (off>>30)&511;
     idx_2mb = (off>>21)&511;
@@ -148,7 +149,7 @@ phygpsmemmgr_t::atom_page_ptr::atom_page_ptr(
     _2mbtb_offestidx = (idx2m < 512 ? idx2m : 0);
     _4kb_offestidx  = (idx4k < 512 ? idx4k : 0);
 
-    page_size1gb_t &p1 = mgr.top_1gb_table[_1gbtb_idx];
+    page_size1gb_t &p1 = *mgr.top_1gb_table->get(_1gbtb_idx);
 
     // ====== Case 1: 1GB 原子页 =================================
     if (!p1.flags.is_sub_valid) {
@@ -194,7 +195,7 @@ int phygpsmemmgr_t::atom_page_ptr::the_next()
         if (_4kb_offestidx + 1 < 512) {
             _4kb_offestidx++;
 
-            page_size2mb_t &p2 = mgr.top_1gb_table[_1gbtb_idx].sub2mbpages[_2mbtb_offestidx];
+            page_size2mb_t &p2 = mgr.top_1gb_table->get(_1gbtb_idx)->sub2mbpages[_2mbtb_offestidx];
 
             page_strut_ptr = &p2.sub_pages[_4kb_offestidx];
             return OS_SUCCESS;
@@ -211,7 +212,7 @@ int phygpsmemmgr_t::atom_page_ptr::the_next()
     // ----------------------------------------------------------------------
     case _2MB_PG_SIZE:
     {
-        page_size1gb_t &p1 = mgr.top_1gb_table[_1gbtb_idx];
+        page_size1gb_t &p1 = *mgr.top_1gb_table->get(_1gbtb_idx);
 
         if (_2mbtb_offestidx + 1 < 512) {
             _2mbtb_offestidx++;
@@ -252,7 +253,7 @@ int phygpsmemmgr_t::atom_page_ptr::the_next()
 
         _1gbtb_idx++;
 
-        page_size1gb_t &p1 = mgr.top_1gb_table[_1gbtb_idx];
+        page_size1gb_t &p1 = *mgr.top_1gb_table->get(_1gbtb_idx);
 
         // 是否有子表？
         bool has_sub = p1.flags.is_sub_valid;
@@ -305,41 +306,12 @@ inline uint16_t pg4k_to_4kb_offset(uint64_t pg4k_index) {
 inline uint16_t pg2mb_to_4kb_offset_in_2mb(uint64_t pg2mb_index) {
     return 0; // for clarity; used as above if needed
 }
-int phygpsmemmgr_t::_1gb_pages_state_set(phyaddr_t entry_base_idx, uint64_t num_of_1gbpgs, page_state_t state,bool if_inc)
-{
-    for (uint64_t i = 0; i < num_of_1gbpgs; i++) {
-        auto& page_entry = top_1gb_table[entry_base_idx + i];
-        page_entry.flags.state = state;
-        if(if_inc)page_entry.ref_count=1;
-    }
-    return OS_SUCCESS;
-}
-
-int phygpsmemmgr_t::_4kb_pages_state_set(uint64_t entry4kb_base_idx, uint64_t num_of_4kbpgs, page_state_t state, page_size4kb_t *base_entry,bool if_inc)
-{
-    for (uint64_t i = 0; i < num_of_4kbpgs; i++) {
-        auto& page_entry = base_entry[entry4kb_base_idx + i];
-        page_entry.flags.state = state;
-        if(if_inc)page_entry.ref_count=1;
-    }
-    return OS_SUCCESS;
-}
-
-int phygpsmemmgr_t::_2mb_pages_state_set(uint64_t entry2mb_base_idx, uint64_t num_of_2mbpgs, page_state_t state, page_size2mb_t *base_entry,bool if_inc)
-{
-    for (uint64_t i = 0; i < num_of_2mbpgs; i++) {
-        auto& page_entry = base_entry[entry2mb_base_idx + i];
-        page_entry.flags.state = state;
-        if(if_inc)page_entry.ref_count=1;
-    }
-    return OS_SUCCESS;
-}
 
 
 
 int phygpsmemmgr_t::ensure_1gb_subtable(uint64_t idx_1gb)
 {
-    page_size1gb_t& p1 = top_1gb_table[idx_1gb];
+    page_size1gb_t& p1 = *top_1gb_table->get(idx_1gb);
     if (!p1.flags.is_sub_valid)
     {
         page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];
@@ -348,7 +320,7 @@ int phygpsmemmgr_t::ensure_1gb_subtable(uint64_t idx_1gb)
             return OS_OUT_OF_MEMORY;
             }
 
-        gKpoolmemmgr.clear(sub2);
+        kpoolmemmgr_t::clear(sub2);
 
         p1.sub2mbpages = sub2;
         p1.flags.is_sub_valid = 1;
@@ -365,7 +337,7 @@ int phygpsmemmgr_t::ensure_2mb_subtable(page_size2mb_t &p2)
         page_size4kb_t* sub4 = new page_size4kb_t[PAGES_4KB_PER_2MB];
         if (!sub4){return OS_OUT_OF_MEMORY;}
 
-        gKpoolmemmgr.clear(sub4);
+        kpoolmemmgr_t::clear(sub4);
 
         p2.sub_pages = sub4;
         p2.flags.is_sub_valid = 1;
@@ -486,7 +458,6 @@ int phygpsmemmgr_t::pages_recycle(phyaddr_t phybase, uint64_t numof_4kbpgs)
 int phygpsmemmgr_t::Init()
 {
     base=0;
-    constexpr uint32_t _1MB_PHYADDR=0x100000;
     int status=0;
     seg_size_in_byte=gBaseMemMgr.getMaxPhyaddr();
     seg_support_1gb_page_count=(seg_size_in_byte+_1GB_PG_SIZE-1)/_1GB_PG_SIZE;
@@ -494,13 +465,14 @@ int phygpsmemmgr_t::Init()
     seg_support_4kb_page_count=seg_support_2mb_page_count*512;
     uint64_t tail_4kb_pages_count=
     (seg_support_1gb_page_count*_1GB_PG_SIZE-seg_size_in_byte+_4KB_PG_SIZE-1)/_4KB_PG_SIZE;
+    //todo 注册函数
     setmem(top_1gb_table,seg_support_1gb_page_count*sizeof(top_1gb_table),0);
     uint32_t phymemtb_count=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    phy_memDescriptor* memDescriptors=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
+    phy_memDescriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
     for(uint32_t i=0;i<phymemtb_count;i++)
     {
         page_state_t seg_state;
-        switch(memDescriptors[i].Type)
+        switch(base[i].Type)
         {
             case freeSystemRam:seg_state=FREE;break;
             case EFI_RUNTIME_SERVICES_CODE:
@@ -515,23 +487,42 @@ int phygpsmemmgr_t::Init()
             default:seg_state=RESERVED; 
             break;
         } 
-        phy_memDescriptor& seg=memDescriptors[i];
+        phy_memDescriptor& seg=base[i];
         phyaddr_t segbase=seg.PhysicalStart;
         phyaddr_t segend=seg.PhysicalStart+seg.NumberOfPages*_4KB_PG_SIZE;
         if(segbase<_1MB_PHYADDR)
         {
             if(segend<=_1MB_PHYADDR){
-                if(seg_state==FREE)status=pages_state_set(segbase,seg.NumberOfPages,LOW1MB_FREE);
-                else if(seg_state==EFI_RESERVED_MEMORY_TYPE)status=pages_state_set(segbase,seg.NumberOfPages,LOW1MB_RESERVED);
-                else status=pages_state_set(segbase,seg.NumberOfPages,LOW1MB_USED);
+                if(seg_state==FREE){
+                    pages_state_set_flags_t flags = {0, 0};
+                    status=pages_state_set(segbase,seg.NumberOfPages,LOW1MB_FREE, flags);
+                }
+                else if(seg_state==EFI_RESERVED_MEMORY_TYPE){
+                    pages_state_set_flags_t flags = {0, 0};
+                    status=pages_state_set(segbase,seg.NumberOfPages,LOW1MB_RESERVED, flags);
+                }
+                else {
+                    pages_state_set_flags_t flags = {0, 0};
+                    status=pages_state_set(segbase,seg.NumberOfPages,LOW1MB_USED, flags);
+                }
             }else{
-                if(seg_state==FREE)status=pages_state_set(segbase,(_1MB_PHYADDR-segbase)/_4KB_PG_SIZE,LOW1MB_FREE);
-                else if(seg_state==EFI_RESERVED_MEMORY_TYPE)status=pages_state_set(segbase,(_1MB_PHYADDR-segbase)/_4KB_PG_SIZE,LOW1MB_RESERVED);
-                else status=pages_state_set(segbase,(_1MB_PHYADDR-segbase)/_4KB_PG_SIZE,LOW1MB_USED);
+                if(seg_state==FREE){
+                    pages_state_set_flags_t flags = {0, 0};
+                    status=pages_state_set(segbase,(_1MB_PHYADDR-segbase)/_4KB_PG_SIZE,LOW1MB_FREE, flags);
+                }
+                else if(seg_state==EFI_RESERVED_MEMORY_TYPE){
+                    pages_state_set_flags_t flags = {0, 0};
+                    status=pages_state_set(segbase,(_1MB_PHYADDR-segbase)/_4KB_PG_SIZE,LOW1MB_RESERVED, flags);
+                }
+                else {
+                    pages_state_set_flags_t flags = {0, 0};
+                    status=pages_state_set(segbase,(_1MB_PHYADDR-segbase)/_4KB_PG_SIZE,LOW1MB_USED, flags);
+                }
                 
                 if(status != OS_SUCCESS) return status;
                 
-                status=pages_state_set(_1MB_PHYADDR,(segend-_1MB_PHYADDR)/_4KB_PG_SIZE,seg_state);
+                pages_state_set_flags_t flags = {0, 0};
+                status=pages_state_set(_1MB_PHYADDR,(segend-_1MB_PHYADDR)/_4KB_PG_SIZE,seg_state, flags);
             }
             
             if(status != OS_SUCCESS) return status;
@@ -541,37 +532,38 @@ int phygpsmemmgr_t::Init()
 
 
     //内核映像注册
-    status=pages_state_set((phyaddr_t)&init_text_begin,(&init_text_end-&init_text_begin)/_4KB_PG_SIZE,LOW1MB_USED);
+    pages_state_set_flags_t flags = {0, 0};
+    status=pages_state_set((phyaddr_t)&init_text_begin,(&init_text_end-&init_text_begin)/_4KB_PG_SIZE,LOW1MB_USED, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&init_rodata_begin,(&init_rodata_end-&init_rodata_begin)/_4KB_PG_SIZE,LOW1MB_USED);
+    status=pages_state_set((phyaddr_t)&init_rodata_begin,(&init_rodata_end-&init_rodata_begin)/_4KB_PG_SIZE,LOW1MB_USED, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&KImgphybase,(phyaddr_t)(text_end-text_begin)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&KImgphybase,(phyaddr_t)(text_end-text_begin)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_stack_lma,(&_stack_top-&_stack_bottom)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_stack_lma,(&_stack_top-&_stack_bottom)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_heap_bitmap_lma,(&__heap_bitmap_end-&__heap_bitmap_start)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_heap_bitmap_lma,(&__heap_bitmap_end-&__heap_bitmap_start)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_heap_lma,(&__heap_end-&__heap_start)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_heap_lma,(&__heap_end-&__heap_start)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_pgtb_heap_lma,(&__pgtbhp_end-&__pgtbhp_start)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_pgtb_heap_lma,(&__pgtbhp_end-&__pgtbhp_start)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
     
-    status=pages_state_set((phyaddr_t)&_klog_lma,(&__klog_end-&__klog_start)/_4KB_PG_SIZE,KERNEL_PERSIST);
+    status=pages_state_set((phyaddr_t)&_klog_lma,(&__klog_end-&__klog_start)/_4KB_PG_SIZE,KERNEL_PERSIST, flags);
     if(status != OS_SUCCESS) return status;
 
-    status=pages_state_set(seg_size_in_byte,tail_4kb_pages_count,RESERVED);
+    status=pages_state_set(seg_size_in_byte,tail_4kb_pages_count,RESERVED, flags);
     return status;
 }
 
@@ -761,7 +753,7 @@ int phygpsmemmgr_t::inner_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
             uint64_t idx_2mb = pg4k_start / PAGES_4KB_PER_2MB;
 
             // ensure parent 1GB subtable exists to access this 2MB entry (if needed)
-            page_size1gb_t &p1 = top_1gb_table[idx_1gb];
+            page_size1gb_t &p1 = *top_1gb_table->get(idx_1gb);
             if (!p1.flags.is_sub_valid) {
                 // if parent is pure RESERVED and we need to split only part, only then ensure;
                 // here caller asked for a 2MB-granularity registration: if parent is RESERVED and we are covering a whole 2MB,
@@ -778,7 +770,7 @@ int phygpsmemmgr_t::inner_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
             // ent covers some number of 4KB pages contiguously
             uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
             uint64_t idx_2mb = pg4k_start / PAGES_4KB_PER_2MB;
-            page_size1gb_t &p1 = top_1gb_table[idx_1gb];
+            page_size1gb_t &p1 = *top_1gb_table->get(idx_1gb);
 
             // if parent 1GB is pure (not sub_valid) and we need to change children -> ensure parent and mark RESERVED_MMIO
             if (!p1.flags.is_sub_valid) {

@@ -37,22 +37,22 @@ local_processor::local_processor()
     tss_entry.base1=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>16)&base1_mask;
     tss_entry.base2=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>24)&base2_mask;
     tss_entry.base3=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>32)&base3_mask;
-    phyaddr_t rsp0top=gPhyPgsMemMgr.pages_alloc(0x4000/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
-    phyaddr_t ist1top=gPhyPgsMemMgr.pages_alloc(0x4000/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
-    phyaddr_t ist2top=gPhyPgsMemMgr.pages_alloc(0x4000/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
+    phyaddr_t rsp0top=gPhyPgsMemMgr.pages_alloc(total_stack_size/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
     phyaddr_t pcid_tb_phy=gPhyPgsMemMgr.pages_alloc(0x1000*sizeof(AddressSpace*)/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
-    vaddr_t rsp0=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top,DEFAULT_KERNEL_STACK_SIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist1=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(ist1top,DEFAULT_KERNEL_STACK_SIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist2=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(ist2top,DEFAULT_KERNEL_STACK_SIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t rsp0=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top,RSP0_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t ist1=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE,DF_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t ist2=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE,MC_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t ist3=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE,NMI_STACKSIZE,KSPACE_RW_ACCESS,0,true);
     pcid_table=(AddressSpace**)gKspacePgsMemMgr.pgs_remapp(pcid_tb_phy,0x1000*sizeof(AddressSpace*),KSPACE_RW_ACCESS);
-    if(!(rsp0top&ist1top&ist2top&rsp0&ist1&ist2)){
-        gkernelPanicManager.panic("[local_processor]init stack failed");
+    if(!(rsp0top&rsp0&rsp0&ist1&ist2)){
+        KernelPanicManager::panic("[local_processor]init stack failed");
     }
-    tss.rsp0=rsp0+DEFAULT_KERNEL_STACK_SIZE;
+    tss.rsp0=rsp0+RSP0_STACKSIZE;
     tss.ist[0]=0;
-    tss.ist[1]=ist1+DEFAULT_KERNEL_STACK_SIZE;
-    tss.ist[2]=ist2+DEFAULT_KERNEL_STACK_SIZE;
-    vaddr_t readonly_idt=(vaddr_t)gProccessorsManager.get_idt_readonly_ptr();
+    tss.ist[1]=ist1+DF_STACKSIZE;
+    tss.ist[2]=ist2+MC_STACKSIZE;
+    tss.ist[3]=ist3+NMI_STACKSIZE;
+    vaddr_t readonly_idt=(vaddr_t)ProccessorsManager_t::get_idt_readonly_ptr();
     GDTR gdtr={
         .base=reinterpret_cast<uint64_t>(&gdt),
         .limit=sizeof(gdt)-1
@@ -92,6 +92,78 @@ local_processor::local_processor()
         wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);
     }else{
         kputsSecure("[local_processor]x2apic not supported,unsupportted CPU");
-        gkernelPanicManager.panic("[local_processor]x2apic not supported");
+        KernelPanicManager::panic("[local_processor]x2apic not supported");
     }
+}
+uint64_t local_processor::rdtsc()
+{
+    uint32_t lo, hi;
+    
+    // 使用内联汇编读取时间戳计数器
+    // rdtsc 指令将 64 位时间戳存储在 EDX:EAX 寄存器对中
+    __asm__ __volatile__ (
+        "rdtsc"                  // 执行 rdtsc 指令
+        : "=a" (lo), "=d" (hi)   // 输出：lo = EAX, hi = EDX
+        :                         // 无输入
+        : "%ecx", "%ebx"         // 破坏的寄存器（某些编译器需要）
+    );
+    
+    // 将高低两部分组合成 64 位值
+    return ((uint64_t)hi << 32) | lo;
+}
+void local_processor::set_tsc_ddline(uint64_t time)
+{
+    wrmsr(msr::timer::IA32_TSC_DEADLINE,time);
+}
+void local_processor::raw_config_timer(timer_lvt_entry entry)
+{
+    wrmsr(msr::apic::IA32_X2APIC_LVT_TIMER,entry.raw);
+}
+
+void local_processor::raw_config_timer_init_count(initcout_reg_t count)
+{
+    wrmsr(msr::apic::IA32_X2APIC_TIMER_INITIAL_COUNT,(uint64_t)count);
+}
+
+void local_processor::raw_config_timer_divider(devide_reg_t reg)
+{
+    wrmsr(msr::apic::IA32_X2APIC_TIMER_DIVIDE_CONFIG,reg.raw);
+}
+
+current_reg_t local_processor::get_timer_current_count()
+{
+    return current_reg_t(rdmsr(msr::apic::IA32_X2APIC_TIMER_CURRENT_COUNT));
+}
+
+void local_processor::set_tsc_ddline_on_vec(uint8_t vector, uint64_t ddline)
+{
+    timer_lvt_entry entry=ddline_timer;
+    entry.param.vector=vector;
+    raw_config_timer(entry);
+    set_tsc_ddline(ddline);
+}
+
+void local_processor::set_tsc_ddline_default(uint64_t ddline)
+{
+    raw_config_timer(ddline_timer);
+    set_tsc_ddline(ddline);
+}
+
+void local_processor::cancel_tsc_ddline()
+{
+    wrmsr(msr::timer::IA32_TSC_DEADLINE,0);
+}
+
+void local_processor::raw_send_ipi(x2apic_icr_t icr)
+{
+    wrmsr(msr::apic::IA32_X2APIC_ICR,icr.raw);
+}
+
+void local_processor::broadcast_exself_fixed_ipi(void (*ipi_handler)())
+{
+    global_ipi_handler=ipi_handler;
+    asm volatile (
+        "sfence"    
+    );
+    raw_send_ipi(broadcast_exself_icr);
 }

@@ -35,7 +35,7 @@ private:
             );
             HCB_bitmap();
             ~HCB_bitmap();
-
+            int continual_avaliable_u64s_search_higher_alignment(uint64_t u64idx_align_log2,uint64_t u64_count,uint64_t&result_base_idx);
             bool target_bit_seg_is_avaliable(uint64_t bit_idx,uint64_t bit_count);//考虑用uint64_t来优化扫描，扫描的时候要加锁
             int bit_seg_set(uint64_t bit_idx,uint64_t bit_count,bool value);//优化的set函数，中间会解析，然后调用对应的bits_set，bytes_set，u64s_set，并且会参数检查，加锁
             friend class HCB_v2;
@@ -62,6 +62,7 @@ private:
         int first_linekd_heap_Init();//只能由first_linekd_heap调用的初始化
         //用指针检验是不是那个特殊堆
         HCB_v2(uint32_t apic_id);//给某个逻辑处理器初始化一个HCB
+        HCB_v2();
         int second_stage_Init();
         ~HCB_v2();
         //分配之后对于数据区的清零操作
@@ -106,30 +107,33 @@ private:
         bool is_full();
         void count_used_bytes();
         bool is_addr_belong_to_this_hcb(void* addr);
+        phyaddr_t tran_to_phy(void* addr);//这两个是通过HCB里面的虚拟基址，物理基址直接算出来的
+        vaddr_t tran_to_virt(phyaddr_t addr);
     };
-    bool is_able_to_alloc_new_hcb;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
+    static bool is_able_to_alloc_new_hcb;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
     //这个位开启后会优先在cpu专属堆里面操作，再尝试first_linekd_heap
-    void enable_new_hcb_alloc();
-    class HCB_v2*HCB_ARRAY[HCB_ARRAY_MAX_COUNT];
-    trylock_cpp_t HCB_LOCK_ARR[HCB_ARRAY_MAX_COUNT];//这个锁只有在尝试分配新的指针的时候才会用
-    HCB_v2 first_linekd_heap;
+    static class HCB_v2*HCB_ARRAY[HCB_ARRAY_MAX_COUNT];
+    static trylock_cpp_t HCB_LOCK_ARR[HCB_ARRAY_MAX_COUNT];//这个锁只有在尝试分配新的指针的时候才会用
+    static HCB_v2 first_linekd_heap;
 public:
+    static void enable_new_hcb_alloc();
 /**
  * @param vaddraquire true返回虚拟地址，false返回物理地址
  * @param alignment 实际对齐值=2<<alignment,最高支持到13，8kb对齐
  */
-   void*kalloc(uint64_t size,bool is_longtime=false,bool vaddraquire=true,uint8_t alignment=4);
-   void*realloc(void*ptr,uint64_t size,bool vaddraquire=true,uint8_t alignment=4);//根据表在优先在基地址不变的情况下尝试修改堆对象大小
+   static void*kalloc(uint64_t size,bool is_longtime=false,bool vaddraquire=true,uint8_t alignment=4);
+   static void*realloc(void*ptr,uint64_t size,bool vaddraquire=true,uint8_t alignment=4);//根据表在优先在基地址不变的情况下尝试修改堆对象大小
    //实在不行就创建一个新对象
-   void clear(void*ptr);// 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
+   static void clear(void*ptr);// 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
    //别用这个清理new之后的对象
-   int Init();//真正的初始化，全局对象手动初始化函数
-    void kfree(void*ptr);
+   static int Init();//真正的初始化，全局对象手动初始化函数
+   static void kfree(void*ptr);
+   static phyaddr_t get_phy(vaddr_t addr );
+   static vaddr_t get_virt(phyaddr_t addr);
     kpoolmemmgr_t();
     ~kpoolmemmgr_t();
 };
 constexpr int INDEX_NOT_EXIST = -100;
-extern kpoolmemmgr_t gKpoolmemmgr;
 // 全局 new/delete 操作符重载声明
 void* operator new(size_t size);
 void* operator new(size_t size, bool vaddraquire, uint8_t alignment = 3);

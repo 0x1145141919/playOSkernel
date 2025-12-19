@@ -7,9 +7,12 @@
 #include "linker_symbols.h"
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
-PageTableEntryUnion  kspace_root_pml4tb[512] __attribute__((section(".pml4_kernel_root_table")));
-PageTableEntryUnion kspaceUPpdpt[256*512] __attribute__((section(".kspace_uppdpt")));
+#include "panic.h"
+PageTableEntryUnion  KernelSpacePgsMemMgr::kspace_root_pml4tb[512] __attribute__((section(".pml4_kernel_root_table")));
+PageTableEntryUnion KernelSpacePgsMemMgr::kspaceUPpdpt[256*512] __attribute__((section(".kspace_uppdpt")));
 shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info={0};
+bool KernelSpacePgsMemMgr::is_default_pat_config_enabled=false;
+
 
 int KernelSpacePgsMemMgr::Init()
 {
@@ -29,7 +32,7 @@ int KernelSpacePgsMemMgr::Init()
         kspace_root_pml4tb[256+i].pml4.PWT=WB_idx.PWT;
         kspace_root_pml4tb[256+i].pml4.PCD=WB_idx.PCD;
     }
-
+    
 }
 void nonleaf_pgtbentry_flagsset(PageTableEntryUnion&entry){//内核态的是全局的，
     entry.raw=0;
@@ -48,7 +51,7 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
     pgaccess access,
     bool is_pagetballoc_reserved
     )
-{
+{//暂时只有(is_phypgsmgr_enabled==false）的逻辑
     uint64_t highoffset=vaddr_base-PAGELV4_KSPACE_BASE;
     uint32_t pdpte_index=(highoffset>>30)&((1<<17)-1);
     uint16_t pde_index=(highoffset>>21)&((1<<9)-1);
@@ -66,12 +69,14 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set:PDPTE attempt to dispatch existing 1GB page into 4kb PAGE\n");
             return OS_BAD_FUNCTION;//一个1GB大页面下面居然要4KB小页面
         }
-        PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(kspaceUPpdpt[pdpte_index].pdpte.PD_addr<<12);
+        PDEvbase=(PageTableEntryUnion*)kpoolmemmgr_t::get_virt(kspaceUPpdpt[pdpte_index].pdpte.PD_addr<<12);
     }else{//presentBit==0说明要新建
         PDPTEEntry&_1=kspaceUPpdpt[pdpte_index].pdpte;
         phyaddr_t _1_subphy=0;
-        if(is_pagetballoc_reserved)PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_1_subphy);
-        else PDEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(_1_subphy);
+        if(is_phypgsmgr_enabled==false){
+            PDEvbase=new PageTableEntryUnion[512];
+            _1_subphy=kpoolmemmgr_t::get_phy((vaddr_t)PDEvbase);
+        }
         if(!PDEvbase)return OS_OUT_OF_RESOURCE;
         nonleaf_pgtbentry_flagsset(kspaceUPpdpt[pdpte_index]);
         _1.PD_addr=_1_subphy>>12;
@@ -83,12 +88,13 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set:PDE attempt to dispatch existing 2MB page into 4kb PAGE\n");
             return OS_BAD_FUNCTION;//一个2MB大页面下面居然要4KB小页面
         }
-        PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(PDEvbase[pde_index].pde.pt_addr<<12);
+        PTEvbase=(PageTableEntryUnion*)kpoolmemmgr_t::get_virt(PDEvbase[pde_index].pde.pt_addr<<12);
     }else{
         phyaddr_t _2_subphy=0;
-        if(is_pagetballoc_reserved)PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(_2_subphy);
-        else PTEvbase=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(_2_subphy);
-        if(!PTEvbase)return OS_OUT_OF_RESOURCE;
+        if(is_phypgsmgr_enabled==false){
+            PTEvbase=new PageTableEntryUnion[512];
+            _2_subphy=kpoolmemmgr_t::get_phy((vaddr_t)PTEvbase);
+        }
         nonleaf_pgtbentry_flagsset(PDEvbase[pde_index]);
         PDEvbase[pde_index].pde.pt_addr=_2_subphy>>12;
     }
@@ -109,6 +115,87 @@ int KernelSpacePgsMemMgr::_4lv_pte_4KB_entries_set(
     return OS_SUCCESS;
 }
 // ====================================================================
+void KernelSpacePgsMemMgr::invalidate_seg()
+{
+    asm volatile(
+        "cli"
+    );
+    constexpr uint32_t _4KB_SIZE = 0x1000;
+    constexpr uint32_t _2MB_SIZE = 1ULL << 21;
+    constexpr uint32_t _1GB_SIZE = 1ULL << 30;
+    
+    if (shared_inval_kspace_VMentry_info.is_package_valid == false) {
+        kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid\n");
+        asm volatile(
+        "sti"
+        );
+        KernelPanicManager::panic("invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
+        return;
+    }
+    
+    for (uint8_t i = 0; i < 5; i++) {
+        seg_to_pages_info_pakage_t::pages_info_t& entry = 
+            shared_inval_kspace_VMentry_info.info_package.entryies[i];
+            
+        if (entry.page_size_in_byte == 0 || entry.num_of_pages == 0) 
+            continue;
+            
+        switch (entry.page_size_in_byte) {
+            case _4KB_SIZE:
+                for (uint32_t j = 0; j < entry.num_of_pages; j++) {
+                    asm volatile(
+                        "invlpg (%0)"
+                        :
+                        : "r" (entry.vbase + j * _4KB_SIZE)
+                        : "memory"
+                    );
+                }
+                break;
+                
+            case _2MB_SIZE: 
+                for (uint32_t j = 0; j < entry.num_of_pages; j++) {
+                    asm volatile(
+                        "invlpg (%0)"
+                        :
+                        : "r" (entry.vbase + j * _2MB_SIZE)
+                        : "memory"
+                    );
+                }
+                break;
+                
+            case _1GB_SIZE:
+                for (uint32_t j = 0; j < entry.num_of_pages; j++) {
+                    asm volatile(
+                        "invlpg (%0)"
+                        :
+                        : "r" (entry.vbase + j * _1GB_SIZE)
+                        : "memory"
+                    );
+                }
+                break;
+                
+            default:
+                kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info\n");
+                asm volatile(
+        "sti"
+        );
+                KernelPanicManager::panic("invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info");
+                return;  // 添加 return 避免继续执行
+        }
+    }
+    
+    // 正确的原子递增
+    uint32_t& completed_count = shared_inval_kspace_VMentry_info.completed_processors_count;
+    asm volatile(
+        "lock incl %0"
+        : "+m" (completed_count)
+        :
+        : "cc", "memory"
+    );
+    asm volatile(
+        "sti"
+        );
+}
 // 2MB 大页映射（PDE 级别）
 // 要求：不能跨 PDPT 边界（即一次最多映射 512 个 2MB 页，覆盖 1GB）
 // ====================================================================
@@ -143,18 +230,17 @@ int KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set(
             kputsSecure("KernelSpacePgsMemMgr::_4lv_pde_2MB_entries_set: under a 1GB huge page\n");
             return OS_BAD_FUNCTION;
         }
-        PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(
-            kspaceUPpdpt[pdpt_index].pdpte.PD_addr << 12);
-    } else {
-        phyaddr_t pd_phy = 0;
-        if(is_pagetballoc_reserved)
+        if(is_phypgsmgr_enabled==false)
         {
-            PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(pd_phy);
-        }else{
-            PD_vbase = (PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb_no_reserve(pd_phy);
-        }
-        if (!PD_vbase) return OS_OUT_OF_RESOURCE;
+            PD_vbase = (PageTableEntryUnion*)kpoolmemmgr_t::get_virt(kspaceUPpdpt[pdpt_index].pdpte.PD_addr<<12);
+        }else{//todo
 
+        }
+    } else {//暂时只考虑了(is_phypgsmgr_enabled==false)的情况，注意要改写
+        phyaddr_t pd_phy = 0;
+        PD_vbase=new(true,12) PageTableEntryUnion[512];
+        if(PD_vbase==nullptr)return OS_OUT_OF_MEMORY;
+        pd_phy=kpoolmemmgr_t::get_phy((vaddr_t)PD_vbase);
         nonleaf_pgtbentry_flagsset(kspaceUPpdpt[pdpt_index]);
         kspaceUPpdpt[pdpt_index].pdpte.PD_addr= pd_phy >> 12;
     }

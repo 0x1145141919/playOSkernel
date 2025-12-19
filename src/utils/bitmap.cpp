@@ -1,4 +1,4 @@
-#include "bitmap.h"
+#include "util/Ktemplats.h"
 
 void bitmap_t::bit_set(uint64_t bit_idx, bool value)
 {
@@ -239,4 +239,38 @@ void bitmap_t::count_bitmap_used_bit()
         used += cnt;
     }
     bitmap_used_bit = used;
+}
+Ktemplats::kernel_bitmap::~kernel_bitmap()
+    {
+        if (bitmap) {
+            default_kernel_allocator::free(bitmap);
+            bitmap = nullptr;
+        }
+        bitmap_size_in_64bit_units = 0;
+        bitmap_used_bit = 0;
+        byte_bitmap_base = nullptr;
+    }
+Ktemplats::kernel_bitmap::kernel_bitmap(uint64_t bit_count)
+{
+        bitmap_used_bit = 0;
+
+        uint64_t u64_count = (bit_count + 63) >> 6;
+        bitmap_size_in_64bit_units = u64_count;
+
+        bitmap = reinterpret_cast<uint64_t*>(
+            default_kernel_allocator::alloc(
+                u64_count * sizeof(uint64_t)
+            )
+        );
+
+        if (!bitmap) {
+            bitmap_size_in_64bit_units = 0;
+            byte_bitmap_base = nullptr;
+            return;
+        }
+
+        for (uint64_t i = 0; i < u64_count; ++i)
+            bitmap[i] = 0;
+
+        byte_bitmap_base = reinterpret_cast<uint8_t*>(bitmap);
 }

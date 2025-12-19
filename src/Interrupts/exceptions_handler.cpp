@@ -3,7 +3,7 @@
 #include "VideoDriver.h"
 #include "panic.h"
 #include "pt_regs.h"
-#include "memory/AddresSpace.h"
+void (*global_ipi_handler)()=nullptr;
 __attribute__((interrupt)) void exception_handler_div_by_zero(interrupt_frame* frame)
 {
     pt_regs regs;
@@ -31,7 +31,7 @@ __attribute__((interrupt)) void exception_handler_div_by_zero(interrupt_frame* f
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("Divide by zero", regs);
+        KernelPanicManager::panic("Divide by zero", regs);
     }
         
 }
@@ -64,7 +64,7 @@ __attribute__((interrupt)) void exception_handler_invalid_opcode(interrupt_frame
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("Invalid Opcode", regs);
+        KernelPanicManager::panic("Invalid Opcode", regs);
     }
 }
 
@@ -101,7 +101,7 @@ __attribute__((interrupt)) void exception_handler_general_protection(interrupt_f
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("General Protection", regs);
+        KernelPanicManager::panic("General Protection", regs);
     }
 }
 
@@ -133,7 +133,7 @@ __attribute__((interrupt)) void exception_handler_double_fault(interrupt_frame* 
     kputsSecure("\n");
     
     kputsSecure("[KERNEL] ");
-    gkernelPanicManager.panic("Double Fault", regs);
+    KernelPanicManager::panic("Double Fault", regs);
 }
 
 // 页错误异常 (#PF)
@@ -176,7 +176,7 @@ __attribute__((interrupt)) void exception_handler_page_fault(interrupt_frame* fr
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("Page Fault", regs);
+        KernelPanicManager::panic("Page Fault", regs);
     }
 }
 
@@ -213,7 +213,7 @@ __attribute__((interrupt)) void exception_handler_invalid_tss(interrupt_frame* f
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("Invalid TSS", regs);
+        KernelPanicManager::panic("Invalid TSS", regs);
     }
 }
 
@@ -247,7 +247,7 @@ __attribute__((interrupt)) void exception_handler_simd_floating_point(interrupt_
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("SIMD Floating-Point", regs);
+        KernelPanicManager::panic("SIMD Floating-Point", regs);
     }
 }
 
@@ -284,75 +284,10 @@ __attribute__((interrupt)) void exception_handler_virtualization(interrupt_frame
         return;
     }else{
         kputsSecure("[KERNEL] ");
-        gkernelPanicManager.panic("Virtualization", regs);
+        KernelPanicManager::panic("Virtualization", regs);
     }
 }
-__attribute__((interrupt)) void invalid_kspace_VMentry_handler(interrupt_frame* frame, uint64_t error_code)
+__attribute__((interrupt)) void IPI(interrupt_frame* frame, uint64_t error_code)
 {
-    constexpr uint32_t _4KB_SIZE = 0x1000;
-    constexpr uint32_t _2MB_SIZE = 1ULL << 21;
-    constexpr uint32_t _1GB_SIZE = 1ULL << 30;
-    
-    if (shared_inval_kspace_VMentry_info.is_package_valid == false) {
-        kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid\n");
-        gkernelPanicManager.panic("invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
-        return;
-    }
-    
-    for (uint8_t i = 0; i < 5; i++) {
-        seg_to_pages_info_pakage_t::pages_info_t& entry = 
-            shared_inval_kspace_VMentry_info.info_package.entryies[i];
-            
-        if (entry.page_size_in_byte == 0 || entry.num_of_pages == 0) 
-            continue;
-            
-        switch (entry.page_size_in_byte) {
-            case _4KB_SIZE:
-                for (uint32_t j = 0; j < entry.num_of_pages; j++) {
-                    asm volatile(
-                        "invlpg (%0)"
-                        :
-                        : "r" (entry.vbase + j * _4KB_SIZE)
-                        : "memory"
-                    );
-                }
-                break;
-                
-            case _2MB_SIZE: 
-                for (uint32_t j = 0; j < entry.num_of_pages; j++) {
-                    asm volatile(
-                        "invlpg (%0)"
-                        :
-                        : "r" (entry.vbase + j * _2MB_SIZE)
-                        : "memory"
-                    );
-                }
-                break;
-                
-            case _1GB_SIZE:
-                for (uint32_t j = 0; j < entry.num_of_pages; j++) {
-                    asm volatile(
-                        "invlpg (%0)"
-                        :
-                        : "r" (entry.vbase + j * _1GB_SIZE)
-                        : "memory"
-                    );
-                }
-                break;
-                
-            default:
-                kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info\n");
-                gkernelPanicManager.panic("invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info");
-                return;  // 添加 return 避免继续执行
-        }
-    }
-    
-    // 正确的原子递增
-    uint32_t& completed_count = shared_inval_kspace_VMentry_info.completed_processors_count;
-    asm volatile(
-        "lock incl %0"
-        : "+m" (completed_count)
-        :
-        : "cc", "memory"
-    );
+    global_ipi_handler();
 }

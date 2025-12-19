@@ -5,8 +5,8 @@
 #include "errno.h"
 #include "VideoDriver.h"
 #include "kcirclebufflogMgr.h"
-#include "OS_utils.h"
-#ifdef TEST_MODE
+#include "util/OS_utils.h"
+#ifdef USER_MODE
 #include "stdio.h"
 #include <inttypes.h>
 #endif
@@ -959,7 +959,7 @@ int kputsSecure(char*strbuff)
     return OS_SUCCESS;
 }
 #endif
-#ifdef TEST_MODE
+#ifdef USER_MODE
     int kputsSecure(char* strbuff) {
     if (!strbuff) return -1;
     return printf("%s", strbuff);  // 用户空间直接使用printf
@@ -1114,7 +1114,7 @@ int kpnumSecure(void* numptr, int format, int len)//有符号十进制的情况�
     return 0;
 }
 #endif
-#ifdef TEST_MODE
+#ifdef USER_MODE
 int kpnumSecure(void* numptr, int format, int len)
 { 
     if (!numptr) return -1;

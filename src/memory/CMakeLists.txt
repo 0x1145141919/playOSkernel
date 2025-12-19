@@ -7,7 +7,7 @@ add_library(Mem_module OBJECT
     Memory.cpp
     phygpsmemmgr.cpp
     phypgsmemmgr_alloc.cpp
-    phygpsmemmgr_init.cpp
+    #phygpsmemmgr_init.cpp
     phygpsmemmgr_pgcount_modify.cpp
     KspacMapMgr.cpp
     KspacMapMgr_pagediretct_operate.cpp
@@ -34,6 +34,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../include
          -fno-stack-protector
         #-fno-asynchronous-unwind-tables
          -DKERNEL_MODE
+         -DPGLV_4
          $<$<CONFIG:Debug>:-g -O0 -gdwarf-4>
          $<$<CONFIG:Release>:-O3>
          

@@ -2,7 +2,7 @@
 #pragma once
 #include <stdint.h>
 #include <efi.h>
-#include "./memory/includes/Memory.h"
+#include "memory/Memory.h"
 #include "VideoDriver.h"
 typedef struct {
     uint32_t signature;          // 标识符，例如 'BOOTINFO'

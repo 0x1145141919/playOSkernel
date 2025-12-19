@@ -1,7 +1,7 @@
 #include "init_fs.h"
-#include "../memory/includes/kpoolmemmgr.h"
+#include "memory/kpoolmemmgr.h"
 #include "os_error_definitions.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 /**
  * @brief 改变inode指向的数据流的大小
  *并使用bit相关操作分配释放数据流所占领的相关簇

@@ -7,10 +7,14 @@
 #include "util/cpuid_intel.h"
 #ifdef USER_MODE
 #include "stdlib.h"
+#include "kpoolmemmgr.h"
 #endif  
 
-// 定义全局变量gKpoolmemmgr
-kpoolmemmgr_t gKpoolmemmgr;
+// 定义类中的静态成员变量
+bool kpoolmemmgr_t::is_able_to_alloc_new_hcb = false;
+kpoolmemmgr_t::HCB_v2* kpoolmemmgr_t::HCB_ARRAY[kpoolmemmgr_t::HCB_ARRAY_MAX_COUNT] = {nullptr};
+trylock_cpp_t kpoolmemmgr_t::HCB_LOCK_ARR[kpoolmemmgr_t::HCB_ARRAY_MAX_COUNT];
+kpoolmemmgr_t::HCB_v2 kpoolmemmgr_t::first_linekd_heap;
 
 void kpoolmemmgr_t::enable_new_hcb_alloc()
 {
@@ -19,7 +23,7 @@ void kpoolmemmgr_t::enable_new_hcb_alloc()
 
 void *kpoolmemmgr_t::kalloc(uint64_t size, bool is_longtime, bool vaddraquire, uint8_t alignment)
 {
-    if(this!=&gKpoolmemmgr) return nullptr;
+
     void*ptr;
     if(is_able_to_alloc_new_hcb)//先尝试在现核心的堆中分配，再尝试建立新堆，最后再次借用别人的堆
     { 
@@ -80,7 +84,7 @@ void *kpoolmemmgr_t::kalloc(uint64_t size, bool is_longtime, bool vaddraquire, u
 
 void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size,bool vaddraquire,uint8_t alignment)
 {
-    if(this!=&gKpoolmemmgr) return nullptr;
+
     void*old_ptr=ptr;
     int status=0;
     if(is_able_to_alloc_new_hcb)
@@ -100,9 +104,9 @@ void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size,bool vaddraquire,uint8_t a
         status= first_linekd_heap.in_heap_realloc(ptr,size,vaddraquire,alignment);
         if(status==OS_HEAP_OBJ_DESTROYED)//这个分支直接内核恐慌
         {
-            kputsSecure("kpoolmemmgr_t::realloc:first_linekd_heap.in_heap_realloc() return OS_HEAP_OBJ_DESTROYED\n when reallocating at address 0x");
+            kputsSecure(const_cast<char*>("kpoolmemmgr_t::realloc:first_linekd_heap.in_heap_realloc() return OS_HEAP_OBJ_DESTROYED\n when reallocating at address 0x"));
             kpnumSecure(&ptr,UNHEX,8);
-            gkernelPanicManager.panic("\nInit error,first_linekd_heap has been destroyed\n");
+            KernelPanicManager::panic("\nInit error,first_linekd_heap has been destroyed\n");
         }
     }
     return status==OS_SUCCESS?ptr:nullptr;
@@ -111,7 +115,7 @@ void *kpoolmemmgr_t::realloc(void *ptr, uint64_t size,bool vaddraquire,uint8_t a
 void kpoolmemmgr_t::clear(void *ptr)
 {
     int status=OS_SUCCESS;
-    if(this!=&gKpoolmemmgr) return;
+
     if(is_able_to_alloc_new_hcb)
     {
         for(uint32_t i=0;i<HCB_ARRAY_MAX_COUNT;i++)
@@ -130,28 +134,25 @@ void kpoolmemmgr_t::clear(void *ptr)
     }
         status=first_linekd_heap.clear(ptr);
         if(status==OS_HEAP_OBJ_DESTROYED){
-            kputsSecure("kpoolmemmgr_t::clear:first_linekd_heap.clear return OS_HEAP_OBJ_DESTROYED\n when clearing at address 0x");
+            kputsSecure(const_cast<char*>("kpoolmemmgr_t::clear:first_linekd_heap.clear return OS_HEAP_OBJ_DESTROYED\n when clearing at address 0x"));
             kpnumSecure(&ptr,UNHEX,8);
-            gkernelPanicManager.panic("\nfirst_linekd_heap has been destroyed\n");
+            KernelPanicManager::panic("\nfirst_linekd_heap has been destroyed\n");
         }
     
 }
 
 int kpoolmemmgr_t::Init()
 {
-    if(this!=&gKpoolmemmgr) return OS_BAD_FUNCTION;
+
     is_able_to_alloc_new_hcb=false;
     first_linekd_heap.first_linekd_heap_Init();
-    for(uint32_t i=0;i<HCB_ARRAY_MAX_COUNT;i++)
-    {
-        HCB_ARRAY[i]=nullptr;
-    }
+    return OS_SUCCESS;
 }
 
 void kpoolmemmgr_t::kfree(void *ptr)
 {
     int status=OS_SUCCESS;
-    if(this!=&gKpoolmemmgr) return;
+
     if(is_able_to_alloc_new_hcb)
     {
         for(uint32_t i=0;i<HCB_ARRAY_MAX_COUNT;i++)
@@ -181,54 +182,62 @@ void kpoolmemmgr_t::kfree(void *ptr)
         status=first_linekd_heap.free(ptr);
         if(status==OS_HEAP_OBJ_DESTROYED)
         {
-             kputsSecure("kpoolmemmgr_t::realloc:first_linekd_heap.in_heap_realloc() return OS_HEAP_OBJ_DESTROYED\n when freeing at address 0x");
+             kputsSecure(const_cast<char*>("kpoolmemmgr_t::realloc:first_linekd_heap.in_heap_realloc() return OS_HEAP_OBJ_DESTROYED\n when freeing at address 0x"));
             kpnumSecure(&ptr,UNHEX,8);
-            gkernelPanicManager.panic("\nInit error,first_linekd_heap has been destroyed\n");
+            KernelPanicManager::panic("\nInit error,first_linekd_heap has been destroyed\n");
         }
     }
 }
-
+//想获得物理地址若本身传的就是物理地址则还是会返回物理地址
+phyaddr_t kpoolmemmgr_t::get_phy(vaddr_t addr)
+{
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if(addr<MIN_KVADDR&&addr>=MAX_PHYADDR)return 0;
+    if(is_able_to_alloc_new_hcb){
+        for(uint16_t i=0;i<HCB_ARRAY_MAX_COUNT;i++)
+        {
+            if(HCB_ARRAY[i]!=nullptr){
+                phyaddr_t result=HCB_ARRAY[i]->tran_to_phy((void*)addr);
+                if(result!=0)return result;
+            }
+        }
+    }
+    return first_linekd_heap.tran_to_phy((void*)addr);
+}
+vaddr_t kpoolmemmgr_t::get_virt(phyaddr_t addr)
+{
+    uint64_t MIN_KVADDR=0;
+    uint64_t MAX_PHYADDR=0;;
+    #ifdef PGLV_5
+    MIN_KVADDR=0xff00000000000000;
+    MAX_PHYADDR=1ULL<<56;
+    #endif
+    #ifdef PGLV_4
+    MIN_KVADDR=0xffff800000000000;
+    MAX_PHYADDR=1ULL<<47;
+    #endif
+    if(addr<MIN_KVADDR&&addr>=MAX_PHYADDR)return 0;
+    if(is_able_to_alloc_new_hcb){
+        for(uint16_t i=0;i<HCB_ARRAY_MAX_COUNT;i++)
+        {
+            if(HCB_ARRAY[i]!=nullptr){
+                vaddr_t result=HCB_ARRAY[i]->tran_to_virt(addr);
+                if(result!=0)return result;
+            }
+        }
+    }
+    return first_linekd_heap.tran_to_virt(addr);
+}
 kpoolmemmgr_t::~kpoolmemmgr_t()
 {
 }
-// 重载全局 new/delete 操作符
-void* operator new(size_t size) {
-    return gKpoolmemmgr.kalloc(size,false, true, 4);
-}
 
-void* operator new(size_t size, bool vaddraquire, uint8_t alignment) {
-    return gKpoolmemmgr.kalloc(size, vaddraquire, alignment);
-}
-
-void* operator new[](size_t size) {
-    return gKpoolmemmgr.kalloc(size,false,true, 3);
-}
-
-void* operator new[](size_t size, bool vaddraquire, uint8_t alignment) {
-    return gKpoolmemmgr.kalloc(size, vaddraquire, alignment);
-}
-
-void operator delete(void* ptr) noexcept {
-    gKpoolmemmgr.kfree(ptr);
-}
-
-void operator delete(void* ptr, size_t) noexcept {
-
-}
-
-void operator delete[](void* ptr) noexcept {
-    gKpoolmemmgr.kfree(ptr);
-}
-
-void operator delete[](void* ptr, size_t) noexcept {
-
-}
-
-// 放置 new 操作符
-void* operator new(size_t, void* ptr) noexcept {
-    return ptr;
-}
-
-void* operator new[](size_t, void* ptr) noexcept {
-    return ptr;
-}

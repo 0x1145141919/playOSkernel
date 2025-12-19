@@ -1,5 +1,5 @@
 #include "gSTResloveAPIs.h"
-#include "../memory/includes/Memory.h"
+#include "memory/Memory.h"
 #include "panic.h"
 acpimgr_t gAcpiVaddrSapceMgr;
 typedef uint64_t GUID_DEF[2];

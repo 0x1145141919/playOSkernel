@@ -152,7 +152,7 @@ static constexpr uint32_t FILE_PATH_MAX_LEN=8192;
         uint64_t last_modification_time;     // 最后修改时间(秒)
         uint64_t last_access_time;            // 最后访问时间(秒)     
         data_descript data_desc;             // 数据描述符
-        spinwirtelock_cpp_t spinwlock;
+        spinrwlock_cpp_t spinwlock;
         trylock_cpp_t trylock;
     };
     Inode root_inode;

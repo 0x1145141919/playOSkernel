@@ -1,7 +1,7 @@
 #include "memory/Memory.h"
 #include "VideoDriver.h"
 #include "errno.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
 #define KEFLBASE 0x4000000
 #define DIRTY_ENTRY 1
@@ -215,7 +215,7 @@ void GlobalMemoryPGlevelMgr_t::fillMemoryHolesInEfiMap() {
             // 创建Reserved类型的描述符
             EFI_MEMORY_DESCRIPTORX64 holeDesc ;
             setmem(&holeDesc,sizeof(EFI_MEMORY_DESCRIPTORX64),0);
-            holeDesc.Type = EFI_RESERVED_MEMORY_TYPE;
+            holeDesc.Type = OS_MEMSEG_HOLE;
             holeDesc.PhysicalStart = currentEnd;
             holeDesc.NumberOfPages = holePages;
             holeDesc.Attribute = 0;

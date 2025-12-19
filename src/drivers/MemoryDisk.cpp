@@ -2,10 +2,10 @@
 #ifdef KERNEL_MODE
 #include "VideoDriver.h"
 #endif
-#include "../memory/includes/phygpsmemmgr.h"
-#include "../memory/includes/kpoolmemmgr.h"
+#include "memory/phygpsmemmgr.h"
+#include "memory/kpoolmemmgr.h"
 #include "blockdeviceids.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 #ifdef USER_MODE
 #include <cstdio>
 #endif

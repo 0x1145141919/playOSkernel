@@ -137,9 +137,11 @@ cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy);
 class KernelSpacePgsMemMgr//使用上面的位域结构体，在初始化函数中直接用，但在后续正式外部暴露接口中对页表项必须用原子操作函数
 {
 private://后面五级页表的时候考虑选择编译
-PageTableEntryUnion*roottbv;
-phyaddr_t root_pml4_phyaddr;
-phyaddr_t kspace_uppdpt_phyaddr;
+static PageTableEntryUnion*roottbv;
+static PageTableEntryUnion  kspace_root_pml4tb[512];
+static PageTableEntryUnion kspaceUPpdpt[256*512];
+static phyaddr_t root_pml4_phyaddr;
+static phyaddr_t kspace_uppdpt_phyaddr;
 static constexpr uint64_t PAGELV4_KSPACE_BASE=0xFFFF800000000000;
 static constexpr uint64_t PAGELV5_KSPACE_BASE=0xFF00000000000000;
 static constexpr uint64_t PAGELV4_KSPACE_SIZE=1ULL<<(48-1);
@@ -149,9 +151,12 @@ static constexpr uint32_t _4KB_SIZE=0x1000;
 static constexpr uint32_t _2MB_SIZE=1ULL<<21;
 static constexpr uint32_t _1GB_SIZE=1ULL<<30;
 
-bool is_default_pat_config_enabled=false;
-
-
+static bool is_default_pat_config_enabled;
+static bool is_phypgsmgr_enabled;//这个位影响页框管理的
+/**
+ * is_phypgsmgr_enabled为false时用堆分配页框
+ * 为true时用物理页框管理分配页框
+ */
 //这个数组按照虚拟地址从小到大排序,规定虚拟地址是主键
 class kspace_vm_table_t:public RBTree_t
 {
@@ -174,8 +179,8 @@ class kspace_vm_table_t:public RBTree_t
     using RBTree_t::remove;
     vaddr_t alloc_available_space(uint64_t size,uint32_t target_vaddroffset);
 };
-kspace_vm_table_t*kspace_vm_table;
-spinlock_cpp_t GMlock;
+static kspace_vm_table_t*kspace_vm_table;
+static spinlock_cpp_t GMlock;
 friend int AddressSpace::Init();
 friend AddressSpace::AddressSpace();
 /**
@@ -184,59 +189,60 @@ friend AddressSpace::AddressSpace();
  * 内部接口默认外部调用函数持有锁，
  * 不对参数合法性进行校验
  */
-int VM_add(VM_DESC vmentry);
+static int VM_add(VM_DESC vmentry);
 /**
  * 往kspace_vm_table删除虚拟地址为vaddr的VM_DESC项，
  * 遵守虚拟地址从小到大排序，
  * 内部接口默认外部调用函数持有锁
  */
-int VM_del(VM_DESC*entry);
+static int VM_del(VM_DESC*entry);
 /**
  * 搜索虚拟地址为vaddr的VM_DESC项，
  * 建议采取二分查找
  */
-int VM_search_by_vaddr(vaddr_t vaddr,VM_DESC&result);
+static int VM_search_by_vaddr(vaddr_t vaddr,VM_DESC&result);
 
-int _4lv_pdpte_1GB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨父页表项指针边界
+static int _4lv_pdpte_1GB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨父页表项指针边界
 
-int _4lv_pde_2MB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access,bool is_pagetballoc_reserved);//这里要求的是不能跨页目录指针边界
+static int _4lv_pde_2MB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access,bool is_pagetballoc_reserved);//这里要求的是不能跨页目录指针边界
 
-int _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access,bool is_pagetballoc_reserved);//这里要求的是不能跨页目录边界
+static int _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access,bool is_pagetballoc_reserved);//这里要求的是不能跨页目录边界
 
+static void invalidate_seg();
 
 /**
  * 
  */
-int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC& vmentry);
+static int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC& vmentry);
 
-int enable_VMentry(VM_DESC& vmentry,bool is_pagetballoc_reserved);
+static int enable_VMentry(VM_DESC& vmentry,bool is_pagetballoc_reserved);
 //这个函数的职责是根据vmentry的内容撤销对应的页表项映射，只对对应的页表结构进行操作
 //失效对应tlb项目在函数外部完成
 //以及顺便使用共享信息包填充shared_inval_kspace_VMentry_info
-int disable_VMentry(VM_DESC& vmentry);
+static int disable_VMentry(VM_DESC& vmentry);
 
-int invalidate_tlb_entry();//这个函数的职责是失效对应的tlb条目,由pgs_remapped_free调用，
+static int invalidate_tlb_entry();//这个函数的职责是失效对应的tlb条目,由pgs_remapped_free调用，
 //disable_VMentry会把共享信息处理好，直接使用共享信息包所以不需要任何参数
 
 /**
  * 删除对应1个pde下对应的pte项，如果检测到全部pte项被删除则回收对应的pde项
  */
-int _4lv_pte_4KB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录边界
+static int _4lv_pte_4KB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录边界
 
-int _4lv_pde_2MB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录指针边界
+static int _4lv_pde_2MB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录指针边界
 
-int _4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨父页表项指针边界
+static int _4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨父页表项指针边界
 void enable_DEFAULT_PAT_CONFIG();
-int v_to_phyaddrtraslation_entry(vaddr_t vaddr,PageTableEntryUnion& result,uint32_t&page_size);
+static int v_to_phyaddrtraslation_entry(vaddr_t vaddr,PageTableEntryUnion& result,uint32_t&page_size);
     public:
 const pgaccess PG_RW={1,1,1,0,1,WB};
 const pgaccess PG_RWX ={1,1,1,1,1,WB};
 const pgaccess PG_R ={1,0,1,0,1,WB};
-int pgs_remapped_free(vaddr_t addr);
+static int pgs_remapped_free(vaddr_t addr);
 /**
  * 暴露在外面的接口，其中addr，size必须4k对齐
  */
-void*pgs_remapp(
+static void*pgs_remapp(
     phyaddr_t addr,
     uint64_t size,
     pgaccess access,
@@ -244,9 +250,8 @@ void*pgs_remapp(
     bool is_protective=false,
     bool is_pagetballoc_reserved=true
 );//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
-    int Init();
-    int v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
+static int Init();
+static int v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
 
 };
-extern KernelSpacePgsMemMgr gKspacePgsMemMgr;
 extern shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info;

@@ -1,12 +1,13 @@
 #include "UefiRunTimeServices.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 #include  "memory/Memory.h"
+
 EFI_SYSTEM_TABLE*global_gST;
-runtime_services_t gRuntimeServices;
-runtime_services_t::runtime_services_t()
+EFI_RT_SVS gRuntimeServices;
+EFI_RT_SVS::EFI_RT_SVS()
 {
 }
-runtime_services_t::runtime_services_t(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
+EFI_RT_SVS::EFI_RT_SVS(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
 {
     gST = sti;
     uint64_t filter_maxcount = gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
@@ -44,7 +45,7 @@ runtime_services_t::runtime_services_t(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
     convert_pointer = (EFI_CONVERT_POINTER)gST->RuntimeServices->ConvertPointer;
 }
 
-EFI_TIME runtime_services_t::rt_time_get()
+EFI_TIME EFI_RT_SVS::rt_time_get()
 {
     EFI_STATUS status;
     EFI_TIME time;
@@ -57,7 +58,7 @@ EFI_TIME runtime_services_t::rt_time_get()
     return time;
 }
 
-EFI_STATUS runtime_services_t::rt_time_set(EFI_TIME &time)
+EFI_STATUS EFI_RT_SVS::rt_time_set(EFI_TIME &time)
 {
     EFI_STATUS status;
     // 使用efi_call1函数调用set_time
@@ -77,7 +78,7 @@ EFI_STATUS runtime_services_t::rt_time_set(EFI_TIME &time)
     return EFI_SUCCESS;
 }
 
-EFI_STATUS runtime_services_t::rt_reset(EFI_RESET_TYPE reset_type, EFI_STATUS status, uint64_t data_size, void *data_ptr)
+EFI_STATUS EFI_RT_SVS::rt_reset(EFI_RESET_TYPE reset_type, EFI_STATUS status, uint64_t data_size, void *data_ptr)
 {
     // 使用efi_call4函数调用reset_system
     efi_call4((void*)reset_system, (UINT64)reset_type, (UINT64)status, (UINT64)data_size, (UINT64)data_ptr);
@@ -90,7 +91,7 @@ EFI_STATUS runtime_services_t::rt_reset(EFI_RESET_TYPE reset_type, EFI_STATUS st
     return EFI_SUCCESS;
 }
 
-void runtime_services_t::Init(EFI_SYSTEM_TABLE *sti, uint64_t mapver)
+void EFI_RT_SVS::Init(EFI_SYSTEM_TABLE *sti, uint64_t mapver)
 {
     gST = sti;
    /* uint64_t filter_maxcount = gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
@@ -128,17 +129,17 @@ void runtime_services_t::Init(EFI_SYSTEM_TABLE *sti, uint64_t mapver)
 }
 
 
-void runtime_services_t::rt_hotreset()
+void EFI_RT_SVS::rt_hotreset()
 {
     rt_reset(EfiResetWarm,EFI_SUCCESS,0,NULL);
 }
 
-void runtime_services_t::rt_coldreset()
+void EFI_RT_SVS::rt_coldreset()
 {
     rt_reset(EfiResetCold,EFI_SUCCESS,0,NULL);
 }
 
-void runtime_services_t::rt_shutdown()
+void EFI_RT_SVS::rt_shutdown()
 {
     rt_reset(EfiResetShutdown,EFI_SUCCESS,0,NULL);
     asm volatile("hlt");

@@ -1,3 +1,4 @@
+#pragma once
 #include <stdint.h> 
 #include <lock.h>
 #include "os_error_definitions.h"

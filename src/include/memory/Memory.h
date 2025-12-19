@@ -28,6 +28,7 @@ typedef enum :uint32_t{
     OS_ALLOCATABLE_MEMORY,
     OS_RESERVED_MEMORY,
     OS_PGTB_SEGS,
+    OS_MEMSEG_HOLE,
     MEMORY_TYPE_OEM_RESERVED_MIN = 0x70000000,
   MEMORY_TYPE_OEM_RESERVED_MAX = 0x7FFFFFFF,
   MEMORY_TYPE_OS_RESERVED_MIN  = 0x80000000,
@@ -127,3 +128,6 @@ class GlobalMemoryPGlevelMgr_t {
   int descriptor_remapped_dec(phyaddr_t base);
 };
 extern GlobalMemoryPGlevelMgr_t gBaseMemMgr;
+constexpr uint64_t MAX_PHYADDR_1GB_PGS_COUNT=4096;
+static_assert((MAX_PHYADDR_1GB_PGS_COUNT&(MAX_PHYADDR_1GB_PGS_COUNT-1))==0,"MAX_PHYADDR_1GB_PGS_COUNT must be power of 2");
+static_assert((MAX_PHYADDR_1GB_PGS_COUNT>512),"MAX_PHYADDR_1GB_PGS_COUNT must be greater than 512");

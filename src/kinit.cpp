@@ -6,12 +6,11 @@
 #include "VideoDriver.h"
 #include "kcirclebufflogMgr.h"
 #include "16x32AsciiCharacterBitmapSet.h"
-#include "processor_Ks_stacks_mgr.h"
 #include "Interrupt.h"
-#include "./memory/includes/Memory.h"
-#include "./memory/includes/kpoolmemmgr.h"
-#include "./memory/includes/phygpsmemmgr.h"
-#include "processor_self_manage.h"
+#include "memory/Memory.h"
+#include "memory/kpoolmemmgr.h"
+#include "memory/phygpsmemmgr.h"
+#include "memory/AddresSpace.h"
 #include "UefiRunTimeServices.h"
 #include "panic.h"
 #include "gSTResloveAPIs.h"
@@ -64,9 +63,7 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
         serial_puts("InitialGlobalBasicGraphicInfo Failed\n");
         return ;
     }
-    gKpoolmemmgr.Init();
-      
-      // 3. 此时所有参数已处理完毕，可以安全切换栈
+    kpoolmemmgr_t::Init();
     Status =InitialGlobalCharacterSetBitmapControler(
         32,
         16,
@@ -92,16 +89,15 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
         serial_puts("InitialKernelShellControler Failed\n");
         return ;
     }
-    gkernelPanicManager.Init(5);
-    LocalCPU bsp_regieters;
+    KernelPanicManager::Init(5);
     // 初始化全局Ascii位图控制器
     kputsSecure("Welcome to PlayOSKernelShell\n");
     gBaseMemMgr.Init(reinterpret_cast<EFI_MEMORY_DESCRIPTORX64*>(transfer->memory_map_ptr),transfer->memory_map_entry_count);
     gBaseMemMgr.printPhyMemDesTb();
-    gKspacePgsMemMgr.Init();
+    KernelSpacePgsMemMgr::Init();
+    gPhyPgsMemMgr.Init();
     gRuntimeServices.Init(global_gST, efi_map_ver);
     gBaseMemMgr.DisableBasicMemService();
-    gProcessor_Ks_stacks_mgr.Init();
     gInterrupt_mgr.Init();
     gAcpiVaddrSapceMgr.Init(global_gST);
     gRuntimeServices.rt_shutdown();
