@@ -404,7 +404,7 @@ int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsE
                                 FileExtentsEntry_merger(using_buffer,extents_entry,extents_index);
                                 entry_count=extents_index;
 #ifdef KERNEL_MODE
-                                gKpoolmemmgr.realloc(extents_entry,sizeof(FileExtentsEntry_t)*extents_index);
+                                kpoolmemmgr_t::realloc(extents_entry,sizeof(FileExtentsEntry_t)*extents_index);
 #endif
                                 if(!is_memdiskv1){
                                     delete[] reinterpret_cast<uint8_t*>(clusters_bitmap);
@@ -433,7 +433,7 @@ int init_fs_t::clusters_bitmap_alloc(uint64_t alloc_clusters_count, FileExtentsE
                                 extents_entry=new FileExtentsEntry_t[MAX_EXTENTS_ENTRIES];
                                 FileExtentsEntry_merger(using_buffer,extents_entry,extents_index);
 #ifdef KERNEL_MODE
-                                gKpoolmemmgr.realloc(extents_entry,sizeof(FileExtentsEntry_t)*extents_index);
+                                kpoolmemmgr_t::realloc(extents_entry,sizeof(FileExtentsEntry_t)*extents_index);
 #endif
                                  if(!is_memdiskv1){
                                     delete[] reinterpret_cast<uint8_t*>(clusters_bitmap);

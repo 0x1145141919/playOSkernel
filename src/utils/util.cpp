@@ -5,7 +5,6 @@
 #endif
 #ifdef KERNEL_MODE 
 #include "kintrin.h"
-#include "OS_utils.h"
 #endif
 typedef uint64_t size_t;
 const uint8_t masks_entry1bit_width[8]={128,64,32,16,8,4,2,1};

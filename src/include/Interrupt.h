@@ -432,7 +432,6 @@ class local_processor {
     TSSentry tss;
     x2apicid_t apic_id;
     spinlock_cpp_t  lock;
-    AddressSpace** pcid_table;
     //x2apic下的lapic配置相关函数
     //比如计时器相关配置，优先级相关配置，核间中断相关配置
     //pcid管理相关接口，给某某cr3注册/注销pcid
@@ -440,7 +439,7 @@ class local_processor {
 
     public:
     local_processor();
-    uint64_t rdtsc();
+    static uint64_t rdtsc();
     static  void raw_config_timer(timer_lvt_entry entry);
     static void raw_config_timer_init_count(initcout_reg_t count);
     static void raw_config_timer_divider(devide_reg_t reg);

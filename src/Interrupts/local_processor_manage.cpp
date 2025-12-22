@@ -37,8 +37,8 @@ local_processor::local_processor()
     tss_entry.base1=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>16)&base1_mask;
     tss_entry.base2=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>24)&base2_mask;
     tss_entry.base3=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>32)&base3_mask;
-    phyaddr_t rsp0top=gPhyPgsMemMgr.pages_alloc(total_stack_size/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
-    phyaddr_t pcid_tb_phy=gPhyPgsMemMgr.pages_alloc(0x1000*sizeof(AddressSpace*)/0x1000,phygpsmemmgr_t::page_state_t::KERNEL);
+    phyaddr_t rsp0top=gPhyPgsMemMgr.pages_alloc(total_stack_size/0x1000,phymemspace_mgr::page_state_t::KERNEL);
+    phyaddr_t pcid_tb_phy=gPhyPgsMemMgr.pages_alloc(0x1000*sizeof(AddressSpace*)/0x1000,phymemspace_mgr::page_state_t::KERNEL);
     vaddr_t rsp0=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top,RSP0_STACKSIZE,KSPACE_RW_ACCESS,0,true);
     vaddr_t ist1=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE,DF_STACKSIZE,KSPACE_RW_ACCESS,0,true);
     vaddr_t ist2=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE,MC_STACKSIZE,KSPACE_RW_ACCESS,0,true);

@@ -1,18 +1,23 @@
 # 创建内存管理模块的对象文件，用于内核空间
 # 包含内核池内存管理、物理内存段管理等相关功能的实现文件
-add_library(Mem_module OBJECT 
-    AddresSpace.cpp
-    kpoolmemmgr.cpp
-    kpoolmemmgr_HCBv2.cpp
-    Memory.cpp
-    phygpsmemmgr.cpp
-    phypgsmemmgr_alloc.cpp
-    #phygpsmemmgr_init.cpp
-    phygpsmemmgr_pgcount_modify.cpp
-    KspacMapMgr.cpp
-    KspacMapMgr_pagediretct_operate.cpp
-    PagetbHeapMgr.cpp
+set(MEMORY_SOURCE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Memory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_pgcount_modify.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_pgs_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_seg_managment.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_availabe_search.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phypgsmemmgr_alloc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kpoolmemmgr.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kpoolmemmgr_HCBv2.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/AddresSpace.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/KspacMapMgr.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/KspacMapMgr_pagediretct_operate.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/out_surfaces.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PhyAddrAccessor.cpp
 )
+
+add_library(Mem_module OBJECT ${MEMORY_SOURCE})
 
 # 设置私有包含目录，指定编译时需要的头文件搜索路径
 # 包括上层目录的include目录和当前目录下的includes目录

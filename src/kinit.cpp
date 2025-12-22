@@ -94,14 +94,19 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
     kputsSecure("Welcome to PlayOSKernelShell\n");
     gBaseMemMgr.Init(reinterpret_cast<EFI_MEMORY_DESCRIPTORX64*>(transfer->memory_map_ptr),transfer->memory_map_entry_count);
     gBaseMemMgr.printPhyMemDesTb();
-    KernelSpacePgsMemMgr::Init();
-    gPhyPgsMemMgr.Init();
-    gRuntimeServices.Init(global_gST, efi_map_ver);
-    gBaseMemMgr.DisableBasicMemService();
-    gInterrupt_mgr.Init();
-    gAcpiVaddrSapceMgr.Init(global_gST);
-    gRuntimeServices.rt_shutdown();
-    asm volatile("hlt");
+    
+    phymemspace_mgr::Init();
+    KspaceMapMgr::Init();
+    gKernelSpace=new AddressSpace();
+    Status=gKernelSpace->second_stage_init();
+    if(Status!=OS_SUCCESS)
+        {
+            kputsSecure("KernelSpace Init Failed\n");
+            asm volatile("hlt");
+        }
+    gKernelSpace->load_pml4_to_cr3();
     //中断接管工作
+    asm volatile("hlt");
+    
 
 }

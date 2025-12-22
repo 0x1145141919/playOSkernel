@@ -3,7 +3,6 @@
 #include "memory/phygpsmemmgr.h"
 #include "memory/kpoolmemmgr.h"
 #include "os_error_definitions.h"
-#include "memory/PagetbHeapMgr.h"
 #include "linker_symbols.h"
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
@@ -21,7 +20,7 @@ cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy)
     };
     return result;
 }
-int KernelSpacePgsMemMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
+int KspaceMapMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
     // 假定调用者持有 GMlock，并且前 valid_vmentry_count 项是紧凑排列的已用条目
     VM_DESC tmp_desc={
         0
@@ -37,20 +36,20 @@ int KernelSpacePgsMemMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
 }
 
 
-int KernelSpacePgsMemMgr::VM_add(VM_DESC vmentry){
+int KspaceMapMgr::VM_add(VM_DESC vmentry){
     // 假定调用者持有 GMlock，且参数已校验（不做重复/越界检查）
     VM_DESC*vmentry_in_heap = new VM_DESC(vmentry);
     return kspace_vm_table->insert(vmentry_in_heap);
 }
 
 
-int KernelSpacePgsMemMgr::VM_del(VM_DESC*entry){
+int KspaceMapMgr::VM_del(VM_DESC*entry){
     int status = kspace_vm_table->remove(entry);
     delete entry;
     return status;
 }
 
-int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry, bool is_pagetballoc_reserved)
+int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
 {
     // basic alignment checks (4KB)
     if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE)
@@ -92,12 +91,12 @@ int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry, bool is_pagetballoc_r
             }
             case _2MB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pde_2MB_entries_set(e.base, e.vbase, count, vmentry.access, is_pagetballoc_reserved);
+                rc = _4lv_pde_2MB_entries_set(e.base, e.vbase, count, vmentry.access);
                 break;
             }
             case _4KB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pte_4KB_entries_set(e.base, e.vbase, count, vmentry.access, is_pagetballoc_reserved);
+                rc = _4lv_pte_4KB_entries_set(e.base, e.vbase, count, vmentry.access);
                 break;
             }
             default:
@@ -111,13 +110,12 @@ int KernelSpacePgsMemMgr::enable_VMentry(VM_DESC &vmentry, bool is_pagetballoc_r
 
     return OS_SUCCESS;
 }
-void *KernelSpacePgsMemMgr::pgs_remapp(
+void *KspaceMapMgr::pgs_remapp(
     phyaddr_t addr, 
     uint64_t size, 
     pgaccess access, 
     vaddr_t vbase,
-    bool is_protective,
-    bool is_pagetballoc_reserved
+    bool is_protective
 )
 {
     if(addr%_4KB_SIZE||size%_4KB_SIZE||vbase%_4KB_SIZE)return nullptr;
@@ -160,7 +158,7 @@ void *KernelSpacePgsMemMgr::pgs_remapp(
     {
         GMlock.unlock();
         if(status==OS_OUT_OF_RESOURCE){
-            kputsSecure("KernelSpacePgsMemMgr::pgs_remapp:VM_add entryies out of resource\n");
+            kputsSecure("KspaceMapMgr::pgs_remapp:VM_add entryies out of resource\n");
         }
         return nullptr;
     }
@@ -170,13 +168,13 @@ void *KernelSpacePgsMemMgr::pgs_remapp(
         vmentry_copy.start+=_4KB_SIZE;
         vmentry_copy.end-=_4KB_SIZE;
     }
-    status=enable_VMentry(vmentry_copy,is_pagetballoc_reserved);    
+    status=enable_VMentry(vmentry_copy);    
     GMlock.unlock();
     if(status==OS_SUCCESS)return(void*)vmentry_copy.start; 
     return nullptr;
 }
 static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
-int KernelSpacePgsMemMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC &vmentry)
+int KspaceMapMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC &vmentry)
 {
     if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.start % _1GB_SIZE != vmentry.phys_start % _1GB_SIZE)
         return OS_INVALID_PARAMETER;
@@ -249,7 +247,7 @@ int KernelSpacePgsMemMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &resu
 
     return OS_SUCCESS;
 }
-int KernelSpacePgsMemMgr::disable_VMentry(VM_DESC &vmentry)
+int KspaceMapMgr::disable_VMentry(VM_DESC &vmentry)
 {
         // basic alignment checks (4KB)
     if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE)
@@ -296,7 +294,7 @@ int KernelSpacePgsMemMgr::disable_VMentry(VM_DESC &vmentry)
     }
     return OS_SUCCESS;
 }
-int KernelSpacePgsMemMgr::v_to_phyaddrtraslation(vaddr_t vaddr, phyaddr_t &result)
+int KspaceMapMgr::v_to_phyaddrtraslation(vaddr_t vaddr, phyaddr_t &result)
 {
     PageTableEntryUnion badentry={0};
     PageTableEntryUnion& result_entry=badentry;
@@ -345,7 +343,7 @@ int VM_vaddr_cmp(VM_DESC *a, VM_DESC *b)
 /**
  * 所以需要把起始虚拟地址向上调整操作，鉴定物理段使用的大页操作这些拿出来做成函数
  */
-vaddr_t KernelSpacePgsMemMgr::kspace_vm_table_t::alloc_available_space(uint64_t size,uint32_t target_vaddroffset)
+vaddr_t KspaceMapMgr::kspace_vm_table_t::alloc_available_space(uint64_t size,uint32_t target_vaddroffset)
 {
     if(size==0||size%_4KB_SIZE||target_vaddroffset>=_1GB_SIZE||target_vaddroffset%_4KB_SIZE)return 0;
     enum PHY_SEG_MAX_PAGE:uint8_t{

@@ -44,13 +44,13 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
 #ifdef KERNEL_MODE
     phyaddr_t bitmap_phybase=gPhyPgsMemMgr.pages_alloc(
         (bitmap_size_in_64bit_units*8)/4096,
-        phygpsmemmgr_t::KERNEL
+        phymemspace_mgr::KERNEL
     );
     if(bitmap_phybase==0)
     {
         return OS_OUT_OF_MEMORY;
     }
-    this->bitmap=(uint64_t*)KernelSpacePgsMemMgr::pgs_remapp(bitmap_phybase,bitmap_size_in_64bit_units*8,KSPACE_RW_ACCESS);
+    this->bitmap=(uint64_t*)KspaceMapMgr::pgs_remapp(bitmap_phybase,bitmap_size_in_64bit_units*8,KSPACE_RW_ACCESS);
 #endif
 #ifdef USER_MODE
     this->bitmap=(uint64_t*)malloc((bitmap_size_in_64bit_units*8));
@@ -65,8 +65,8 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
     byte_bitmap_base=nullptr;
     #ifdef KERNEL_MODE
    phyaddr_t bitmap_phyaddr;
-    int status=KernelSpacePgsMemMgr::v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
-    status=KernelSpacePgsMemMgr::pgs_remapped_free((vaddr_t)this->bitmap);
+    int status=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
+    status=KspaceMapMgr::pgs_remapped_free((vaddr_t)this->bitmap);
     
     if(status!=OS_SUCCESS){
         KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
@@ -287,9 +287,9 @@ int kpoolmemmgr_t::HCB_v2::second_stage_Init()
 {
     if(this==&kpoolmemmgr_t::first_linekd_heap)return OS_BAD_FUNCTION;
     #ifdef KERNEL_MODE
-    phybase=gPhyPgsMemMgr.pages_alloc(total_size_in_bytes/4096,phygpsmemmgr_t::KERNEL);
+    phybase=gPhyPgsMemMgr.pages_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL);
     if(phybase==0)return OS_OUT_OF_MEMORY;
-    vbase=(vaddr_t)KernelSpacePgsMemMgr::pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
+    vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
     if(vbase==0){
         gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
         return OS_MEMRY_ALLOCATE_FALT;
@@ -312,7 +312,7 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
     bitmap_controller.~HCB_bitmap();
     int status=OS_SUCCESS;
     #ifdef KERNEL_MODE
-    status=KernelSpacePgsMemMgr::pgs_remapped_free(vbase);
+    status=KspaceMapMgr::pgs_remapped_free(vbase);
     #endif
     #ifdef USER_MODE
     std::free((void*)vbase);

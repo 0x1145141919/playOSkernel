@@ -2,13 +2,17 @@
 #include "memory/Memory.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/kpoolmemmgr.h"
+#include "memory/phyaddr_accessor.h"    
 #include "os_error_definitions.h"
-#include "memory/PagetbHeapMgr.h"
 #include "linker_symbols.h"
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
+AddressSpace::AddressSpace()
+{
+}
 static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 int AddressSpace::enable_VM_desc(VM_DESC desc)
+    
 {
     /**
      * 先搞参数检验
@@ -34,28 +38,36 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
     三个工具匿名函数，用于设置4级页表项，返回值是错误码 
     */
     // 匿名函数替代原来的get_sub_tb函数
-    auto get_sub_tb = [](PageTableEntryUnion& entry, PageTableEntryType Clevel) -> PageTableEntryUnion* {
-        if(Clevel==PageTableEntryType::PT) return nullptr;
+    bool alloced=false;
+    auto get_sub_tb = [&alloced](PageTableEntryUnion& entry, PageTableEntryType Clevel) -> phyaddr_t {
+        if(Clevel==PageTableEntryType::PT) return 0;
         constexpr uint32_t _4KB_SIZE=0x1000;
         PageTableEntryUnion  copy=entry;
         if(copy.raw&PageTableEntry::P_MASK){
-            phyaddr_t subtb_phybase=copy.pte.page_addr*_4KB_SIZE;
+            phyaddr_t subtb_phybase=(copy.pte.page_addr*_4KB_SIZE) & PHYS_ADDR_MASK;
             if(Clevel==PageTableEntryType::PDPT||Clevel==PageTableEntryType::PD)
             {
-                if(copy.raw&PDE::PS_MASK) return nullptr;
+                if(copy.raw&PDE::PS_MASK) return 0;
             }
-            return (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(subtb_phybase);
+            
+            return subtb_phybase;
         }else{
             phyaddr_t entry_to_alloc_phybase=0;
-            PageTableEntryUnion*subtb=nullptr;
-            subtb=(PageTableEntryUnion*)gPgtbHeapMgr.alloc_pgtb(entry_to_alloc_phybase);
-            if(!subtb) return nullptr;
+            entry_to_alloc_phybase = phymemspace_mgr::pages_alloc(1, phymemspace_mgr::KERNEL, 12);
+            if(!entry_to_alloc_phybase) return 0;
+            
+            // 初始化新分配的页表内存为0
+            for(uint16_t i=0; i<512; i++) {
+                uint64_t offset = sizeof(PageTableEntryUnion) * i;
+                PhyAddrAccessor::writeu64(entry_to_alloc_phybase + offset, 0);
+            }
+            alloced=true;
             entry.raw=0;
             entry.pte.KERNELbit=1;
             entry.pte.present=1;
             entry.pte.RWbit=1;
             entry.pte.page_addr=entry_to_alloc_phybase/_4KB_SIZE;
-            return subtb;
+            return entry_to_alloc_phybase;
         }
     };
 
@@ -73,26 +85,60 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
             kputsSecure("AddressSpace::enable_VM_desc::_4lv_pte_4KB_entries_set:cross page directory boundary not allowed\n");
             return OS_OUT_OF_RANGE;//跨页目录边界不允许
         }//这里权限问题待解决
-       PageTableEntryUnion pml4e=pml4eroottb[pml4_index];
-        PageTableEntryUnion* pdpte_tb=get_sub_tb(pml4e,PageTableEntryType::PML4);
-        if(!pdpte_tb)return OS_OUT_OF_MEMORY;
-        PageTableEntryUnion* pde_tb=get_sub_tb(pdpte_tb[pdpte_index],PageTableEntryType::PDPT);
-        if(!pde_tb)return OS_OUT_OF_MEMORY;
-        PageTableEntryUnion* pte_tb=get_sub_tb(pde_tb[pde_index],PageTableEntryType::PD);
-        if(!pte_tb)return OS_OUT_OF_MEMORY;
+        
+        PageTableEntryUnion pml4e=pml4eroottb[pml4_index];
+        phyaddr_t pdpte_tb_phyaddr = get_sub_tb(pml4e,PageTableEntryType::PML4);
+        if(!pdpte_tb_phyaddr)return OS_OUT_OF_MEMORY;
+        
+        uint64_t pdpte_offset = sizeof(PageTableEntryUnion) * pdpte_index;
+        uint64_t pdpte_addr = pdpte_tb_phyaddr + pdpte_offset;
+        uint64_t pdpte_raw = PhyAddrAccessor::readu64(pdpte_addr);
+        PageTableEntryUnion pdpte_entry = { .raw = pdpte_raw };
+        
+        phyaddr_t pde_tb_phyaddr = get_sub_tb(pdpte_entry, PageTableEntryType::PDPT);
+        if(!pde_tb_phyaddr)
+            if((pdpte_raw&PDPTE::PS_MASK)&&(pdpte_raw&PageTableEntry::P_MASK))
+                return OS_RESOURCE_CONFILICT;
+            else 
+                return OS_OUT_OF_MEMORY;
+        // 如果在get_sub_tb中修改了pdpte_entry（例如分配了新的页表），需要将修改写回
+        if (!(pdpte_raw & PageTableEntry::P_MASK)&&(pdpte_entry.pdpte.present)) {
+            PhyAddrAccessor::writeu64(pdpte_addr, pdpte_entry.raw);
+        }
+        
+        uint64_t pde_offset = sizeof(PageTableEntryUnion) * pde_index;
+        uint64_t pde_addr = pde_tb_phyaddr + pde_offset;
+        uint64_t pde_raw = PhyAddrAccessor::readu64(pde_addr);
+        PageTableEntryUnion pde_entry = { .raw = pde_raw };
+        
+        phyaddr_t pte_tb_phyaddr = get_sub_tb(pde_entry, PageTableEntryType::PD);
+        if(!pte_tb_phyaddr)
+            if(pde_raw&PageTableEntry::P_MASK&&pde_raw&PDE::PS_MASK)
+            return OS_OUT_OF_MEMORY;
+            else return OS_RESOURCE_CONFILICT;
+        // 如果在get_sub_tb中修改了pde_entry（例如分配了新的页表），需要将修改写回
+        if (!(pde_raw & PageTableEntry::P_MASK)&&(pde_entry.pde.present)) {
+            PhyAddrAccessor::writeu64(pde_addr, pde_entry.raw);
+        }
+        
         //设置pte项
         for(uint16_t i=0;i<count;i++){
-            PageTableEntryUnion& pte_entry=pte_tb[pte_index+i];
+            uint64_t pte_offset = sizeof(PageTableEntryUnion) * (pte_index + i);
+            uint64_t pte_addr = pte_tb_phyaddr + pte_offset;
+            
+            PageTableEntryUnion pte_entry;
             pte_entry.raw=0;
             pte_entry.pte.present=1;
             pte_entry.pte.RWbit=desc_access.is_writeable;
             pte_entry.pte.KERNELbit=!desc_access.is_kernel;
-            pte_entry.pte.page_addr=phybase/0x1000+i;
+            pte_entry.pte.page_addr=(phybase/0x1000)+i;
             pte_entry.pte.PWT=atompages_cache_table_idx.PWT;
             pte_entry.pte.PCD=atompages_cache_table_idx.PCD;
             pte_entry.pte.PAT=atompages_cache_table_idx.PAT;
             pte_entry.pte.EXECUTE_DENY=!desc_access.is_executable;
             pte_entry.pte.global=desc_access.is_global;
+            
+            PhyAddrAccessor::writeu64(pte_addr, pte_entry.raw);
         }
         return OS_SUCCESS;
     };
@@ -112,27 +158,46 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
 
         if (pde_index + count > 512) return OS_OUT_OF_RANGE;  // 不能跨 PD 边界
 
-        PageTableEntryUnion  pml4e   = pml4eroottb[pml4_index];
-        PageTableEntryUnion* pdpte_tb = get_sub_tb(pml4e, PageTableEntryType::PML4);
-        if (!pdpte_tb) return OS_OUT_OF_MEMORY;
-        PageTableEntryUnion* pde_tb  = get_sub_tb(pdpte_tb[pdpte_index], PageTableEntryType::PDPT);
-        if (!pde_tb) return OS_OUT_OF_MEMORY;
-
-        // 关键：如果上级 PDE 已经存在且 PS=1（已经是 2MB），不允许覆盖（防止拆大页）
-        // 如果不存在则创建并设 PS=1
-        for (uint16_t i = 0; i < count; i++) {
-            PageTableEntryUnion& pde = pde_tb[pde_index + i];
-            pde.raw = 0;
-            pde.raw|=PDE::PS_MASK;
-            pde.pde2MB.present = 1;
-            pde.pde2MB.RWbit = desc_access.is_writeable;
-            pde.pde2MB.KERNELbit = !desc_access.is_kernel;
-            pde.pde2MB._2mb_Addr = phybase / _2MB_SIZE + i;
-            pde.pde2MB.PWT=atompages_cache_table_idx.PWT;
-            pde.pde2MB.PCD=atompages_cache_table_idx.PCD;
-            pde.pde2MB.PAT=atompages_cache_table_idx.PAT;
-            pde.pde2MB.EXECUTE_DENY=!desc_access.is_executable;
-            pde.pde2MB.global=desc_access.is_global;
+        PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
+        phyaddr_t pdpte_tb_phyaddr = get_sub_tb(pml4e, PageTableEntryType::PML4);
+        if (!pdpte_tb_phyaddr) return OS_OUT_OF_MEMORY;
+        
+        uint64_t pdpte_offset = sizeof(PageTableEntryUnion) * pdpte_index;
+        uint64_t pdpte_addr = pdpte_tb_phyaddr + pdpte_offset;
+        uint64_t pdpte_raw = PhyAddrAccessor::readu64(pdpte_addr);
+        PageTableEntryUnion pdpte_entry = { .raw = pdpte_raw };
+        
+        phyaddr_t pde_tb_phyaddr = get_sub_tb(pdpte_entry, PageTableEntryType::PDPT);
+        if(!pde_tb_phyaddr)
+            if((pdpte_raw&PDPTE::PS_MASK)&&(pdpte_raw&PageTableEntry::P_MASK))
+                return OS_RESOURCE_CONFILICT;
+            else 
+                return OS_OUT_OF_MEMORY;
+            
+        // 如果在get_sub_tb中修改了pdpte_entry（例如分配了新的页表），需要将修改写回
+        if (!(pdpte_raw & PageTableEntry::P_MASK)&&(pdpte_entry.pdpte.present)) {
+            PhyAddrAccessor::writeu64(pdpte_addr, pdpte_entry.raw);
+        }
+        
+        // 设置pde项
+        for(uint16_t i=0;i<count;i++){
+            uint64_t pde_offset = sizeof(PageTableEntryUnion) * (pde_index + i);
+            uint64_t pde_addr = pde_tb_phyaddr + pde_offset;
+            
+            PageTableEntryUnion pde_entry;
+            pde_entry.raw = 0;
+            pde_entry.raw |= PDE::PS_MASK;
+            pde_entry.pde2MB.present = 1;
+            pde_entry.pde2MB.RWbit = desc_access.is_writeable;
+            pde_entry.pde2MB.KERNELbit = !desc_access.is_kernel;
+            pde_entry.pde2MB._2mb_Addr = phybase / _2MB_SIZE + i;
+            pde_entry.pde2MB.PWT = atompages_cache_table_idx.PWT;
+            pde_entry.pde2MB.PCD = atompages_cache_table_idx.PCD;
+            pde_entry.pde2MB.PAT = atompages_cache_table_idx.PAT;
+            pde_entry.pde2MB.EXECUTE_DENY = !desc_access.is_executable;
+            pde_entry.pde2MB.global = desc_access.is_global;
+            
+            PhyAddrAccessor::writeu64(pde_addr, pde_entry.raw);
         }
         return OS_SUCCESS;
     };
@@ -152,23 +217,39 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
 
         if (pdpte_index + count > 512) return OS_OUT_OF_RANGE;  // 不能跨 PML4 边界
 
-        PageTableEntryUnion  pml4e   = pml4eroottb[pml4_index];
-        PageTableEntryUnion* pdpte_tb = get_sub_tb(pml4e, PageTableEntryType::PML4);
-        if (!pdpte_tb) return OS_OUT_OF_MEMORY;
-
-        for (uint16_t i = 0; i < count; i++) {
-            PageTableEntryUnion& pdpte = pdpte_tb[pdpte_index + i];
-            pdpte.raw = 0;
-            pdpte.raw|=PDPTE::PS_MASK;
-            pdpte.pdpte1GB.present       = 1;
-            pdpte.pdpte1GB.RWbit         = desc_access.is_writeable;
-            pdpte.pdpte1GB.KERNELbit     = !desc_access.is_kernel;
-            pdpte.pdpte1GB._1GB_Addr     = (phybase / _1GB_SIZE) + i;                           // 必须置 1
-            pdpte.pdpte1GB.PWT           = atompages_cache_table_idx.PWT;
-            pdpte.pdpte1GB.PCD           = atompages_cache_table_idx.PCD;
-            pdpte.pdpte1GB.PAT           = atompages_cache_table_idx.PAT;  // 1GB 大页 PAT 在 bit 12
-            pdpte.pdpte1GB.EXECUTE_DENY  = !desc_access.is_executable;
-            pdpte.pdpte1GB.global        = desc_access.is_global;
+        PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
+        phyaddr_t pdpte_tb_phyaddr = get_sub_tb(pml4e, PageTableEntryType::PML4);
+        if (!pdpte_tb_phyaddr) return OS_OUT_OF_MEMORY;
+        
+        uint64_t pdpte_offset = sizeof(PageTableEntryUnion) * pdpte_index;
+        uint64_t pdpte_addr = pdpte_tb_phyaddr + pdpte_offset;
+        uint64_t pdpte_raw = PhyAddrAccessor::readu64(pdpte_addr);
+        PageTableEntryUnion pdpte_entry = { .raw = pdpte_raw };
+        
+        // 如果在get_sub_tb中修改了pml4e（例如分配了新的页表），需要将修改写回
+        if (!(pdpte_raw & PageTableEntry::P_MASK)&&(pml4e.pml4.present)) {
+            PhyAddrAccessor::writeu64(pdpte_addr, pml4e.raw);
+        }
+        
+        // 设置pdpte项
+        for(uint16_t i=0;i<count;i++){
+            uint64_t pdpte_offset = sizeof(PageTableEntryUnion) * (pdpte_index + i);
+            uint64_t pdpte_addr = pdpte_tb_phyaddr + pdpte_offset;
+            
+            PageTableEntryUnion pdpte_entry;
+            pdpte_entry.raw = 0;
+            pdpte_entry.raw |= PDPTE::PS_MASK;
+            pdpte_entry.pdpte1GB.present = 1;
+            pdpte_entry.pdpte1GB.RWbit = desc_access.is_writeable;
+            pdpte_entry.pdpte1GB.KERNELbit = !desc_access.is_kernel;
+            pdpte_entry.pdpte1GB._1GB_Addr = (phybase / _1GB_SIZE) + i;
+            pdpte_entry.pdpte1GB.PWT = atompages_cache_table_idx.PWT;
+            pdpte_entry.pdpte1GB.PCD = atompages_cache_table_idx.PCD;
+            pdpte_entry.pdpte1GB.PAT = atompages_cache_table_idx.PAT;
+            pdpte_entry.pdpte1GB.EXECUTE_DENY = !desc_access.is_executable;
+            pdpte_entry.pdpte1GB.global = desc_access.is_global;
+            
+            PhyAddrAccessor::writeu64(pdpte_addr, pdpte_entry.raw);
         }
         return OS_SUCCESS;
     };
@@ -318,32 +399,15 @@ int AddressSpace::disable_VM_desc(VM_DESC desc)
     )return OS_INVALID_ADDRESS;
     uint64_t currunt_roottb_phyaddr=0;
     asm volatile("mov %%cr3, %0" : "=r"(currunt_roottb_phyaddr));
-    bool will_invalidate_soon=align_down(currunt_roottb_phyaddr, _4KB_SIZE)==this->kspace_pml4_phyaddr;
+    bool will_invalidate_soon=align_down(currunt_roottb_phyaddr, _4KB_SIZE)==this->pml4_phybase;
     PageTableEntryUnion* pml4eroottb = (PageTableEntryUnion*)pml4;
     pgaccess desc_access = desc.access;
     cache_table_idx_struct_t atompages_cache_table_idx = cache_strategy_to_idx(desc_access.cache_strategy);
 
-    // 不分配的 get_sub_tb（只读/不创建），如果对应 entry 未存在则返回 nullptr（表示上级表不存在）
-    auto get_sub_tb_noalloc = [](PageTableEntryUnion& entry, PageTableEntryType Clevel) -> PageTableEntryUnion* {
-        if (Clevel == PageTableEntryType::PT) return nullptr;
-        constexpr uint32_t _4KB_SIZE = 0x1000;
-        PageTableEntryUnion copy = entry;
-        if (copy.raw & PageTableEntry::P_MASK) {
-            // 若上级表存在且不是大页（在需要时检查 PS）
-            phyaddr_t subtb_phybase = copy.pte.page_addr * _4KB_SIZE;
-            if (Clevel == PageTableEntryType::PDPT || Clevel == PageTableEntryType::PD) {
-                if (copy.raw & PDE::PS_MASK) return nullptr; // 已经是大页，上级没有下级表
-            }
-            return (PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(subtb_phybase);
-        } else {
-            // 上级不存在，不要分配，返回 nullptr 表示“空表，视为已清空”
-            return nullptr;
-        }
-    };
     //新增错误码OS_PGTB_FREE_VALIDATION_FAIL
     // 清 4KB PTE 范围（不会分配表，表不存在就认为已清空）
    // ==== 4KB PTE 清理（含物理地址校验 + invlpg） ====
-auto _4lv_pte_4KB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalidate_soon](
+auto _4lv_pte_4KB_entries_clear = [pml4eroottb, will_invalidate_soon](
     phyaddr_t phybase, vaddr_t vaddr_base, uint16_t count) -> int
 {
     if (count == 0 || count > 512) {
@@ -359,82 +423,78 @@ auto _4lv_pte_4KB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalid
 
     if (pte_index + count > 512) return OS_OUT_OF_RANGE;
 
-    // PML4
-    PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
-    PageTableEntryUnion* pdpte_tb = get_sub_tb_noalloc(pml4e, PageTableEntryType::PML4);
-    if (!pdpte_tb) return OS_PGTB_NOT_PRESENT;
-
-    // PDPT
-    PageTableEntryUnion* pde_tb = get_sub_tb_noalloc(pdpte_tb[pdpte_index], PageTableEntryType::PDPT);
-    if (!pde_tb) return OS_PGTB_NOT_PRESENT;
-
-    // PD (PDE)
-    PageTableEntryUnion& pde = pde_tb[pde_index];
-    // 如果 PDE 已经是 2MB 大页则不能在 4KB 层处理，视为校验失败
-    if (pde.raw & PDE::PS_MASK) return OS_PGTB_FREE_VALIDATION_FAIL;
-
-    PageTableEntryUnion* pte_tb = get_sub_tb_noalloc(pde, PageTableEntryType::PD);
-    if (!pte_tb) return OS_PGTB_NOT_PRESENT;
-
-    // 实际清除：先校验物理地址一一对应，然后清零并（可选）立即 invlpg
-    uint64_t expected_page = phybase / _4KB_SIZE;
-    for (uint16_t i = 0; i < count; i++) {
-        PageTableEntryUnion &ent = pte_tb[pte_index + i];
-        if (ent.pte.page_addr != (expected_page + i)) {
-            return OS_PGTB_FREE_VALIDATION_FAIL;
-        }
-        ent.raw = 0;
-        if (will_invalidate_soon) {
-            vaddr_t va = vaddr_base + (vaddr_t)i * _4KB_SIZE;
-            __asm__ __volatile__("invlpg (%0)" :: "r"( (void*)va ) : "memory");
-        }
+    phyaddr_t pdpt_base=pml4eroottb[pml4_index].pml4.pdpte_addr<<12;
+    uint64_t pdpte_raw=PhyAddrAccessor::readu64(pdpt_base+pdpte_index*sizeof(PageTableEntryUnion));
+    if(!(pdpte_raw&PageTableEntry::P_MASK))
+    { 
+        return OS_RESOURCE_CONFILICT;
+    }else {
+        if(pdpte_raw&PDPTE::PS_MASK)return OS_RESOURCE_CONFILICT;
     }
-
-    // 检查 PTE 表是否已空
-    bool pte_all_empty = true;
-    for (int i = 0; i < 512; i++) {
-        if (pte_tb[i].raw != 0) {
-            pte_all_empty = false;
+    phyaddr_t pde_base=align_down(pdpte_raw,_4KB_SIZE)&PHYS_ADDR_MASK;
+    uint64_t pde_raw=PhyAddrAccessor::readu64(pde_base+pde_index*sizeof(PageTableEntryUnion));
+    if(!(pde_raw&PageTableEntry::P_MASK))
+    { 
+        return OS_RESOURCE_CONFILICT;
+    }else {
+        if(pde_raw&PDE::PS_MASK)return OS_RESOURCE_CONFILICT;
+    }
+    phyaddr_t pte_base=align_down(pde_raw,_4KB_SIZE)&PHYS_ADDR_MASK;
+    for(uint16_t i=pte_index;i<pte_index+count;i++)
+    {
+        uint64_t pte_raw=PhyAddrAccessor::readu64(pte_base+i*sizeof(PageTableEntryUnion));
+        if(!(pte_raw&PageTableEntry::P_MASK))
+        {
+            return OS_RESOURCE_CONFILICT;
+        }
+        phyaddr_t pte_phyaddr=align_down(pte_raw,_4KB_SIZE)&PHYS_ADDR_MASK;
+        if(pte_phyaddr!=phybase+(i-pte_index)*_4KB_SIZE)return OS_RESOURCE_CONFILICT;
+        PhyAddrAccessor::writeu64(pte_base+i*sizeof(PageTableEntryUnion),0);
+        vaddr_t vaddr=vaddr_base+(i-pte_index)*_4KB_SIZE;
+        asm volatile("invlpg %0" : : "m"(vaddr));
+    }
+    bool all_clear=true;
+    for(uint16_t i=0;i<512;i++){
+        if(PhyAddrAccessor::readu64(pte_base+i*sizeof(PageTableEntryUnion))){
+            all_clear=false;
             break;
         }
     }
-    if (!pte_all_empty) return OS_SUCCESS;
-
-    // 释放 PTE 表（使用你原有字段名）
-    int status = gPgtbHeapMgr.free_pgtb_by_phyaddr(pde.pde.pt_addr << 12);
-    if (status != OS_SUCCESS) return status;
-    pde.raw = 0; // 同时清除 PDE
-
-    // 检查 PDE 表是否全空
-    bool pde_all_empty = true;
-    for (int i = 0; i < 512; i++) {
-        if (pde_tb[i].raw != 0) {
-            pde_all_empty = false;
-            break;
+    if(all_clear)
+     {
+        phymemspace_mgr::pages_recycle(pte_base,1);
+        PhyAddrAccessor::writeu64(pde_base+pde_index*sizeof(PageTableEntryUnion),0);
+        
+        // Check if the entire PD is now empty and can be recycled
+        bool pd_all_clear = true;
+        for (uint16_t i = 0; i < 512; i++) {
+            if (PhyAddrAccessor::readu64(pde_base + i * sizeof(PageTableEntryUnion))) {
+                pd_all_clear = false;
+                break;
+            }
         }
-    }
-    if (!pde_all_empty) return OS_SUCCESS;
-
-    // 释放 PDE 表（对应 PDPT 的条目）
-    status = gPgtbHeapMgr.free_pgtb_by_phyaddr(pdpte_tb[pdpte_index].pdpte.PD_addr << 12);
-    if (status != OS_SUCCESS) return status;
-    pdpte_tb[pdpte_index].raw = 0;
-
-    // 检查 PDPT 是否全空
-    bool pdpte_all_empty = true;
-    for (int i = 0; i < 512; i++) {
-        if (pdpte_tb[i].raw != 0) {
-            pdpte_all_empty = false;
-            break;
+        
+        if (pd_all_clear) {
+            // Recycle the entire PD page
+            phymemspace_mgr::pages_recycle(pde_base, 1);
+            PhyAddrAccessor::writeu64(pdpt_base + pdpte_index * sizeof(PageTableEntryUnion), 0);
+            
+            // Check if the entire PDPT is now empty and can be recycled
+            bool pdpt_all_clear = true;
+            for (uint16_t i = 0; i < 512; i++) {
+                if (PhyAddrAccessor::readu64(pdpt_base + i * sizeof(PageTableEntryUnion))) {
+                    pdpt_all_clear = false;
+                    break;
+                }
+            }
+            
+            if (pdpt_all_clear) {
+                // Recycle the entire PDPT page
+                phymemspace_mgr::pages_recycle(pdpt_base, 1);
+                PhyAddrAccessor::writeu64((phyaddr_t)pml4eroottb + pml4_index * sizeof(PageTableEntryUnion), 0);
+            }
         }
-    }
-    if (!pdpte_all_empty) return OS_SUCCESS;
-
-    // 释放 PDPT（对应 PML4 的条目）
-    status = gPgtbHeapMgr.free_pgtb_by_phyaddr(pml4e.pml4.pdpte_addr << 12);
-    if (status != OS_SUCCESS) return status;
-    pml4eroottb[pml4_index].raw = 0;
-
+     }
     return OS_SUCCESS;
 };
 
@@ -442,7 +502,7 @@ auto _4lv_pte_4KB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalid
 
     // 清 2MB PDE 范围（若上级不存在则视为已清空）
     // ==== 2MB PDE 清理（含物理地址校验 + invlpg） ====
-auto _4lv_pde_2MB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalidate_soon](
+auto _4lv_pde_2MB_entries_clear = [pml4eroottb, will_invalidate_soon](
     phyaddr_t phybase, vaddr_t vaddr_base, uint16_t count) -> int
 {
     if (count == 0 || count > 512) {
@@ -458,37 +518,47 @@ auto _4lv_pde_2MB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalid
 
     if (pde_index + count > 512) return OS_OUT_OF_RANGE;
 
-    PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
-    PageTableEntryUnion* pdpte_tb = get_sub_tb_noalloc(pml4e, PageTableEntryType::PML4);
-    if (!pdpte_tb) return OS_PGTB_NOT_PRESENT;
-
-    PageTableEntryUnion& pdpte = pdpte_tb[pdpte_index];
-    PageTableEntryUnion* pde_tb = get_sub_tb_noalloc(pdpte, PageTableEntryType::PDPT);
-    if (!pde_tb) return OS_PGTB_NOT_PRESENT;
-
+    phyaddr_t pdpt_base = pml4eroottb[pml4_index].pml4.pdpte_addr << 12;
+    uint64_t pdpte_raw = PhyAddrAccessor::readu64(pdpt_base + pdpte_index * sizeof(PageTableEntryUnion));
+    
+    // 检查PDPT条目是否存在且不是1GB大页
+    if (!(pdpte_raw & PageTableEntry::P_MASK)) {
+        return OS_RESOURCE_CONFILICT;
+    } else {
+        if (pdpte_raw & PDPTE::PS_MASK) return OS_RESOURCE_CONFILICT;
+    }
+    
+    phyaddr_t pde_base = align_down(pdpte_raw, _4KB_SIZE) & PHYS_ADDR_MASK;
+    
     // 逐项校验：条目必须为 2MB（PS=1）并且物理地址对齐匹配
     uint64_t expected_2mb = phybase / _2MB_SIZE;
     for (int i = 0; i < count; i++) {
-        PageTableEntryUnion &ent = pde_tb[pde_index + i];
-        if (!(ent.raw & PDE::PS_MASK)) {
+        uint64_t pde_raw = PhyAddrAccessor::readu64(pde_base + (pde_index + i) * sizeof(PageTableEntryUnion));
+        
+        // 检查是否为2MB大页
+        if (!(pde_raw & PDE::PS_MASK)) {
             // 不是 2MB 大页，校验不通过
             return OS_PGTB_FREE_VALIDATION_FAIL;
         }
-        if (ent.pde2MB._2mb_Addr != (expected_2mb + i)) {
+        
+        // 解析2MB页的物理地址
+        uint64_t pde_phyaddr = align_down(pde_raw, _2MB_SIZE) & PHYS_ADDR_MASK;
+        if (pde_phyaddr != (expected_2mb + i) * _2MB_SIZE) {
             return OS_PGTB_FREE_VALIDATION_FAIL;
         }
+        
         // 清零并立即 invlpg（按 2MB 大页的虚地址）
-        ent.raw = 0;
+        PhyAddrAccessor::writeu64(pde_base + (pde_index + i) * sizeof(PageTableEntryUnion), 0);
         if (will_invalidate_soon) {
             vaddr_t va = vaddr_base + (vaddr_t)i * _2MB_SIZE;
-            __asm__ __volatile__("invlpg (%0)" :: "r"( (void*)va ) : "memory");
+            asm volatile("invlpg %0" : : "m"(va));
         }
     }
 
     // 检查 PDE 表是否全空
     bool pde_all_empty = true;
     for (int i = 0; i < 512; i++) {
-        if (pde_tb[i].raw != 0) {
+        if (PhyAddrAccessor::readu64(pde_base + i * sizeof(PageTableEntryUnion))) {
             pde_all_empty = false;
             break;
         }
@@ -496,24 +566,37 @@ auto _4lv_pde_2MB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalid
     if (!pde_all_empty) return OS_SUCCESS;
 
     // 释放 PDE 表
-    int status = gPgtbHeapMgr.free_pgtb_by_phyaddr(pdpte.pdpte.PD_addr << 12);
-    if (status != OS_SUCCESS) return status;
-    pdpte.raw = 0;
+    phymemspace_mgr::pages_recycle(pde_base, 1);
+    PhyAddrAccessor::writeu64(pdpt_base + pdpte_index * sizeof(PageTableEntryUnion), 0);
 
     // 检查 PDPT 是否全空
-    bool pdpte_all_empty = true;
+    bool pdpt_all_empty = true;
     for (int i = 0; i < 512; i++) {
-        if (pdpte_tb[i].raw != 0) {
-            pdpte_all_empty = false;
+        if (PhyAddrAccessor::readu64(pdpt_base + i * sizeof(PageTableEntryUnion))) {
+            pdpt_all_empty = false;
             break;
         }
     }
-    if (!pdpte_all_empty) return OS_SUCCESS;
+    if (!pdpt_all_empty) return OS_SUCCESS;
 
     // 释放 PDPT
-    status = gPgtbHeapMgr.free_pgtb_by_phyaddr(pml4e.pml4.pdpte_addr << 12);
-    if (status != OS_SUCCESS) return status;
-    pml4eroottb[pml4_index].raw = 0;
+    phymemspace_mgr::pages_recycle(pdpt_base, 1);
+    PhyAddrAccessor::writeu64((phyaddr_t)pml4eroottb + pml4_index * sizeof(PageTableEntryUnion), 0);
+    
+    // 检查 PML4 是否全空（理论上不太可能发生）
+    bool pml4_all_empty = true;
+    for (int i = 0; i < 512; i++) {
+        if (PhyAddrAccessor::readu64((phyaddr_t)pml4eroottb + i * sizeof(PageTableEntryUnion))) {
+            pml4_all_empty = false;
+            break;
+        }
+    }
+    
+    // 如果整个PML4也为空（理论上不太可能发生），记录日志但不处理
+    if (pml4_all_empty) {
+        // 这里不需要实际回收根页表，只是记录信息
+        // 因为根页表还在使用中
+    }
 
     return OS_SUCCESS;
 };
@@ -521,7 +604,7 @@ auto _4lv_pde_2MB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalid
 
     // 清 1GB PDPTE 范围
    // ==== 1GB PDPT 清理（含物理地址校验 + invlpg） ====
-auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_invalidate_soon](
+auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
     phyaddr_t phybase, vaddr_t vaddr_base, uint64_t count) -> int {
     if (count == 0 || count > 512) {
         kputsSecure("AddressSpace::disable_VM_desc::_4lv_pdpte_1GB_entries_clear: invalid count\n");
@@ -535,36 +618,54 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, get_sub_tb_noalloc, will_inval
 
     if (pdpte_index + count > 512) return OS_OUT_OF_RANGE;
 
-    PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
-    PageTableEntryUnion* pdpte_tb = get_sub_tb_noalloc(pml4e, PageTableEntryType::PML4);
-    if (!pdpte_tb) return OS_PGTB_NOT_PRESENT;
+    phyaddr_t pdpt_base = pml4eroottb[pml4_index].pml4.pdpte_addr << 12;
 
     // 逐项校验并清除
     uint64_t expected_1gb = phybase / _1GB_SIZE;
     for (uint16_t i = 0; i < count; i++) {
-        PageTableEntryUnion &ent = pdpte_tb[pdpte_index + i];
+        uint64_t pdpte_raw = PhyAddrAccessor::readu64(pdpt_base + (pdpte_index + i) * sizeof(PageTableEntryUnion));
+        
         // 必须是 1GB 大页（PS=1）且物理地址一致
-        if (!(ent.raw & PDPTE::PS_MASK)) return OS_PGTB_FREE_VALIDATION_FAIL;
-        if (ent.pdpte1GB._1GB_Addr != (expected_1gb + i)) return OS_PGTB_FREE_VALIDATION_FAIL;
-        ent.raw = 0;
+        if (!(pdpte_raw & PDPTE::PS_MASK)) return OS_PGTB_FREE_VALIDATION_FAIL;
+        
+        // 解析1GB页的物理地址
+        uint64_t pdpte_phyaddr = align_down(pdpte_raw, _1GB_SIZE) & PHYS_ADDR_MASK;
+        if (pdpte_phyaddr != (expected_1gb + i) * _1GB_SIZE) return OS_PGTB_FREE_VALIDATION_FAIL;
+        
+        PhyAddrAccessor::writeu64(pdpt_base + (pdpte_index + i) * sizeof(PageTableEntryUnion), 0);
         if (will_invalidate_soon) {
             vaddr_t va = vaddr_base + (vaddr_t)i * _1GB_SIZE;
-            __asm__ __volatile__("invlpg (%0)" :: "r"( (void*)va ) : "memory");
+            asm volatile("invlpg %0" : : "m"(va));
         }
     }
 
-    // 如果前面所有 pdpte 条目都被清了，检测并回收 pdpt（根据你的示例）
-    bool is_all_empty = true;
+    // 检查 PDPT 是否全空
+    bool pdpt_all_empty = true;
     for (uint16_t i = 0; i < 512; i++) {
-        if (pdpte_tb[i].raw != 0) {
-            is_all_empty = false;
+        if (PhyAddrAccessor::readu64(pdpt_base + i * sizeof(PageTableEntryUnion))) {
+            pdpt_all_empty = false;
             break;
         }
     }
-    if (is_all_empty) {
-        int status = gPgtbHeapMgr.free_pgtb_by_phyaddr(pml4e.pml4.pdpte_addr << 12);
-        if (status != OS_SUCCESS) return status;
-        pml4eroottb[pml4_index].raw = 0;
+    if (!pdpt_all_empty) return OS_SUCCESS;
+
+    // 释放 PDPT
+    phymemspace_mgr::pages_recycle(pdpt_base, 1);
+    PhyAddrAccessor::writeu64((phyaddr_t)pml4eroottb + pml4_index * sizeof(PageTableEntryUnion), 0);
+    
+    // 检查 PML4 是否全空（理论上不太可能发生）
+    bool pml4_all_empty = true;
+    for (int i = 0; i < 512; i++) {
+        if (PhyAddrAccessor::readu64((phyaddr_t)pml4eroottb + i * sizeof(PageTableEntryUnion))) {
+            pml4_all_empty = false;
+            break;
+        }
+    }
+    
+    // 如果整个PML4也为空（理论上不太可能发生），记录日志但不处理
+    if (pml4_all_empty) {
+        // 这里不需要实际回收根页表，只是记录信息
+        // 因为根页表还在使用中
     }
 
     return OS_SUCCESS;
@@ -700,18 +801,26 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr)
     lock.read_lock();
     if(pglv_4_or_5 == PAGE_TBALE_LV::LV_4){
         if(pml4_idx>255)goto ret0;// 高一半是内核空间,这里无权限访问
-        PML4Entry pml4_entry=pml4[pml4_idx];
+        PML4Entry pml4_entry=pml4[pml4_idx].pml4;
         if(!pml4_entry.present)goto ret0;
-        PageTableEntryUnion*pdpte_base=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(pml4_entry.pdpte_addr<<12);  
-        PageTableEntryUnion pdpte=pdpte_base[pdpte_idx];
+        phyaddr_t pdpte_base_phyaddr = pml4_entry.pdpte_addr << 12;
+        uint64_t pdpte_raw = PhyAddrAccessor::readu64(pdpte_base_phyaddr + pdpte_idx * sizeof(PageTableEntryUnion));
+        PageTableEntryUnion pdpte;
+        pdpte.raw = pdpte_raw;
         if(!pdpte.pdpte.present)goto ret0;
         else if(pdpte.pdpte.large)goto pdpte_end;
-        PageTableEntryUnion*pde_base=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(pdpte.pdpte.PD_addr<<12);
-        PageTableEntryUnion pde=pde_base[pde_idx];
+        
+        phyaddr_t pde_base_phyaddr = pdpte.pdpte.PD_addr << 12;
+        uint64_t pde_raw = PhyAddrAccessor::readu64(pde_base_phyaddr + pde_idx * sizeof(PageTableEntryUnion));
+        PageTableEntryUnion pde;
+        pde.raw = pde_raw;
         if(!pde.pde.present)goto ret0;
         else if(pde.raw&PDE::PS_MASK)goto pde_end;
-        PageTableEntryUnion*pte_base=(PageTableEntryUnion*)gPgtbHeapMgr.phyaddr_to_vaddr(pde.pde.pt_addr<<12);
-        PageTableEntryUnion pte=pte_base[pte_idx];
+        
+        phyaddr_t pte_base_phyaddr = pde.pde.pt_addr << 12;
+        uint64_t pte_raw = PhyAddrAccessor::readu64(pte_base_phyaddr + pte_idx * sizeof(PageTableEntryUnion));
+        PageTableEntryUnion pte;
+        pte.raw = pte_raw;
         goto pte_end;
     }else{
         return 0;
@@ -732,11 +841,31 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr)
     return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pde_idx)<<21)+(uint64_t(pte_idx)<<12)+(vaddr&(_4KB_SIZE-1));
 }
 
-int AddressSpace::Init()
+void AddressSpace::load_pml4_to_cr3()
 {
-    if(this!=&gKernelSpace)return OS_BAD_FUNCTION;
-    pml4=&gKspacePgsMemMgr.roottbv->pml4;
-    kspace_pml4_phyaddr=gKspacePgsMemMgr.root_pml4_phyaddr;
+    asm volatile("mov %0, %%cr3"::"r"(pml4_phybase));
+}
+
+AddressSpace::~AddressSpace()
+{
+    delete[] pml4;
+    pml4_phybase=0;
+}
+int AddressSpace::second_stage_init()
+{
+    
+    pml4=(PageTableEntryUnion *)kpoolmemmgr_t::kalloc(sizeof(PageTableEntryUnion)*512,1,1,12);
+    if(pml4==nullptr)return OS_OUT_OF_MEMORY;
+    kpoolmemmgr_t::clear(pml4);
+    pml4_phybase=kpoolmemmgr_t::get_phy((vaddr_t)pml4);
+    phyaddr_t kspacUPpdpt_phybase=KspaceMapMgr::kspace_uppdpt_phyaddr;
+    PageTableEntryUnion Up_pml4e_template=KspaceMapMgr::high_half_template;
+    for(uint16_t i=0;i<256;i++)
+    {
+        uint64_t raw=Up_pml4e_template.raw;
+        raw|=(kspacUPpdpt_phybase+i*4096)&PHYS_ADDR_MASK;
+        pml4[i].raw=raw;
+    }
     occupyied_size=0;
     return OS_SUCCESS;
 }

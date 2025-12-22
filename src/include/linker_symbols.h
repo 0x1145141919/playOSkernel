@@ -26,7 +26,10 @@ extern uint8_t init_text_begin;
 extern uint8_t init_text_end;
 extern uint8_t init_rodata_begin;
 extern uint8_t init_rodata_end;
-
+extern uint8_t init_data_begin;
+extern uint8_t init_data_end;
+extern uint8_t init_stack_begin;
+extern uint8_t init_stack_end;
 // 主文本段符号
 extern uint8_t text_begin;
 extern uint8_t text_end;
@@ -55,18 +58,15 @@ extern uint8_t _heap_lma;
 extern uint8_t __heap_start;
 extern uint8_t __heap_end;
 
-// 页表堆段符号
-extern uint8_t _pgtb_heap_lma;
-extern uint8_t __pgtbhp_start;
-extern uint8_t __pgtbhp_end;
-
 // 内核日志段符号
 extern uint8_t _klog_lma;
 extern uint8_t __klog_start;
 extern uint8_t __klog_end;
 
-extern uint8_t _pml4_lma;
+
 extern uint8_t _kspace_uppdpt_lma;
+extern uint8_t __kspace_uppdpt_start;
+extern uint8_t __kspace_uppdpt_end;
 // 获取地址的宏定义，方便使用
 #define GET_SYMBOL_ADDR(symbol) ((void*)&symbol)
 

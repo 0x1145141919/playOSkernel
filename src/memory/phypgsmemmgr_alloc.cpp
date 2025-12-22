@@ -8,264 +8,47 @@ static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
 static constexpr uint64_t PAGES_4KB_PER_1GB = PAGES_4KB_PER_2MB * PAGES_2MB_PER_1GB; // 262144
 static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
-int phygpsmemmgr_t::pages_state_set(phyaddr_t base,
-                                    uint64_t num_of_4kbpgs,
-                                    page_state_t state,
-                                pages_state_set_flags_t flags)
+
+// 添加辅助结构体和函数
+struct phyaddr_in_idx_t
 {
-    if (num_of_4kbpgs == 0) return 0;
+    uint64_t _1gb_idx=0;
+    uint16_t _2mb_idx=0;
+    uint16_t _4kb_idx=0;
+    
+    // 添加默认构造函数
+    phyaddr_in_idx_t() : _1gb_idx(0), _2mb_idx(0), _4kb_idx(0) {}
+};
 
-    // ---- Step 1: 切段 ----
-    seg_to_pages_info_pakage_t pak;
-    int r = phymemseg_to_pacage(base, num_of_4kbpgs, pak);
-    if (r != 0) return r;
 
-    // 定义四个lambda函数替换原来的成员函数
-    auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
-        page_size1gb_t& p1 = *top_1gb_table->get(idx_1gb);
-        if (!p1.flags.is_sub_valid)
-        {
-            page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];
-            if(!sub2){
-                return OS_OUT_OF_MEMORY;
+
+
+
+int phymemspace_mgr::del_no_atomig_1GB_pg(uint64_t _1idx)
+{
+    page_size1gb_t*pg=top_1gb_table->get(_1idx);
+    if(pg==nullptr)return OS_NOT_EXIST;
+    if(pg->sub2mbpages==nullptr)return OS_MEMORY_FREE_FAULT;
+    page_size2mb_t* _2base=pg->sub2mbpages;
+    for(uint16_t i=0;i<512;i++){
+        page_size2mb_t*_2=_2base+i;
+        if(_2->flags.is_sub_valid){
+            if(_2->sub_pages==nullptr)return OS_MEMORY_FREE_FAULT;
+            page_size4kb_t*_4base=_2->sub_pages;
+            for(uint16_t j=0;j<512;j++){
+                page_size4kb_t*_4=_4base+j;
+                if(_4->flags.state!=RESERVED)return OS_RESOURCE_CONFILICT;//按照文档设计这里必须是reserved才合法，不然应该回炉重造
             }
-
-            kpoolmemmgr_t::clear(sub2);
-
-            p1.sub2mbpages = sub2;
-            p1.flags.is_sub_valid = 1;
-            p1.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_PARTIAL:PARTIAL;
+            delete[] _4base;
         }
-
-        return OS_SUCCESS;
-    };
-
-    auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2) -> int {
-        if (!p2.flags.is_sub_valid)
-        {
-            page_size4kb_t* sub4 = new page_size4kb_t[PAGES_4KB_PER_2MB];
-            if (!sub4){return OS_OUT_OF_MEMORY;}
-
-            kpoolmemmgr_t::clear(sub4);
-
-            p2.sub_pages = sub4;
-            p2.flags.is_sub_valid = 1;
-            p2.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_PARTIAL:PARTIAL;
-        }
-        return 0;
-    };
-
-    auto try_fold_2mb_lambda = [flags](page_size2mb_t &p2) -> int {
-        // 没有子表就是原子 2MB 页，无法向上折叠
-        if (!p2.flags.is_sub_valid)
-            return 0;
-
-        bool all_free = true;
-        bool all_full = true;
-
-        for (uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++)
-        {
-            uint8_t st = p2.sub_pages[i].flags.state;
-            if(flags.if_Split_atomic_in_mmio_partial)
-            {
-            if (st != MMIO_FREE) all_free = false;
-            // all_used_or_full 要求每个子页不是 FREE（即已被占用或被标为 FULL）
-            if (st == MMIO_FREE) all_full = false;
-            }else{
-                if (st != FREE) all_free = false;
-                if (st == FREE) all_full = false;
-            }
-
-            if (!all_free && !all_full)
-                break; // 已经确定是 PARTIAL
-        }
-
-        if (all_free)
-        {
-            // 全部 free：可以删除子表，恢复为原子 FREE 2MB
-            delete[] p2.sub_pages;
-            p2.sub_pages = nullptr;
-            p2.flags.is_sub_valid = 0;
-            p2.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_FREE:FREE;
-            return 1;
-        }
-
-        if (all_full)
-        {
-            // 全部被占用或被标为 FULL：将该 2MB 标记为 FULL
-            // **注意：不删除子表**（后续可能会有引用计数变动）
-            p2.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_FULL:FULL;
-            // 保持 p2.flags.is_sub_valid == 1
-            return 1;
-        }
-
-        // 混合：部分占用，标记为 PARTIAL，不删除子表
-        p2.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_PARTIAL:PARTIAL;
-        return 0;
-    };
-
-    auto try_fold_1gb_lambda = [&try_fold_2mb_lambda,flags](page_size1gb_t &p1) -> int {
-        // 没有子表就是原子 1GB 页，无法向上折叠
-        if (!p1.flags.is_sub_valid)
-            return 0;
-
-        bool all_free = true;
-        bool all_full = true;
-
-        for (uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++)
-        {
-            page_size2mb_t &p2 = p1.sub2mbpages[i];
-
-            // 如果 p2 是非原子（有子表），尝试折叠它（这样可以把能 collapse 的 2MB 变为 FREE/FULL）
-            if (p2.flags.is_sub_valid)
-            {
-                try_fold_2mb_lambda(p2);
-                // try_fold_2mb 会在 all-free 或 all-used 情况下修改 p2.flags.state，
-                // 且在 all_free 情况下会释放 p2.sub_pages 并把 is_sub_valid 置 0。
-            }
-
-            // 现在基于 p2.flags.state 决策：
-            if(flags.if_Split_atomic_in_mmio_partial==false)
-            {
-            if (p2.flags.state != FREE) all_free = false;
-            if (p2.flags.state != FULL) all_full = false;
-            }else{
-                if (p2.flags.state != MMIO_FREE) all_free = false;
-                if (p2.flags.state != MMIO_FULL) all_full = false;
-            }
-
-            if (!all_free && !all_full)
-                break; // 已经确定是 PARTIAL
-        }
-
-        if (all_free)
-        {
-            // 所有 2MB 都是 FREE：删除 1GB 的子表并恢复为原子 FREE
-            delete[] p1.sub2mbpages;
-            p1.sub2mbpages = nullptr;
-            p1.flags.is_sub_valid = 0;
-            p1.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_FREE:FREE;
-            return 1;
-        }
-
-        if (all_full)
-        {
-            // 所有 2MB 都是 FULL：标记该 1GB 为 FULL
-            // **注意：不删除子表**（保留子表以便未来 refcount 增加或子页操作）
-            p1.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_FULL:FULL;
-            // 保持 p1.flags.is_sub_valid == 1
-            return 1;
-        }
-
-        // 混合：标记为 PARTIAL，保留子表
-        p1.flags.state = flags.if_Split_atomic_in_mmio_partial?MMIO_PARTIAL:PARTIAL;
-        return 0;
-    };
-
-    auto _1gb_pages_state_set_lambda = [state,flags](uint64_t entry_base_idx, uint64_t num_of_1gbpgs) -> int {
-        int status = OS_SUCCESS;
-        for (uint64_t i = 0; i < num_of_1gbpgs; i++) {
-            page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + i);
-            if(_1==nullptr){
-                if(flags.is_blackhole_aclaim){
-                    status=top_1gb_table->enable_idx(entry_base_idx+i);
-                    if(status!=OS_SUCCESS){
-                        //可能是内存不足或者参数非法越界
-                        kputsSecure("_1gb_pages_state_set:unable to alloc memory or out of bound\n");
-                        return OS_FAIL_PAGE_ALLOC;
-                    }
-                    _1=top_1gb_table->get(entry_base_idx+i);
-                }else{//非黑洞模式不得创建
-                    kputsSecure("_1gb_pages_state_set:attempt to create a new entry in no black hole mode\n");
-                    return OS_INVALID_FILE_MODE;
-                }
-            }
-            _1->flags.state = state;
-            if(flags.if_init_ref_count)_1->ref_count=1;
-        }
-        return status;
-    };
-
-    auto _4kb_pages_state_set_lambda = [state,flags](uint64_t entry4kb_base_idx, uint64_t num_of_4kbpgs, page_size4kb_t *base_entry) -> int {
-        for (uint64_t i = 0; i < num_of_4kbpgs; i++) {
-            auto& page_entry = base_entry[entry4kb_base_idx + i];
-            page_entry.flags.state = state;
-            if(flags.if_init_ref_count)page_entry.ref_count=1;
-        }
-        return OS_SUCCESS;
-    };
-
-    auto _2mb_pages_state_set_lambda = [state,flags](uint64_t entry2mb_base_idx, uint64_t num_of_2mbpgs, page_size2mb_t *base_entry) -> int {
-        for (uint64_t i = 0; i < num_of_2mbpgs; i++) {
-            auto& page_entry = base_entry[entry2mb_base_idx + i];
-            page_entry.flags.state = state;
-            if(flags.if_init_ref_count)page_entry.ref_count=1;
-        }
-        return OS_SUCCESS;
-    };
-
-    // ---- Step 2: 遍历每个段条目 ----
-    for (int i = 0; i < 5; i++)
-    {
-        auto &ent = pak.entryies[i];
-        if (ent.num_of_pages == 0) continue;
-
-        uint64_t pg4k_start = ent.base >> 12;
-
-        if (ent.page_size_in_byte == _1GB_PG_SIZE)
-        {
-            // ===== 1GB 级 =====
-            uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
-
-            r = _1gb_pages_state_set_lambda(idx_1gb, ent.num_of_pages);
-            if (r != 0) return r;
-        }
-        else if (ent.page_size_in_byte == _2MB_PG_SIZE)
-        {
-            // ===== 2MB 级 =====
-            uint64_t idx_2mb = pg4k_start / PAGES_4KB_PER_2MB;
-            uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
-
-            if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)
-            return r;
-
-            // ---- 调用真正的 2MB setter ----
-            page_size2mb_t *p2 = top_1gb_table->get(idx_1gb)->sub2mbpages;
-            r = _2mb_pages_state_set_lambda(idx_2mb % PAGES_2MB_PER_1GB,
-                                     ent.num_of_pages,
-                                     p2);
-            if (r != OS_SUCCESS) return r;
-            try_fold_1gb_lambda(*top_1gb_table->get(idx_1gb));
-        }
-        
-        else if (ent.page_size_in_byte == _4KB_PG_SIZE)
-        {
-            // ===== 4KB 级 =====
-            uint64_t idx_2mb = pg4k_start / PAGES_4KB_PER_2MB;
-            uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
-
-            page_size1gb_t &p1 = *top_1gb_table->get(idx_1gb);
-            if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)return r;
-            page_size2mb_t &p2ent = p1.sub2mbpages[idx_2mb%PAGES_2MB_PER_1GB];
-            if((r=ensure_2mb_subtable_lambda(p2ent))!=OS_SUCCESS)return r;
-          
-            // ---- 调用 4KB setter ----
-            page_size4kb_t *p4 = p2ent.sub_pages;
-            r = _4kb_pages_state_set_lambda(pg4k_start % PAGES_4KB_PER_2MB,
-                                     ent.num_of_pages,
-                                     p4);
-            if (r != 0) return r;
-                try_fold_2mb_lambda(p2ent);
-                try_fold_1gb_lambda(p1);
-            
-        }
+        else  if(_2->flags.state!=RESERVED)return OS_RESOURCE_CONFILICT;
     }
-
+    delete[] _2base;
+    top_1gb_table->release(_1idx);
     return OS_SUCCESS;
 }
 
-
-int phygpsmemmgr_t::phymemseg_to_pacage(
+int phymemspace_mgr::phymemseg_to_pacage(
         phyaddr_t base,
         uint64_t num_of_4kbpgs,
         seg_to_pages_info_pakage_t& pak)
@@ -348,493 +131,110 @@ int phygpsmemmgr_t::phymemseg_to_pacage(
 
     return OS_SUCCESS;
 }
-phyaddr_t phygpsmemmgr_t::pages_alloc(uint64_t numof_4kbpgs, phygpsmemmgr_t::page_state_t state, uint8_t align_log2)
+phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::page_state_t state, uint8_t align_log2)
 {
-    if(state==KERNEL||state==USER_ANONYMOUS||state==USER_FILE)
+    if(state==KERNEL||state==USER_ANONYMOUS||state==USER_FILE||state==DMA)
     {
         module_global_lock.lock();
         
-        // 定义inner_pages_alloc作为lambda表达式
-        auto inner_pages_alloc = [numof_4kbpgs,align_log2](
-            phyaddr_t &result_base,
-            page_state_t state
-        ) -> int {
-            if (numof_4kbpgs == 0)
-                return OS_MEMRY_ALLOCATE_FALT;
-            if(align_log2 > 30)return OS_INVALID_PARAMETER;
-            // 自动向上取最近对齐粒度
-            uint8_t a = [align_log2]()->uint8_t{
-                if (align_log2 < 12) return 12;          // 最小对齐是 4KB
-                if (align_log2 <= 20) return 21;         // 12~20 → 上调到 2MB
-                if (align_log2 <= 29) return 30;         // 21~29 → 上调到 1GB
-
-                // 30以上按1GB处理（你的要求）
-                return 30;
-            }();
-            int status;
-            phyaddr_t result = 0;
-            PHYSEG current_seg;
-            for(auto it = physeg_list->begin(); it != physeg_list->end(); ++it){
-                current_seg=*it;
-                if(current_seg.type==DRAM_SEG) {
-                    struct phyaddr_in_idx_t
-                        {
-                        uint64_t _1gb_idx=0;
-                        uint16_t _2mb_idx=0;
-                        uint16_t _4kb_idx=0;
-                        
-                        // 添加默认构造函数
-                        phyaddr_in_idx_t() : _1gb_idx(0), _2mb_idx(0), _4kb_idx(0) {}
-                        };
-                    auto idx_to_phyaddr=[](phyaddr_in_idx_t phyaddr_in_idx)->phyaddr_t{
-                            return (phyaddr_in_idx._1gb_idx*512*512+phyaddr_in_idx._2mb_idx*512+phyaddr_in_idx._4kb_idx)<<12;
-                        };  
-                        auto phyaddr_to_idx=[](phyaddr_t phyaddr)->phyaddr_in_idx_t{
-                            phyaddr_in_idx_t phyaddr_in_idx;
-                            phyaddr_in_idx._4kb_idx=(phyaddr>>12)&511;
-                            phyaddr_in_idx._2mb_idx=(phyaddr>>21)&511;
-                            phyaddr_in_idx._1gb_idx=phyaddr>>30;
-                            return phyaddr_in_idx;
-                        };
-                        auto is_idx_equal=[](phyaddr_in_idx_t a,phyaddr_in_idx_t b)->bool{
-                            return a._1gb_idx==b._1gb_idx&&a._2mb_idx==b._2mb_idx&&a._4kb_idx==b._4kb_idx;
-                        };
-                    auto align4kb_pages_search = [current_seg, &result, idx_to_phyaddr, phyaddr_to_idx]
-                    (uint64_t num_of_4kbpgs) -> int {
-
-    const uint64_t P4K = 1ULL << 12;
-    const uint64_t P2M = 512ULL * P4K;
-    const uint64_t P1G = 512ULL * P2M;
-
-    phyaddr_in_idx_t begin = phyaddr_to_idx(current_seg.base);
-    phyaddr_in_idx_t irritator = begin;
-    phyaddr_t end_phyaddr_excl = current_seg.base + current_seg.seg_size; // exclusive
-
-    uint64_t accummulated_count = 0;
-    phyaddr_in_idx_t candidate_result = irritator;
-    phyaddr_t expected_next_phys = idx_to_phyaddr(irritator); // 下一个期望的物理页起始地址
-
-    // iterate over 1GB entries
-    for (uint64_t i1 = irritator._1gb_idx; ; ++i1) {
-        phyaddr_in_idx_t temp_idx;
-        temp_idx._1gb_idx = i1;
-        temp_idx._2mb_idx = 0;
-        temp_idx._4kb_idx = 0;
-        if (!(idx_to_phyaddr(temp_idx) < end_phyaddr_excl)) break;
+        if (numof_4kbpgs == 0) {
+            module_global_lock.unlock();
+            return 0;
+        }
+        if(align_log2 > 30) {
+            module_global_lock.unlock();
+            return 0;
+        }
         
-        phyaddr_in_idx_t cur1;
-        cur1._1gb_idx = i1;
-        cur1._2mb_idx = 0;
-        cur1._4kb_idx = 0;
-        if (idx_to_phyaddr(cur1) >= end_phyaddr_excl) break;
+        // 自动向上取最近对齐粒度
+        uint8_t a = [align_log2]()->uint8_t{
+            if (align_log2 < 12) return 12;          // 最小对齐是 4KB
+            if (align_log2 <= 20) return 21;         // 12~20 → 上调到 2MB
+            if (align_log2 <= 29) return 30;         // 21~29 → 上调到 1GB
 
-        page_size1gb_t* p1 = top_1gb_table->get(cur1._1gb_idx);
-        if (p1 == nullptr) {
-            kputsSecure("Consistency violation between top_1gb_table and physeg_list");
-            return OS_MEMRY_ALLOCATE_FALT;
-        }
-
-        if (!(p1->flags.is_sub_valid)) { // 原子 1GB
-            phyaddr_t p1_base = idx_to_phyaddr(cur1);
-            if (p1->flags.state == FREE) {
-                // 连续性检查
-                if (accummulated_count == 0 || p1_base != expected_next_phys) {
-                    candidate_result = cur1;
-                    accummulated_count = 512 * 512;
-                } else {
-                    accummulated_count += 512 * 512;
-                }
-                phyaddr_in_idx_t next_idx;
-                next_idx._1gb_idx = i1 + 1;
-                next_idx._2mb_idx = 0;
-                next_idx._4kb_idx = 0;
-                expected_next_phys = idx_to_phyaddr(next_idx);
-                if (accummulated_count >= num_of_4kbpgs) {
-                    result = idx_to_phyaddr(candidate_result);
-                    return OS_SUCCESS;
-                }
-            } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
-                accummulated_count = 0;
-                phyaddr_in_idx_t next_idx;
-                next_idx._1gb_idx = i1 + 1;
-                next_idx._2mb_idx = 0;
-                next_idx._4kb_idx = 0;
-                expected_next_phys = idx_to_phyaddr(next_idx);
-            } else  { // 其他注册/保留/非法
-                kputsSecure("illegal pagestate when scanning 1gb atomic entry");
-                    result =0;
-                    return OS_MEMRY_ALLOCATE_FALT;
-            }
-            continue;
-        }else if (p1->flags.state == FULL) {
-            phyaddr_in_idx_t next_idx;
-            next_idx._1gb_idx = i1 + 1;
-            next_idx._2mb_idx = 0;
-            next_idx._4kb_idx = 0;
-            accummulated_count = 0;
-            expected_next_phys = idx_to_phyaddr(next_idx);
-            continue;
-        }
-        if(p1->flags.state == PARTIAL)
-        {// PARTIAL at 1GB: need to iterate 2MB entries inside this 1GB
-        page_size2mb_t* p2base = p1->sub2mbpages;
-        if (p2base == nullptr) {
-            kputsSecure("Inconsistent PARTIAL 1GB without sub2mbpages");
-            return OS_MEMRY_ALLOCATE_FALT;
-        }
-
-        uint16_t start2 = 0;
-        if (i1 == begin._1gb_idx) start2 = begin._2mb_idx;
-        for (uint16_t i2 = start2; i2 < 512; ++i2) {
-            phyaddr_in_idx_t cur2;
-            cur2._1gb_idx = i1;
-            cur2._2mb_idx = i2;
-            cur2._4kb_idx = 0;
-            if (idx_to_phyaddr(cur2) >= end_phyaddr_excl) break;
-
-            page_size2mb_t* p2 = p2base + i2;
-            if (!p2->flags.is_sub_valid) { // 原子 2MB
-                phyaddr_t p2_base = idx_to_phyaddr(cur2);
-                if (p2->flags.state == FREE) {
-                    if (accummulated_count == 0 || p2_base != expected_next_phys) {
-                        candidate_result = cur2;
-                        accummulated_count = 512;
-                    } else {
-                        accummulated_count += 512;
-                    }
-                    expected_next_phys = p2_base + 512ULL * P4K;
-                    if (accummulated_count >= num_of_4kbpgs) {
-                        result = idx_to_phyaddr(candidate_result);
-                        return OS_SUCCESS;
-                    }
-                } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
-                           p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST) {
-                    accummulated_count = 0;
-                    phyaddr_in_idx_t next_idx;
-                    next_idx._1gb_idx = i1;
-                    next_idx._2mb_idx = i2 + 1;
-                    next_idx._4kb_idx = 0;
-                    expected_next_phys = idx_to_phyaddr(next_idx);
-                } else {//剩下的类型不应该出现在dram里面
-                    kputsSecure("illegal pagestate when scanning 2mb entry");
-                    result =0;
-                    return OS_MEMRY_ALLOCATE_FALT;
-                }
-                continue;
-            }else if (p2->flags.state == FULL) {
-                accummulated_count = 0;
-                phyaddr_in_idx_t next_idx;
-            next_idx._1gb_idx = i1;
-            next_idx._2mb_idx = i2 + 1;
-            next_idx._4kb_idx = 0;
-            expected_next_phys = idx_to_phyaddr(next_idx);
-            }
-            if(p2->flags.state == PARTIAL)
-            {// PARTIAL at 2MB: iterate 4KB entries
-            page_size4kb_t* p4base = p2->sub_pages;
-            if (p4base == nullptr) {
-                kputsSecure("Inconsistent PARTIAL 2MB without sub_pages");
-                return OS_MEMRY_ALLOCATE_FALT;
-            }
-
-            uint16_t start4 = 0;
-            if (i1 == begin._1gb_idx && i2 == begin._2mb_idx) start4 = begin._4kb_idx;
-            for (uint16_t i4 = start4; i4 < 512; ++i4) {
-                phyaddr_in_idx_t cur4;
-                cur4._1gb_idx = i1;
-                cur4._2mb_idx = i2;
-                cur4._4kb_idx = i4;
-                if (idx_to_phyaddr(cur4) >= end_phyaddr_excl) break;
-
-                page_size4kb_t* p4 = p4base + i4;
-                if (p4->flags.is_sub_valid) {
-                    // 4KB 层不应当有 sub_valid（按你的注释），视为一致性错误
-                    kputsSecure("4KB entry marked is_sub_valid unexpectedly");
-                    return OS_MEMRY_ALLOCATE_FALT;
-                }
-
-                phyaddr_t p4_base = idx_to_phyaddr(cur4);
-                if (p4->flags.state == FREE) {
-                    if (accummulated_count == 0 || p4_base != expected_next_phys) {
-                        candidate_result = cur4;
-                        accummulated_count = 1;
-                    } else {
-                        ++accummulated_count;
-                    }
-                    expected_next_phys = p4_base + P4K;
-                    if (accummulated_count >= num_of_4kbpgs) {
-                        result = idx_to_phyaddr(candidate_result);
-                        return OS_SUCCESS;
-                    }
-                } else if (p4->flags.state == KERNEL || p4->flags.state == USER_ANONYMOUS ||
-                           p4->flags.state == USER_FILE || p4->flags.state == KERNEL_PERSIST) {
-                    accummulated_count = 0;
-                    expected_next_phys = p4_base + P4K;
-                } else { //剩下的类型不应该出现在DRAM段里面
-                    kputsSecure("illegal pagestate when scanning 1GB entry");
-                    result =0;
-                    return OS_MEMRY_ALLOCATE_FALT;
-                }
-            } // end for i4
-
-            }else{
-                kputsSecure("illegal pagestate when scanning 2MB entry"); 
-                result =0;
-                return OS_MEMRY_ALLOCATE_FALT;
-            }
-        } // end for i2
-        }else{
-            kputsSecure("illegal pagestate when scanning 1GB entry in dram seg");
-            result =0;
-            return OS_MEMRY_ALLOCATE_FALT;
-        }
-    } // end for i1
-
-    // 未找到连续区
-    return OS_MEMRY_ALLOCATE_FALT;
-};
-
-                    auto align2mb_pages_search = [current_seg, &result, idx_to_phyaddr, phyaddr_to_idx](uint64_t num_of_2mbpgs) -> int {
-    phyaddr_t begin_phyaddr_incl = current_seg.base;
-    phyaddr_t end_phyaddr_excl = current_seg.base + current_seg.seg_size;
-    phyaddr_in_idx_t begin = phyaddr_to_idx(begin_phyaddr_incl);
-    phyaddr_in_idx_t irritator = begin;
-    phyaddr_t expected_next_phys = begin_phyaddr_incl;
-    phyaddr_in_idx_t candidate_result;
-    uint64_t accummulated_count = 0;
-
-    for (uint64_t i1 = irritator._1gb_idx; ; ++i1) {
-        phyaddr_in_idx_t cur1;
-        cur1._1gb_idx = i1;
-        cur1._2mb_idx = 0;
-        cur1._4kb_idx = 0;
-        if (idx_to_phyaddr(cur1) >= end_phyaddr_excl) break;
-
-        page_size1gb_t *p1 = top_1gb_table->get(i1);
-        if (p1 == nullptr) continue;
-
-        if (!p1->flags.is_sub_valid) { // 原子 1GB
-            phyaddr_t p1_base = idx_to_phyaddr(cur1);
-            if (p1->flags.state == FREE) {
-                if (accummulated_count == 0 || p1_base != expected_next_phys) {
-                    candidate_result = cur1;
-                    accummulated_count = PAGES_2MB_PER_1GB; // 512
-                } else {
-                    accummulated_count += PAGES_2MB_PER_1GB;
-                }
-                expected_next_phys = p1_base + _1GB_PG_SIZE;
-                if (accummulated_count >= num_of_2mbpgs) {
-                    result = idx_to_phyaddr(candidate_result);
-                    return OS_SUCCESS;
-                }
-            } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
-                phyaddr_in_idx_t next_idx;
-                next_idx._1gb_idx = i1 + 1;
-                next_idx._2mb_idx = 0;
-                next_idx._4kb_idx = 0;
-                accummulated_count = 0;
-                expected_next_phys = idx_to_phyaddr(next_idx);
-            } else { // 非法
-                kputsSecure("illegal pagestate when scanning 1GB atomic entry");
-                result = 0;
-                return OS_MEMRY_ALLOCATE_FALT;
-            }
-            continue;
-        } else if (p1->flags.state == FULL) {
-            phyaddr_in_idx_t next_idx;
-            next_idx._1gb_idx = i1 + 1;
-            next_idx._2mb_idx = 0;
-            next_idx._4kb_idx = 0;
-            accummulated_count = 0;
-            expected_next_phys = idx_to_phyaddr(next_idx);
-            continue;
-        }
-
-        if (p1->flags.state == PARTIAL || p1->flags.state == MMIO_PARTIAL) {
-            page_size2mb_t *p2base = p1->sub2mbpages;
-            if (p2base == nullptr) {
-                kputsSecure("Inconsistent PARTIAL 1GB without sub2mbpages");
-                return OS_MEMRY_ALLOCATE_FALT;
-            }
-
-            uint16_t start2 = 0;
-            if (i1 == begin._1gb_idx) start2 = begin._2mb_idx;
-            for (uint16_t i2 = start2; i2 < 512; ++i2) {
-                phyaddr_in_idx_t cur2;
-                cur2._1gb_idx = i1;
-                cur2._2mb_idx = i2;
-                cur2._4kb_idx = 0;
-                if (idx_to_phyaddr(cur2) >= end_phyaddr_excl) break;
-
-                page_size2mb_t* p2 = p2base + i2;
-                if (!p2->flags.is_sub_valid) { // 原子 2MB
-                    phyaddr_t p2_base = idx_to_phyaddr(cur2);
-                    if (p2->flags.state == FREE) {
-                        if (accummulated_count == 0 || p2_base != expected_next_phys) {
-                            candidate_result = cur2;
-                            accummulated_count = 1;
-                        } else {
-                            ++accummulated_count;
-                        }
-                        expected_next_phys = p2_base + _2MB_PG_SIZE;
-                        if (accummulated_count >= num_of_2mbpgs) {
-                            result = idx_to_phyaddr(candidate_result);
-                            return OS_SUCCESS;
-                        }
-                    } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
-                               p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST) {
-                        phyaddr_in_idx_t next_idx;
-                        next_idx._1gb_idx = i1;
-                        next_idx._2mb_idx = i2 + 1;
-                        next_idx._4kb_idx = 0;
-                        accummulated_count = 0;
-                        expected_next_phys = idx_to_phyaddr(next_idx);
-                    } else {
-                        kputsSecure("illegal pagestate when scanning 2mb entry");
-                        result = 0;
-                        return OS_MEMRY_ALLOCATE_FALT;
-                    }
-                    continue;
-                } else if (p2->flags.state == FULL) {
-                    phyaddr_in_idx_t next_idx;
-                    next_idx._1gb_idx = i1;
-                    next_idx._2mb_idx = i2 + 1;
-                    next_idx._4kb_idx = 0;
-                    accummulated_count = 0;
-                    expected_next_phys = idx_to_phyaddr(next_idx);
-                } else {
-                    kputsSecure("illegal pagestate when scanning 2MB entry");
-                    result = 0;
-                    return OS_MEMRY_ALLOCATE_FALT;
-                }
-            } // end for i2
-        } else {
-            kputsSecure("illegal pagestate when scanning 1GB entry in dram seg");
-            result = 0;
-            return OS_MEMRY_ALLOCATE_FALT;
-        }
-    } // end for i1
-
-    return OS_MEMRY_ALLOCATE_FALT;
-};
-
-auto align1gb_pages_search = [current_seg, &result, idx_to_phyaddr, phyaddr_to_idx](uint64_t num_of_1gbpgs) -> int {
-    phyaddr_t begin_phyaddr_incl = current_seg.base;
-    phyaddr_t end_phyaddr_excl = current_seg.base + current_seg.seg_size;
-    phyaddr_in_idx_t begin = phyaddr_to_idx(begin_phyaddr_incl);
-    phyaddr_in_idx_t irritator = begin;
-    phyaddr_t expected_next_phys = begin_phyaddr_incl;
-    phyaddr_in_idx_t candidate_result;
-    uint64_t accummulated_count = 0;
-
-    for (uint64_t i1 = irritator._1gb_idx; ; ++i1) {
-        phyaddr_in_idx_t cur1;
-        cur1._1gb_idx = i1;
-        cur1._2mb_idx = 0;
-        cur1._4kb_idx = 0;
-        if (idx_to_phyaddr(cur1) >= end_phyaddr_excl) break;
-
-        page_size1gb_t *p1 = top_1gb_table->get(i1);
-        if (p1 == nullptr) continue;
-
-        if (!p1->flags.is_sub_valid) { // 原子 1GB
-            phyaddr_t p1_base = idx_to_phyaddr(cur1);
-            if (p1->flags.state == FREE) {
-                if (accummulated_count == 0 || p1_base != expected_next_phys) {
-                    candidate_result = cur1;
-                    accummulated_count = 1;
-                } else {
-                    ++accummulated_count;
-                }
-                expected_next_phys = p1_base + _1GB_PG_SIZE;
-                if (accummulated_count >= num_of_1gbpgs) {
-                    result = idx_to_phyaddr(candidate_result);
-                    return OS_SUCCESS;
-                }
-            } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
-                phyaddr_in_idx_t next_idx;
-                next_idx._1gb_idx = i1 + 1;
-                next_idx._2mb_idx = 0;
-                next_idx._4kb_idx = 0;
-                accummulated_count = 0;
-                expected_next_phys = idx_to_phyaddr(next_idx);
-            } else { // 非法
-                kputsSecure("illegal pagestate when scanning 1GB atomic entry");
-                result = 0;
-                return OS_MEMRY_ALLOCATE_FALT;
-            }
-            continue;
-        } else if (p1->flags.state == FULL) {
-            phyaddr_in_idx_t next_idx;
-            next_idx._1gb_idx = i1 + 1;
-            next_idx._2mb_idx = 0;
-            next_idx._4kb_idx = 0;
-            accummulated_count = 0;
-            expected_next_phys = idx_to_phyaddr(next_idx);
-            continue;
-        } else {
-            kputsSecure("illegal pagestate when scanning 1GB entry in dram seg");
-            result = 0;
-            return OS_MEMRY_ALLOCATE_FALT;
-        }
-    } // end for i1
-
-    return OS_MEMRY_ALLOCATE_FALT;
-};
-                    
-                    if(a==12)
-                    {
-                        status=align4kb_pages_search(numof_4kbpgs);
-                        if(status==OS_SUCCESS)goto search_success;
-                        else continue;
-                    }else if (a==21)
-                    {
-                        status=align2mb_pages_search(align_up(numof_4kbpgs,PAGES_4KB_PER_2MB)/PAGES_4KB_PER_2MB);
-                        if(status==OS_SUCCESS)goto search_success;
-                        else continue;
-                    }else if(a==30){
-                        uint64_t num_of_1gbpgs=align_up(numof_4kbpgs,PAGES_4KB_PER_1GB)/PAGES_4KB_PER_1GB;
-                        status=align1gb_pages_search(num_of_1gbpgs);
-                        if(status==OS_SUCCESS)goto search_success;
-                        else continue;
-                    }else{
-                        return OS_INVALID_PARAMETER;
-                    }
-                    search_success:
-                    pages_state_set_flags_t flag={.if_init_ref_count=1,.is_blackhole_aclaim=0};
-                    status=pages_state_set(result,numof_4kbpgs,state,flag);
-                    
-                }
-            }
+            // 30以上按1GB处理（你的要求）
+            return 30;
+        }();
+        
+        phyaddr_t result = 0;
+        int status = OS_MEMRY_ALLOCATE_FALT;
+        auto it = physeg_list->begin();
+        PHYSEG current_seg = *it;
+        for(; it != physeg_list->end(); ++it){
             
-        };
+            if(current_seg.type == DRAM_SEG) {
+                if(a == 12) {
+                    status = align4kb_pages_search(current_seg, result, numof_4kbpgs);
+                    if(status == OS_SUCCESS) goto search_success;
+                } else if (a == 21) {
+                    status = align2mb_pages_search(current_seg, result, align_up(numof_4kbpgs, PAGES_4KB_PER_2MB) / PAGES_4KB_PER_2MB);
+                    if(status == OS_SUCCESS) goto search_success;
+                } else if(a == 30) {
+                    uint64_t num_of_1gbpgs = align_up(numof_4kbpgs, PAGES_4KB_PER_1GB) / PAGES_4KB_PER_1GB;
+                    status = align1gb_pages_search(current_seg, result, num_of_1gbpgs);
+                    if(status == OS_SUCCESS) goto search_success;
+                } else {
+                    module_global_lock.unlock();
+                    return 0;
+                }
+            }
+        }
         
-        phyaddr_t result_addr;
-        int status=inner_pages_alloc(result_addr,state);
+        // 未找到合适的内存区域
         module_global_lock.unlock();
-        if(status==OS_SUCCESS)return (phyaddr_t)result_addr;
+        return 0;
+        
+        search_success:
+        pages_state_set_flags_t flag = {
+            .op=pages_state_set_flags_t::normal,
+            .params={
+                .if_init_ref_count=1,
+                .if_mmio=0
+            }};
+        status = pages_state_set(result, numof_4kbpgs, state, flag);
+        switch(state){
+            case KERNEL:{
+                current_seg.statistics.kernel+=numof_4kbpgs;
+                statisitcs.kernel+=numof_4kbpgs;break;
+            }
+            case USER_FILE:{
+                current_seg.statistics.user_file+=numof_4kbpgs;
+                statisitcs.user_file+=numof_4kbpgs;break;}
+            case USER_ANONYMOUS:{
+                current_seg.statistics.user_anonymous+=numof_4kbpgs;
+                statisitcs.user_anonymous+=numof_4kbpgs;break;}
+            case DMA:{
+                current_seg.statistics.dma+=numof_4kbpgs;
+                statisitcs.dma+=numof_4kbpgs;break;
+            }
+        }
+        module_global_lock.unlock();
+        if(status == OS_SUCCESS) return result;
         return 0;
     }
 
-    module_global_lock.unlock();    
-    return 0;
+    
+    return OS_INVALID_PARAMETER;
     
 }
 
-int phygpsmemmgr_t::pages_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
+int phymemspace_mgr::pages_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
 {
     module_global_lock.lock();
-    uint64_t out_reserveed_count=0;
-    int status=scan_reserved_contiguous(phybase,numof_4kbpgs,out_reserveed_count);
-    if(status!=OS_SUCCESS||out_reserveed_count!=numof_4kbpgs)
-    {
+    PHYSEG seg=get_physeg_by_addr(phybase);
+    if(seg.type!=MMIO_SEG){
         module_global_lock.unlock();
-        return OS_MMIO_REGIST_FAIL;
+        return OS_INVALID_ADDRESS;
     }
-    status=inner_mmio_regist(phybase,numof_4kbpgs);
+    pages_state_set_flags_t flags={
+        .op=pages_state_set_flags_t::normal,
+        .params={
+            .if_init_ref_count=1,
+            .if_mmio=1
+        }
+    };
+    
+    int status=pages_state_set(phybase, numof_4kbpgs, MMIO, flags);  
     module_global_lock.unlock();
     return status;
 }
@@ -849,3 +249,143 @@ static inline uint8_t normalize_align_log2(uint8_t log2)
     return 30;
 }
 
+int phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs, seg_type_t type, blackhole_acclaim_flags_t flags)
+{
+    if(base%4096!=0)return OS_INVALID_PARAMETER;
+    PHYSEG newseg={.base=base, .seg_size=numof_4kbpgs*4096,.flags=0,.type=type, };
+    module_global_lock.lock();
+    int status=physeg_list->add_seg(newseg);
+    if(status!=OS_SUCCESS)
+    {
+        module_global_lock.unlock();
+        return status;
+    }
+    bool is_mmio=(type==MMIO_SEG);
+    pages_state_set_flags_t flag_set_page={
+        .op=pages_state_set_flags_t::acclaim_backhole,
+        .params={
+            .if_init_ref_count=0,
+            .if_mmio=is_mmio
+        }
+    };
+    page_state_t to_fill_default_state=[type,numof_4kbpgs]()->page_state_t{
+        switch (type)
+        {
+            case DRAM_SEG: {
+                statisitcs.total_allocatable+=numof_4kbpgs;
+                return FREE;
+            }
+            case MMIO_SEG: {
+                statisitcs.total_mmio+=numof_4kbpgs;
+                return MMIO_FREE;
+            }
+            case LOW1MB_SEG: {
+                return LOW1MB;
+            }
+            case FIRMWARE_RESERVED_SEG:{
+                statisitcs.total_firmware+=numof_4kbpgs;
+                return RESERVED;
+            }
+            default: {
+                statisitcs.total_reserved+=numof_4kbpgs;
+                return RESERVED;
+            }
+        }
+    }();
+    status=pages_state_set(
+        base,
+        numof_4kbpgs,
+        to_fill_default_state,
+        flag_set_page
+    );
+    module_global_lock.unlock();
+    return status;
+}
+int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
+{
+    if(base%4096!=0)return OS_INVALID_PARAMETER;
+    module_global_lock.lock();
+    PHYSEG seg;
+    int status=physeg_list->get_seg_by_base(base,seg);
+    if(status!=OS_SUCCESS)
+    {
+        module_global_lock.unlock();
+        return status;
+    }
+    
+    if(seg.type!=DRAM_SEG&&seg.type!=MMIO_SEG){
+        module_global_lock.unlock();
+        return OS_NOT_SUPPORT;//OS_TRY_TO_DELETE_INVALID_PHYSEG
+    }
+    bool is_mmio=(seg.type==MMIO_SEG);
+    if(is_mmio)statisitcs.total_mmio-=seg.statistics.total_pages;
+    else statisitcs.total_allocatable-=seg.statistics.total_pages;  
+    pages_state_set_flags_t flag_set_page={
+        .op=pages_state_set_flags_t::declaim_blackhole,//撤销成黑洞，但是非1GB原子页不能处理
+        .params={
+            .if_init_ref_count=0,
+            .if_mmio=is_mmio
+        }
+    };
+    status=pages_state_set(base,seg.seg_size,RESERVED,flag_set_page);//这个函数里面负责撤销1GB原子页和其它级别的原子页
+    if(status!=OS_SUCCESS){
+        module_global_lock.unlock();
+        return status;
+    }
+    status = physeg_list->del_seg(base);
+    if (status != OS_SUCCESS) {
+        module_global_lock.unlock();
+        return status;
+    }
+
+    // 检查并删除可能悬空的1GB页表项
+    phyaddr_t end = base + seg.seg_size;
+    phyaddr_t align_down_base = align_down(base, _1GB_PG_SIZE);
+    phyaddr_t align_up_end = align_up(end, _1GB_PG_SIZE);
+    if((align_up_end-align_down_base)==_1GB_PG_SIZE){
+        if(!physeg_list->is_seg_have_cover(align_down_base,_1GB_PG_SIZE)){
+            status=del_no_atomig_1GB_pg(align_down_base/_1GB_PG_SIZE);
+            if(status!=OS_SUCCESS)
+            {
+                kputsSecure("[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail\n");
+                module_global_lock.unlock();
+                return status;
+            }
+        }
+    }else{
+        if(!physeg_list->is_seg_have_cover(align_down_base,_1GB_PG_SIZE)){
+            status=del_no_atomig_1GB_pg(align_down_base/_1GB_PG_SIZE);
+            if(status!=OS_SUCCESS)
+            {
+                kputsSecure("[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail\n");
+                module_global_lock.unlock();
+                return status;
+            }
+        }
+        if(!physeg_list->is_seg_have_cover(align_up_end-_1GB_PG_SIZE,_1GB_PG_SIZE))
+        {
+            status=del_no_atomig_1GB_pg((align_up_end-_1GB_PG_SIZE)/_1GB_PG_SIZE);
+            if(status!=OS_SUCCESS)
+            {
+                kputsSecure("[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail\n");
+                module_global_lock.unlock();
+                return status;
+            }
+        }
+    }
+    module_global_lock.unlock();
+    return status;
+}
+int phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_base(phyaddr_t base, PHYSEG &seg)
+{
+    if(m_head==nullptr&&m_tail==nullptr)return OS_NOT_EXIST;
+    for(node *it=m_head;it!=nullptr;it=it->next)
+    {
+        if(it->value.base==base)
+        {
+            seg=it->value;
+            return OS_SUCCESS;
+        }
+    }
+    return OS_NOT_EXIST;
+}

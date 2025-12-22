@@ -121,21 +121,21 @@ public:
         return &e.table->entries[low_index(idx)];
     }
 
-    void release(IndexT idx) {
+    int release(IndexT idx) {
         uint32_t hi = high_index(idx);
         if (hi >= HIGH_ENTRIES)
-            return;
+            return OS_OUT_OF_RANGE;
 
         root_entry& e = m_root[hi];
         if (!e.table)
-            return;
+            return OS_INVALID_ADDRESS;
 
         if (e.table->used_map.bit_get(low_index(idx))==true)
             {
                 e.table->used_map.bit_set(low_index(idx),false);
                 --e.refcnt;
             }
-        else return;
+        else return OS_RERELEASE_ERROR;
         if (e.refcnt == 0) {
             delete e.table;
             e.table = nullptr;
@@ -155,7 +155,7 @@ public:
 template<typename T>
 class list_doubly
 {
-private:
+protected:
     struct node {
         node* prev;
         node* next;

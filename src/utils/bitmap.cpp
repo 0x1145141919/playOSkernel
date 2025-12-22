@@ -1,5 +1,7 @@
 #include "util/Ktemplats.h"
-
+#ifdef KERNEL_MODE
+#include "memory/kpoolmemmgr.h"
+#endif
 void bitmap_t::bit_set(uint64_t bit_idx, bool value)
 {
     if (value)
@@ -243,7 +245,7 @@ void bitmap_t::count_bitmap_used_bit()
 Ktemplats::kernel_bitmap::~kernel_bitmap()
     {
         if (bitmap) {
-            default_kernel_allocator::free(bitmap);
+            delete[] bitmap;
             bitmap = nullptr;
         }
         bitmap_size_in_64bit_units = 0;
@@ -257,11 +259,7 @@ Ktemplats::kernel_bitmap::kernel_bitmap(uint64_t bit_count)
         uint64_t u64_count = (bit_count + 63) >> 6;
         bitmap_size_in_64bit_units = u64_count;
 
-        bitmap = reinterpret_cast<uint64_t*>(
-            default_kernel_allocator::alloc(
-                u64_count * sizeof(uint64_t)
-            )
-        );
+        bitmap = new uint64_t[u64_count];
 
         if (!bitmap) {
             bitmap_size_in_64bit_units = 0;
