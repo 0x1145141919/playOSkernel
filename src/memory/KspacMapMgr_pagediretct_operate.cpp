@@ -9,13 +9,25 @@
 #include "util/OS_utils.h"
 #include "panic.h"
 #include "msr_offsets_definitions.h"
+
+#ifdef USER_MODE
+#include <elf.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 PageTableEntryUnion KspaceMapMgr::kspaceUPpdpt[256*512] __attribute__((section(".kspace_uppdpt")));
 shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info={0};
 bool KspaceMapMgr::is_default_pat_config_enabled=false;
 
 int KspaceMapMgr::Init()
 {
+    #ifdef KERNEL_MODE
     kspace_uppdpt_phyaddr=(phyaddr_t)&_kspace_uppdpt_lma;
+    #endif
     kspace_vm_table=new kspace_vm_table_t();
     int status=0;
     //先注册内核映像
@@ -29,25 +41,106 @@ int KspaceMapMgr::Init()
     };
     vaddr_t result=0;
     uint64_t basic_seg_size=PhyAddrAccessor::BASIC_DESC.SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
+#ifdef KERNEL_MODE
     result=(vaddr_t)pgs_remapp((uint64_t)&KImgphybase,(&text_end-&text_begin),PG_RX,(vaddr_t)&KImgvbase);
     if(result==0)goto regist_segment_fault;
     result=(vaddr_t)pgs_remapp((uint64_t)&_data_lma,(&_data_end-&_data_start),PG_RW,(vaddr_t)&_data_start);
     if(result==0)goto regist_segment_fault;
     result=(vaddr_t)pgs_remapp((uint64_t)&_rodata_lma,(&_rodata_end-&_rodata_start),PG_R,(vaddr_t)&_rodata_start);
     if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp((uint64_t)&_stack_lma,(&__kspace_uppdpt_end-&_stack_bottom),PG_RW,(vaddr_t)&_stack_bottom);
+    result=(vaddr_t)pgs_remapp((uint64_t)&_stack_lma,(&__klog_end-&_stack_bottom),PG_RW,(vaddr_t)&_stack_bottom);
     if(result==0)goto regist_segment_fault;
     result=(vaddr_t)pgs_remapp(0,basic_seg_size,PG_RW,0,true);
     if(result==0)goto regist_segment_fault;
+    PhyAddrAccessor::BASIC_DESC.start=result;
+#endif
+#ifdef USER_MODE
+    // 需要读取kernel.elf的段信息进行模仿完成内核映像的虚拟映射注册
+    // 在用户空间读取kernel.elf文件，分析其段信息并进行模拟映射
+    
+    // 打开kernel.elf文件
+    const char* elf_path = "/home/pangsong/PS_git/OS_pj_uefi/kernel/kernel.elf";
+    int fd = open(elf_path, O_RDONLY);
+    if (fd < 0) {
+        // 如果找不到kernel.elf，使用默认映射
+        return OS_BAD_FUNCTION;
+    }
+
+    // 获取文件大小
+    struct stat sb;
+    if (fstat(fd, &sb) < 0) {
+        close(fd);
+        return OS_BAD_FUNCTION;
+    }
+    
+    // 映射文件到内存
+    void* elf_mapped = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (elf_mapped == MAP_FAILED) {
+        close(fd);
+        return OS_BAD_FUNCTION;
+    }
+
+    // ELF头部指针
+    Elf64_Ehdr* ehdr = (Elf64_Ehdr*)elf_mapped;
+    
+    // 验证ELF头部
+    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 || 
+        ehdr->e_ident[EI_MAG1] != ELFMAG1 || 
+        ehdr->e_ident[EI_MAG2] != ELFMAG2 || 
+        ehdr->e_ident[EI_MAG3] != ELFMAG3) {
+        munmap(elf_mapped, sb.st_size);
+        close(fd);
+        return OS_BAD_FUNCTION;
+    }
+
+    // 获取程序头表
+    Elf64_Phdr* phdr = (Elf64_Phdr*)((char*)elf_mapped + ehdr->e_phoff);
+
+    // 遍历程序头表，映射各段
+    for (int i = 0; i < ehdr->e_phnum; i++) {
+        if (phdr[i].p_type == PT_LOAD && phdr[i].p_memsz > 0&&phdr[i].p_vaddr >= PAGELV4_KSPACE_BASE) {
+            // 根据段的权限设置访问标志
+            pgaccess access;
+            access.is_kernel = 1;
+            access.is_executable = (phdr[i].p_flags & PF_X) ? 1 : 0;
+            access.is_writeable = (phdr[i].p_flags & PF_W) ? 1 : 0;
+            access.is_readable = (phdr[i].p_flags & PF_R) ? 1 : 0;
+            access.is_global = 1;
+            access.cache_strategy = cache_strategy_t::WB;
+
+            // 使用pgs_remapp映射段
+            result = (vaddr_t)pgs_remapp(
+                phdr[i].p_paddr,     // 虚拟地址
+                phdr[i].p_memsz,     // 内存大小
+                access,              // 访问权限
+                phdr[i].p_vaddr      // 映射到相同虚拟地址
+            );
+            
+            if (result == 0) {
+                munmap(elf_mapped, sb.st_size);
+                close(fd);
+                goto regist_segment_fault;
+            }
+        }
+    }
+
+    // 清理资源
+    munmap(elf_mapped, sb.st_size);
+    close(fd);
+    
+#endif
+
+    
     return OS_SUCCESS;  
     regist_segment_fault:
+    return OS_RESOURCE_CONFILICT;
+
 }
 void nonleaf_pgtbentry_flagsset(PageTableEntryUnion&entry){//内核态的是全局的，
     entry.raw=0;
     entry.pte.present=1;
     entry.pte.RWbit=1;
     entry.pte.KERNELbit=0;
-    entry.pte.global=1;
 }
 /**
  * 锁在外部接口中持有
@@ -76,7 +169,9 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
     uint16_t pte_index = (highoffset >> 12) & ((1 << PT_INDEX_BITS) - 1);
 
     PageTableEntryUnion& pdpte = kspaceUPpdpt[pdpte_index];
-    if(pdpte.raw & PDPTE::PS_MASK)return OS_RESOURCE_CONFILICT;
+    if(pdpte.raw & PDPTE::PS_MASK){
+        return OS_RESOURCE_CONFILICT;
+    }
     // 检查页目录指针表项是否存在且不是1GB页面
     if (!(pdpte.raw & PageTableEntry::P_MASK) ){
         nonleaf_pgtbentry_flagsset(pdpte);
@@ -89,17 +184,14 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
             PhyAddrAccessor::writeu64((pd_phyaddr & PHYS_ADDR_MASK) + sizeof(PageTableEntryUnion) * i, 0);
         }
     }
-        
-
-    // 修复位运算优先级问题：使用括号确保正确的运算顺序
-    uint64_t pd_addr = pdpte.pdpte.PD_addr;
-    uint64_t pde_offset = sizeof(PageTableEntryUnion) * pde_index;
-    uint64_t pde_address = (pd_addr << 12) + pde_offset;
-    uint64_t pderaw = PhyAddrAccessor::readu64(pde_address);
+    phyaddr_t pde_loacte_phyaddr = (pdpte.pdpte.PD_addr << 12) +sizeof(PageTableEntryUnion) * pde_index;
+    uint64_t pderaw = PhyAddrAccessor::readu64(pde_loacte_phyaddr);
     PageTableEntryUnion pde = {
         .raw = pderaw
     };
-    if(pderaw & PDE::PS_MASK)return OS_RESOURCE_CONFILICT;
+    if(pderaw & PDE::PS_MASK){
+        return OS_RESOURCE_CONFILICT;
+    }
     // 检查页目录项是否存在且不是2MB页面
     if (!(pderaw & PageTableEntry::P_MASK))
         {
@@ -107,7 +199,7 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
             phyaddr_t pt_phyaddr = phymemspace_mgr::pages_alloc(1,phymemspace_mgr::KERNEL,12);
             if (pt_phyaddr == 0) return OS_OUT_OF_MEMORY;
             pde.pde.pt_addr = pt_phyaddr >> 12;
-            PhyAddrAccessor::writeu64(pde_address, pde.raw);
+            PhyAddrAccessor::writeu64(pde_loacte_phyaddr, pde.raw);
             // 初始化新分配的页表中的所有页表项为0
             for(uint16_t i=0;i<512;i++)
             {
@@ -115,7 +207,7 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
             }
         }
 
-    phyaddr_t pte_phybase = (pd_addr << 12) & PHYS_ADDR_MASK;
+    phyaddr_t pte_phybase = (pde.pde.pt_addr << 12) & PHYS_ADDR_MASK;
     cache_table_idx_struct_t idx = cache_strategy_to_idx(access.cache_strategy);
 
     PageTableEntryUnion template_entry = {
@@ -133,7 +225,7 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
 
     for (uint16_t i = 0; i < count; i++) {
         uint64_t pte_offset = sizeof(PageTableEntryUnion) * (i + pte_index);
-        uint64_t pte_value = template_entry.raw + phybase + (i + pte_index) * _4KB_SIZE;
+        uint64_t pte_value = template_entry.raw + phybase + i * _4KB_SIZE;
         PhyAddrAccessor::writeu64(pte_phybase + pte_offset, pte_value);
     }
 
@@ -551,7 +643,14 @@ int KspaceMapMgr::_4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base, uint16_t coun
 // ====================================================================
 void KspaceMapMgr::enable_DEFAULT_PAT_CONFIG()
 {
-    wrmsr(msr::mtrr::IA32_PAT,DEFAULT_PAT_CONFIG.value);
+    
+    uint32_t value_high=(DEFAULT_PAT_CONFIG.value>>32)&0xffffffff, value_low=DEFAULT_PAT_CONFIG.value&0xffffffff; 
+    asm volatile("wrmsr"
+                 :
+                 : "c" (msr::mtrr::IA32_PAT),
+                   "a" (value_low),
+                   "d" (value_high));
+    
 }
 // 2MB 大页清除（PDE 级别）
 // 要求：不能跨 PDPT 边界（即一次最多清除 512 个 2MB 页，覆盖 1GB）

@@ -1,5 +1,5 @@
 #include "kcirclebufflogMgr.h"
-#include "OS_utils.h"
+#include "util/OS_utils.h"
 extern "C"
 {
     extern char* __klog_start;

@@ -187,7 +187,7 @@ struct PML4Entry
         uint64_t PCD:1;
         uint64_t accessed:1;
         uint64_t reserved:6;
-        uint64_t pdpte_addr:36;
+        uint64_t pdpte_addr:40;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -200,7 +200,7 @@ struct PML4Entry
         uint64_t PCD:1;
         uint64_t accessed:1;
         uint64_t reserved:6;
-        uint64_t PML4_addr:36;
+        uint64_t PML4_addr:40;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -216,7 +216,7 @@ struct PML4Entry
         uint64_t large:1;
         uint64_t global:1;
         uint64_t reserved:3;
-        uint64_t PD_addr:36;
+        uint64_t PD_addr:40;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -234,7 +234,7 @@ struct PML4Entry
         uint64_t reserved:3;//HLAT不考虑这个特性
         uint64_t PAT:1;
         uint64_t reserved3:17;
-        uint64_t _1GB_Addr:18;
+        uint64_t _1GB_Addr:22;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -247,7 +247,7 @@ struct PML4Entry
         uint64_t PCD:1;
         uint64_t accessed:1;
         uint64_t reserved:6;
-        uint64_t pt_addr:36;
+        uint64_t pt_addr:40;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -265,7 +265,7 @@ struct PML4Entry
         uint64_t reserved:3;//HLAT不考虑这个特性
         uint64_t PAT:1;
         uint64_t reserved3:8;
-        uint64_t _2mb_Addr:27;
+        uint64_t _2mb_Addr:31;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));
@@ -278,10 +278,10 @@ struct PML4Entry
         uint64_t PCD:1;
         uint64_t accessed:1;
         uint64_t dirty:1;
-        uint64_t global:1;
         uint64_t PAT:1;
+        uint64_t global:1;
         uint64_t reserved:3;
-        uint64_t page_addr:36;
+        uint64_t page_addr:40;
         uint64_t reserved2:11;
         uint64_t EXECUTE_DENY:1;
     }__attribute__((packed));

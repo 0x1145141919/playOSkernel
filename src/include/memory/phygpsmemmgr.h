@@ -146,13 +146,13 @@ class phymemspace_mgr{
     };
     static Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,page_size1gb_t,__builtin_ctz(MAX_PHYADDR_1GB_PGS_COUNT)-9,9>*top_1gb_table;
     
-    struct seg_to_pages_info_pakage_t{
+    struct seg_to_pages_info_package_t{
         struct pages_info_t{
             phyaddr_t base;
             uint64_t page_size_in_byte;
             uint64_t num_of_pages;
         };
-        pages_info_t entryies[5];//里面的地址顺序是无序的
+        pages_info_t entries[5];//里面的地址顺序是无序的
     };
     /**
      * pages_state_set接口的标志结构体，下面讲解有效参数选择组合以及对应的行为
@@ -177,7 +177,7 @@ class phymemspace_mgr{
         }params;
     };
     static int pages_state_set(phyaddr_t base,uint64_t num_of_4kbpgs,page_state_t state,pages_state_set_flags_t flags);//这个函数对大中页原子free表项的“染色”策略是染色成PARTIAL
-    static int phymemseg_to_pacage(phyaddr_t base,uint64_t num_of_4kbpgs,seg_to_pages_info_pakage_t& pakage);
+    static int phymemseg_to_pacage(phyaddr_t base,uint64_t num_of_4kbpgs,seg_to_pages_info_package_t& pakage);
        
     static int del_no_atomig_1GB_pg(uint64_t _1idx); // 添加新的私有成员函数声明
     //比外部接口多允许UEFI_RUNTIME,ACPI_TABLES,这两个类型，最高支持到30 align_log2对齐
@@ -311,6 +311,9 @@ class phymemspace_mgr{
      */
     
     static int Init();
-    
+    #ifdef USER_MODE
+    phymemspace_mgr();
+    static int print_all_atom_table();//打印top_1gb_table下所有有效表项以及递归打印非原子表项
+    static int print_allseg();//打印 static PHYSEG_LIST_ITEM*physeg_list;所有内容
+    #endif
 };//todo:统计量相关子系统以及公开接口，强制统计量刷新的接口
-extern phymemspace_mgr gPhyPgsMemMgr;

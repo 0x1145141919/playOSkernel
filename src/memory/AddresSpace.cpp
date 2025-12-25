@@ -7,6 +7,7 @@
 #include "linker_symbols.h"
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
+AddressSpace*gKernelSpace;
 AddressSpace::AddressSpace()
 {
 }
@@ -86,7 +87,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
             return OS_OUT_OF_RANGE;//跨页目录边界不允许
         }//这里权限问题待解决
         
-        PageTableEntryUnion pml4e=pml4eroottb[pml4_index];
+        PageTableEntryUnion&pml4e=pml4eroottb[pml4_index];
         phyaddr_t pdpte_tb_phyaddr = get_sub_tb(pml4e,PageTableEntryType::PML4);
         if(!pdpte_tb_phyaddr)return OS_OUT_OF_MEMORY;
         
@@ -158,7 +159,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
 
         if (pde_index + count > 512) return OS_OUT_OF_RANGE;  // 不能跨 PD 边界
 
-        PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
+        PageTableEntryUnion&pml4e = pml4eroottb[pml4_index];
         phyaddr_t pdpte_tb_phyaddr = get_sub_tb(pml4e, PageTableEntryType::PML4);
         if (!pdpte_tb_phyaddr) return OS_OUT_OF_MEMORY;
         
@@ -217,7 +218,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
 
         if (pdpte_index + count > 512) return OS_OUT_OF_RANGE;  // 不能跨 PML4 边界
 
-        PageTableEntryUnion pml4e = pml4eroottb[pml4_index];
+        PageTableEntryUnion&pml4e = pml4eroottb[pml4_index];
         phyaddr_t pdpte_tb_phyaddr = get_sub_tb(pml4e, PageTableEntryType::PML4);
         if (!pdpte_tb_phyaddr) return OS_OUT_OF_MEMORY;
         
@@ -264,7 +265,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
     // initialize
     for (int i = 0; i < 5; i++) {
         result.entryies[i].vbase = 0;
-        result.entryies[i].base = 0;
+        result.entryies[i].phybase = 0;
         result.entryies[i].page_size_in_byte = 0;
         result.entryies[i].num_of_pages = 0;
     }
@@ -277,7 +278,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
 
     if (_1GB_end > _1GB_base) {
         result.entryies[idx].vbase = _1GB_base;
-        result.entryies[idx].base = vmentry.phys_start + (_1GB_base - vmentry.start);
+        result.entryies[idx].phybase = vmentry.phys_start + (_1GB_base - vmentry.start);
         result.entryies[idx].page_size_in_byte = _1GB_SIZE;
         result.entryies[idx].num_of_pages = (_1GB_end - _1GB_base) / _1GB_SIZE;
         idx++;
@@ -294,7 +295,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
         if (_2MB_base > seg_s) {
             if (idx >= 5) return; // defensive, shouldn't happen
             result.entryies[idx].vbase = seg_s;
-            result.entryies[idx].base = vmentry.phys_start + (seg_s - vmentry.start);
+            result.entryies[idx].phybase = vmentry.phys_start + (seg_s - vmentry.start);
             result.entryies[idx].page_size_in_byte = _4KB_SIZE;
             result.entryies[idx].num_of_pages = (_2MB_base - seg_s) / _4KB_SIZE;
             idx++;
@@ -304,7 +305,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
         if (_2MB_end > _2MB_base) {
             if (idx >= 5) return;
             result.entryies[idx].vbase = _2MB_base;
-            result.entryies[idx].base = vmentry.phys_start + (_2MB_base - vmentry.start);
+            result.entryies[idx].phybase = vmentry.phys_start + (_2MB_base - vmentry.start);
             result.entryies[idx].page_size_in_byte = _2MB_SIZE;
             result.entryies[idx].num_of_pages = (_2MB_end - _2MB_base) / _2MB_SIZE;
             idx++;
@@ -314,7 +315,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
         if (_2MB_end < seg_e) {
             if (idx >= 5) return;
             result.entryies[idx].vbase = _2MB_end;
-            result.entryies[idx].base = vmentry.phys_start + (_2MB_end - vmentry.start);
+            result.entryies[idx].phybase = vmentry.phys_start + (_2MB_end - vmentry.start);
             result.entryies[idx].page_size_in_byte = _4KB_SIZE;
             result.entryies[idx].num_of_pages = (seg_e - _2MB_end) / _4KB_SIZE;
             idx++;
@@ -339,11 +340,11 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
         {
             seg_to_pages_info_pakage_t::pages_info_t entry=package.entryies[i];
             if(entry.page_size_in_byte==_4KB_SIZE){
-                status=_4lv_pte_4KB_entries_set(entry.vbase,entry.num_of_pages,entry.num_of_pages);
+                status=_4lv_pte_4KB_entries_set(entry.vbase,entry.phybase,entry.num_of_pages);
                 if(status!=OS_SUCCESS)goto sub_step_invalid;
             }else if(entry.page_size_in_byte==_2MB_SIZE)
             {
-                status=_4lv_pde_2MB_entries_set(entry.vbase,entry.num_of_pages,entry.num_of_pages);
+                status=_4lv_pde_2MB_entries_set(entry.vbase,entry.phybase,entry.num_of_pages);
                 if(status!=OS_SUCCESS)goto sub_step_invalid;
             }else if(entry.page_size_in_byte==_1GB_SIZE)
             {
@@ -355,7 +356,7 @@ int AddressSpace::enable_VM_desc(VM_DESC desc)
                 auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
                 while(count_to_assign_left > 0){
                     uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pdpte_idx));
-                    phyaddr_t this_phybase = entry.base + processed_pages * _1GB_SIZE;
+                    phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
                     vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
                     status = _4lv_pdpte_1GB_entries_set(this_phybase, this_vbase, this_count);
                     if(status != OS_SUCCESS) goto sub_step_invalid;
@@ -681,7 +682,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
         // initialize
         for (int i = 0; i < 5; i++) {
             result.entryies[i].vbase = 0;
-            result.entryies[i].base = 0;
+            result.entryies[i].phybase = 0;
             result.entryies[i].page_size_in_byte = 0;
             result.entryies[i].num_of_pages = 0;
         }
@@ -692,7 +693,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
 
         if (_1GB_end > _1GB_base) {
             result.entryies[idx].vbase = _1GB_base;
-            result.entryies[idx].base = vmentry.phys_start + (_1GB_base - vmentry.start);
+            result.entryies[idx].phybase = vmentry.phys_start + (_1GB_base - vmentry.start);
             result.entryies[idx].page_size_in_byte = _1GB_SIZE;
             result.entryies[idx].num_of_pages = (_1GB_end - _1GB_base) / _1GB_SIZE;
             idx++;
@@ -706,7 +707,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
             if (_2MB_base > seg_s) {
                 if (idx >= 5) return;
                 result.entryies[idx].vbase = seg_s;
-                result.entryies[idx].base = vmentry.phys_start + (seg_s - vmentry.start);
+                result.entryies[idx].phybase = vmentry.phys_start + (seg_s - vmentry.start);
                 result.entryies[idx].page_size_in_byte = _4KB_SIZE;
                 result.entryies[idx].num_of_pages = (_2MB_base - seg_s) / _4KB_SIZE;
                 idx++;
@@ -715,7 +716,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
             if (_2MB_end > _2MB_base) {
                 if (idx >= 5) return;
                 result.entryies[idx].vbase = _2MB_base;
-                result.entryies[idx].base = vmentry.phys_start + (_2MB_base - vmentry.start);
+                result.entryies[idx].phybase = vmentry.phys_start + (_2MB_base - vmentry.start);
                 result.entryies[idx].page_size_in_byte = _2MB_SIZE;
                 result.entryies[idx].num_of_pages = (_2MB_end - _2MB_base) / _2MB_SIZE;
                 idx++;
@@ -724,7 +725,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
             if (_2MB_end < seg_e) {
                 if (idx >= 5) return;
                 result.entryies[idx].vbase = _2MB_end;
-                result.entryies[idx].base = vmentry.phys_start + (_2MB_end - vmentry.start);
+                result.entryies[idx].phybase = vmentry.phys_start + (_2MB_end - vmentry.start);
                 result.entryies[idx].page_size_in_byte = _4KB_SIZE;
                 result.entryies[idx].num_of_pages = (seg_e - _2MB_end) / _4KB_SIZE;
                 idx++;
@@ -746,10 +747,10 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
             seg_to_pages_info_pakage_t::pages_info_t entry = package.entryies[i];
             if (entry.page_size_in_byte == _4KB_SIZE) {
                 // 注意：参数顺序与 set 函数一致（传 physbase 以便风格一致）
-                status = _4lv_pte_4KB_entries_clear(entry.base, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
+                status = _4lv_pte_4KB_entries_clear(entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
                 if (status != OS_SUCCESS) goto sub_step_invalid;
             } else if (entry.page_size_in_byte == _2MB_SIZE) {
-                status = _4lv_pde_2MB_entries_clear(entry.base, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
+                status = _4lv_pde_2MB_entries_clear(entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
                 if (status != OS_SUCCESS) goto sub_step_invalid;
             } else if (entry.page_size_in_byte == _1GB_SIZE) {
                 uint64_t pdpte_equal_offset = entry.vbase / _1GB_SIZE;
@@ -761,7 +762,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4eroottb, will_invalidate_soon](
                 while (count_to_clear_left > 0) {
                     uint16_t this_count = static_cast<uint16_t>(min(count_to_clear_left, 512 - pdpte_idx));
                     // 使用 vbase/physbase 计算本段起点
-                    phyaddr_t this_phybase = entry.base + processed_pages * _1GB_SIZE;
+                    phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
                     vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
                     status = _4lv_pdpte_1GB_entries_clear(this_phybase, this_vbase, this_count);
                     if (status != OS_SUCCESS) goto sub_step_invalid;
@@ -840,9 +841,12 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr)
     lock.read_unlock();
     return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pde_idx)<<21)+(uint64_t(pte_idx)<<12)+(vaddr&(_4KB_SIZE-1));
 }
-
-void AddressSpace::load_pml4_to_cr3()
+/**
+ * 不对pcid内容进行校验直接位运算
+ */
+void AddressSpace::unsafe_load_pml4_to_cr3(uint16_t pcid)
 {
+    uint64_t cr3_value=pml4_phybase|pcid;
     asm volatile("mov %0, %%cr3"::"r"(pml4_phybase));
 }
 
@@ -864,8 +868,31 @@ int AddressSpace::second_stage_init()
     {
         uint64_t raw=Up_pml4e_template.raw;
         raw|=(kspacUPpdpt_phybase+i*4096)&PHYS_ADDR_MASK;
-        pml4[i].raw=raw;
+        pml4[i+256].raw=raw;
     }
     occupyied_size=0;
     return OS_SUCCESS;
+}
+int AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
+{
+    if(this!=gKernelSpace)return OS_BAD_FUNCTION;
+    VM_DESC identity_desc={
+        .start=0x10000,
+        .end=0x1000000000,
+        .SEG_SIZE_ONLY_UES_IN_BASIC_SEG=0,
+        .map_type=VM_DESC::map_type_t::MAP_PHYSICAL,
+        .phys_start=0x10000,
+        .access={
+            .is_kernel=1,
+            .is_writeable=1,
+            .is_readable=1,
+            .is_executable=1,
+            .is_global=0,
+            .cache_strategy=WB,
+        },
+        .committed_full=0,
+        .is_vaddr_alloced=0,
+        .is_out_bound_protective=0
+    };
+    return enable_VM_desc(identity_desc);
 }

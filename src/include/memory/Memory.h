@@ -108,8 +108,10 @@ class GlobalMemoryPGlevelMgr_t {
     void printEfiMemoryDescriptorTable();
     GlobalMemoryPGlevelMgr_t();
     GlobalMemoryPGlevelMgr_t(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount);
-    // 移除析构函数声明，因为在freestanding环境中不需要
     void Init(EFI_MEMORY_DESCRIPTORX64* gEfiMemdescriptromap, uint64_t entryCount);
+    #ifdef USER_MODE
+    void Init();
+    #endif
     phy_memDescriptor* queryPhysicalMemoryUsage(phyaddr_t addr);
     phy_memDescriptor* getGlobalPhysicalMemoryInfo();
     uint64_t getRootPhysicalMemoryDescriptorTableEntryCount();
@@ -117,15 +119,15 @@ class GlobalMemoryPGlevelMgr_t {
     int FixedPhyaddPgallocate(IN phyaddr_t addr,
                               IN uint64_t size,
                               IN PHY_MEM_TYPE type);                                     // 这个函数分配的内存会在根物理描述符表中增加表项
-    int defaultPhyaddPgallocate( IN OUT phyaddr_t& addr,uint64_t size,PHY_MEM_TYPE type);//默认分配器，从前往后尽可能减少内存碎片
-    void* SameNeighborMerge(phyaddr_t addr);
     int pageRecycle(phyaddr_t EntryStartphyaddr);//回收起始地址为addr项的内存,若是已经合并了则不可以
     void pageSetValue(phyaddr_t EntryStartphyaddr,uint64_t value);//起始地址为addr项的内存,若是已经合并了则不可以
     void printPhyMemDesTb();
     void DisableBasicMemService();
     uint64_t getGlobalPhysicalMemoryMgrflags();
     int descriptor_remapped_inc(phyaddr_t base);
-  int descriptor_remapped_dec(phyaddr_t base);
+    int descriptor_remapped_dec(phyaddr_t base);
+    EFI_MEMORY_DESCRIPTORX64* getEfiMemoryDescriptorTable();
+    uint64_t getEfiMemoryDescriptorTableEntryCount();
 };
 extern GlobalMemoryPGlevelMgr_t gBaseMemMgr;
 constexpr uint64_t MAX_PHYADDR_1GB_PGS_COUNT=4096;

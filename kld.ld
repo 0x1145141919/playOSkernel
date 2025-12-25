@@ -3,10 +3,11 @@ __KImgSize = 128M;
 EXTERN(PAGE_LEVEL)
 PAGE_LEVEL_5 = 0xFF00000000000000;
 PAGE_LEVEL_4 = 0xFFFF800000000000;
-__HEAP_SIZE = 16M;
+__HEAP_SIZE = 4M;
+__HEAP_BITMAP_SIZE = __HEAP_SIZE / 128;
 __KLOG_SIZE = 2M;
-__STACK_SIZE = 64K;
-__PGTB_HEAP_SIZE = 4M;
+__STACK_SIZE = 32K;
+__PGTB_HEAP_SIZE = 2M;
 init_sec_base = 0x1000;
 init_sec_size   = 0x100000;
 KImgphybase = 0x4000000;
@@ -37,6 +38,18 @@ SECTIONS {
         . = ALIGN(4K);
         init_rodata_end = .;
     } > init : init_rodata
+    .init_data : {
+        init_data_begin = .;
+        CMakeFiles/kernel.elf.dir/src/kernel_entry.asm.o(.bootdata)
+        . = ALIGN(4K);
+        init_data_end = .;
+    } > init : init_data
+    .init_stack : {
+        init_stack_begin = .;
+        CMakeFiles/kernel.elf.dir/src/kernel_entry.asm.o(.init_stack)
+        . = ALIGN(4K);
+        init_stack_end = .;
+    } > init : init_stack
     . = KImgvbase;
     .text_main :  AT( KImgphybase){
         text_begin = .;
@@ -75,28 +88,36 @@ SECTIONS {
         . = . + __STACK_SIZE; 
         _stack_top = .;
         . = ALIGN(4096); 
-            . = ALIGN(2M);
     } > VRAM :stack
+    
+    /* 内核页表段 - kspaceUPpdpt表 */
+    _kspace_uppdpt_lma = ALIGN(LOADADDR(.stack) + SIZEOF(.stack), 4096);
+    .kspace_uppdpt : AT(_kspace_uppdpt_lma) {
+    __kspace_uppdpt_start = .;
+    *(.kspace_uppdpt)
+    __kspace_uppdpt_end = .;
+    . = ALIGN(4096);
+    } > VRAM :kspace_uppdpt
+
+    _heap_bitmap_lma = ALIGN(LOADADDR(.kspace_uppdpt) + SIZEOF(.kspace_uppdpt),4096);
+    . = ALIGN(4096);
+    .heap_bitmap :  AT( _heap_bitmap_lma){
+        __heap_bitmap_start = .;
+        . = . + __HEAP_BITMAP_SIZE;
+        __heap_bitmap_end = .;
+        . = ALIGN(2M);
+    } > VRAM :heap_bitmap
 
     /* 计算堆段加载地址 */
-    _heap_lma = ALIGN(LOADADDR(.stack) + SIZEOF(.stack),2M);
+    _heap_lma = ALIGN(LOADADDR(.heap_bitmap) + SIZEOF(.heap_bitmap),2M);
     . = ALIGN(2M);
     .heap :  AT( _heap_lma){
         __heap_start = .;
         . = . + __HEAP_SIZE;
         __heap_end = .;
-    } > VRAM :heap
-    
-    /* 计算页表堆段加载地址 */
-    _pgtb_heap_lma = ALIGN(LOADADDR(.heap) + SIZEOF(.heap),2M);
-    .pgtb_heap : AT( _pgtb_heap_lma){
-        __pgtbhp_start = .;
-        . = . + __PGTB_HEAP_SIZE;
-        __pgtbhp_end = .;
-    } > VRAM :pgtb_heap
-    
+    } > VRAM :heap    
     /* 计算内核日志段加载地址 */
-    _klog_lma = ALIGN(LOADADDR(.pgtb_heap) + SIZEOF(.pgtb_heap),2M);
+    _klog_lma = ALIGN(LOADADDR(.heap) + SIZEOF(.heap),2M);
     .klog : AT( _klog_lma){
         __klog_start = .;
         . = . + __KLOG_SIZE;
@@ -109,12 +130,14 @@ SECTIONS {
 PHDRS {
     init_text PT_LOAD FLAGS(5);      /* PF_R | PF_X (RX) */
     init_rodata PT_LOAD FLAGS(4);
+    init_data PT_LOAD FLAGS(6);
+    init_stack PT_LOAD FLAGS(6);
     text_main PT_LOAD FLAGS(5);      /* PF_R | PF_X (RX) */
     data PT_LOAD FLAGS(6);      /* PF_R | PF_W (RW) */   
     rodata PT_LOAD FLAGS(4);    /* PF_R (R) */
     stack PT_LOAD FLAGS(6);     /* PF_R | PF_W (RW) */
+    kspace_uppdpt PT_LOAD FLAGS(6);  /* PF_R | PF_W (RW) */    
+    heap_bitmap PT_LOAD FLAGS(6);
     heap PT_LOAD FLAGS(6);
-    pgtb_heap PT_LOAD FLAGS(6);
     klog PT_LOAD FLAGS(6);
-    
 }

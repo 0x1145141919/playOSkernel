@@ -1,8 +1,8 @@
-
+#pragma once
 #include <stdint.h>
 #include <efi.h>
 #include <efilib.h>
-
+#include "memory/Memory.h"
 //
 // ACPI 表签名常量定义（仅C++）
 //
@@ -123,30 +123,42 @@ struct MCFG_Table {
     // 后续是设备配置空间描述符数组
 } __attribute__((packed));
 
+// 将4字符ACPI签名转换为uint32（小端序）
+constexpr uint32_t make_acpi_signature(const char* str) {
+    return static_cast<uint32_t>(str[0]) |
+           static_cast<uint32_t>(str[1]) << 8 |
+           static_cast<uint32_t>(str[2]) << 16 |
+           static_cast<uint32_t>(str[3]) << 24;
+}
+
 // 条件编译支持C和C++
+static constexpr uint32_t XSDT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_XSDT_SIGNATURE); // 'XSDT'
+static constexpr uint32_t FADT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_FADT_SIGNATURE); // 'FACP'
+static constexpr uint32_t FACS_SIGNATURE_UINT32 = make_acpi_signature(ACPI_FACS_SIGNATURE); // 'FACS'
+static constexpr uint32_t MADT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_MADT_SIGNATURE); // 'APIC'
+static constexpr uint32_t DSDT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_DSDT_SIGNATURE); // 'DSDT'
+static constexpr uint32_t SSDT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_SSDT_SIGNATURE); // 'SSDT'
+static constexpr uint32_t MCFG_SIGNATURE_UINT32 = make_acpi_signature(ACPI_MCFG_SIGNATURE); // 'MCFG'
 
 class acpimgr_t {
 private:
     SSDT_Table*vSSDT[40];
     // 对应的uint32_t类型常量
-static constexpr uint32_t XSDT_SIGNATURE_UINT32 = 0x54445358; // 'XSDT'
-static constexpr uint32_t FADT_SIGNATURE_UINT32 = 0x50434146; // 'FACP'
-static constexpr uint32_t FACS_SIGNATURE_UINT32 = 0x53434146; // 'FACS'
-static constexpr uint32_t MADT_SIGNATURE_UINT32 = 0x43495041; // 'APIC'
-static constexpr uint32_t DSDT_SIGNATURE_UINT32 = 0x54445344; // 'DSDT'
-static constexpr uint32_t SSDT_SIGNATURE_UINT32 = 0x54445353; // 'SSDT'
-static constexpr uint32_t MCFG_SIGNATURE_UINT32 = 0x4746434D; // 'MCFG'
+
     uint16_t xsdt_entry_count;    
-    RSDP_struct*vRSDP;
-    XSDT_Table*vXSDT;
-    FADT_Table*vFADT;
-    FACS_Table*vFACS;
-    MADT_Table*vMADT;
-    DSDT_Table*vDSDT;
-    MCFG_Table*vMCFG;
+    uint32_t RSDP_OFFSET;
+    uint32_t XSDT_OFFSET;
+    uint32_t FADT_OFFSET;
+    uint32_t FACS_OFFSET;
+    uint32_t MADT_OFFSET;
+    uint32_t DSDT_OFFSET;
+    uint32_t MCFG_OFFSET;
+    vaddr_t acpi_seg_vbase;
+    uint64_t acpi_seg_size;
+    phyaddr_t acpi_seg_pbase;   
 public:
 
-    void Init(EFI_SYSTEM_TABLE* st);
+    int Init(EFI_SYSTEM_TABLE* st);
     void* get_acpi_table(char* signature);
 };
 extern acpimgr_t gAcpiVaddrSapceMgr;

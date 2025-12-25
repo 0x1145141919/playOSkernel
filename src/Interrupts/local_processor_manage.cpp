@@ -37,16 +37,13 @@ local_processor::local_processor()
     tss_entry.base1=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>16)&base1_mask;
     tss_entry.base2=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>24)&base2_mask;
     tss_entry.base3=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>32)&base3_mask;
-    phyaddr_t rsp0top=gPhyPgsMemMgr.pages_alloc(total_stack_size/0x1000,phymemspace_mgr::page_state_t::KERNEL);
-    phyaddr_t pcid_tb_phy=gPhyPgsMemMgr.pages_alloc(0x1000*sizeof(AddressSpace*)/0x1000,phymemspace_mgr::page_state_t::KERNEL);
-    vaddr_t rsp0=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top,RSP0_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist1=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE,DF_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist2=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE,MC_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist3=(vaddr_t)gKspacePgsMemMgr.pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE,NMI_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    pcid_table=(AddressSpace**)gKspacePgsMemMgr.pgs_remapp(pcid_tb_phy,0x1000*sizeof(AddressSpace*),KSPACE_RW_ACCESS);
-    if(!(rsp0top&rsp0&rsp0&ist1&ist2)){
+    phyaddr_t rsp0top=phymemspace_mgr::pages_alloc(total_stack_size/0x1000,phymemspace_mgr::page_state_t::KERNEL);
+    vaddr_t rsp0=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top,RSP0_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t ist1=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE,DF_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t ist2=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE,MC_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    vaddr_t ist3=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE,NMI_STACKSIZE,KSPACE_RW_ACCESS,0,true);
         KernelPanicManager::panic("[local_processor]init stack failed");
-    }
+    
     tss.rsp0=rsp0+RSP0_STACKSIZE;
     tss.ist[0]=0;
     tss.ist[1]=ist1+DF_STACKSIZE;

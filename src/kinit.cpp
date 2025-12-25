@@ -95,16 +95,25 @@ extern "C" void kernel_start( BootInfoHeader* transfer)
     gBaseMemMgr.Init(reinterpret_cast<EFI_MEMORY_DESCRIPTORX64*>(transfer->memory_map_ptr),transfer->memory_map_entry_count);
     gBaseMemMgr.printPhyMemDesTb();
     
-    phymemspace_mgr::Init();
-    KspaceMapMgr::Init();
+    Status=phymemspace_mgr::Init();
+    Status=KspaceMapMgr::Init();
     gKernelSpace=new AddressSpace();
     Status=gKernelSpace->second_stage_init();
     if(Status!=OS_SUCCESS)
-        {
-            kputsSecure("KernelSpace Init Failed\n");
-            asm volatile("hlt");
-        }
-    gKernelSpace->load_pml4_to_cr3();
+    {
+        kputsSecure("KernelSpace Init Failed\n");
+        asm volatile("hlt");
+    }
+    Status=gKernelSpace->build_identity_map_ONLY_IN_gKERNELSPACE();
+    if(Status!=OS_SUCCESS){
+        kputsSecure("KernelSpace Build Identity Map Failed\n");
+        asm volatile("hlt");
+    }
+    Status=EFI_RT_SVS::Init(transfer->gST_ptr,efi_map_ver);
+    gAcpiVaddrSapceMgr.Init(global_gST);
+    gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
+    kputsSecure("KernelSpace Init Success on \n");
+    
     //中断接管工作
     asm volatile("hlt");
     

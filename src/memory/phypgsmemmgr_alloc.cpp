@@ -47,88 +47,84 @@ int phymemspace_mgr::del_no_atomig_1GB_pg(uint64_t _1idx)
     top_1gb_table->release(_1idx);
     return OS_SUCCESS;
 }
+static inline phyaddr_t min(phyaddr_t a, phyaddr_t b) {
+    return (a < b) ? a : b;
+}
 
+static inline phyaddr_t max(phyaddr_t a, phyaddr_t b) {
+    return (a > b) ? a : b;
+}
 int phymemspace_mgr::phymemseg_to_pacage(
-        phyaddr_t base,
-        uint64_t num_of_4kbpgs,
-        seg_to_pages_info_pakage_t& pak)
+    phyaddr_t base,
+    uint64_t num_of_4kbpgs,
+    seg_to_pages_info_package_t& pak)
 {
     // 清空
     for (int i = 0; i < 5; i++) {
-        pak.entryies[i].base = 0;
-        pak.entryies[i].num_of_pages = 0;
-        pak.entryies[i].page_size_in_byte = 0;
+        pak.entries[i].base = 0;
+        pak.entries[i].num_of_pages = 0;
+        pak.entries[i].page_size_in_byte = 0;
     }
 
     uint64_t start = base;
     uint64_t end   = base + num_of_4kbpgs * _4KB_PG_SIZE;
+    phyaddr_t start_up_2mb = align_up(start, _2MB_PG_SIZE);
+    phyaddr_t end_down_2mb = align_down(end, _2MB_PG_SIZE);
+    
+    phyaddr_t start_up_1gb = align_up(start, _1GB_PG_SIZE);
+    phyaddr_t end_down_1gb = align_down(end, _1GB_PG_SIZE);
 
-    int idx = 0;
-
-    /////////////////////////////////////////////////////////
-    // 1) 如果在高 4GB，则尝试对齐并截取 1GB 页
-    /////////////////////////////////////////////////////////
-    if (start >= 0x100000000ULL) {
-        uint64_t gb_aligned_start = align_up(start, _1GB_PG_SIZE);
-
-        // 中间的 4KB/2MB 不丢弃，只是不适用 1GB
-        if (gb_aligned_start < end) {
-
-            uint64_t gb_area_end = align_down(end, _1GB_PG_SIZE);
-            if (gb_area_end > gb_aligned_start) {
-
-                pak.entryies[idx].base = gb_aligned_start;
-                pak.entryies[idx].page_size_in_byte = _1GB_PG_SIZE;
-                pak.entryies[idx].num_of_pages =
-                    (gb_area_end - gb_aligned_start) / _1GB_PG_SIZE;
-
-                idx++;
-
-                // 截掉 1GB 区域
-                if (start < gb_aligned_start)
-                    ; // 前部留给 2MB/4KB 处理
-                start = gb_area_end;
-            }
+    bool is_cross_2mb_boud = false;
+    bool is_cross_1gb_boud = false;
+    
+    if (start_up_2mb <= end_down_2mb) {
+        is_cross_2mb_boud = true;
+        if (start_up_1gb <= end_down_1gb) {
+            is_cross_1gb_boud = true;
+        } else {
+            is_cross_1gb_boud = false;
         }
+    } else {
+        is_cross_1gb_boud = false;
+        is_cross_2mb_boud = false;
     }
-
-    /////////////////////////////////////////////////////////
-    // 2) 尝试对齐 2MB 大页
-    /////////////////////////////////////////////////////////
-    {
-        uint64_t mb_aligned_start = align_up(start, _2MB_PG_SIZE);
-        if (mb_aligned_start < end) {
-
-            uint64_t mb_area_end = align_down(end, _2MB_PG_SIZE);
-            if (mb_area_end > mb_aligned_start) {
-
-                pak.entryies[idx].base = mb_aligned_start;
-                pak.entryies[idx].page_size_in_byte = _2MB_PG_SIZE;
-                pak.entryies[idx].num_of_pages =
-                    (mb_area_end - mb_aligned_start) / _2MB_PG_SIZE;
-
-                idx++;
-
-                // 截掉 2MB 区
-                if (start < mb_aligned_start)
-                    ; // 前部留给 4KB
-                start = mb_area_end;
-            }
+    
+    if(is_cross_2mb_boud){
+        if(is_cross_1gb_boud){
+            uint64_t countmid1gb=(end_down_1gb - start_up_1gb)/_1GB_PG_SIZE;
+            pak.entries[0].base = start_up_1gb;
+            pak.entries[0].num_of_pages = countmid1gb;
+            pak.entries[0].page_size_in_byte = _1GB_PG_SIZE;
+            uint64_t count_down_2mb=(start_up_1gb - start_up_2mb)/_2MB_PG_SIZE;
+            pak.entries[1].base = start_up_2mb;
+            pak.entries[1].num_of_pages = count_down_2mb;
+            pak.entries[1].page_size_in_byte = _2MB_PG_SIZE;
+            uint64_t count_up_2mb=(end_down_2mb - end_down_1gb)/_2MB_PG_SIZE;
+            pak.entries[2].base = end_down_1gb;
+            pak.entries[2].num_of_pages = count_up_2mb;
+            pak.entries[2].page_size_in_byte = _2MB_PG_SIZE; 
+        }else{
+            
+            uint64_t count_2mb=(end_down_2mb - start_up_2mb)/_2MB_PG_SIZE;
+            pak.entries[2].base = start_up_2mb;
+            pak.entries[2].num_of_pages = count_2mb;
+            pak.entries[2].page_size_in_byte = _2MB_PG_SIZE; 
         }
+        uint64_t countdown4kb=(start_up_2mb-start)/_4KB_PG_SIZE;
+        pak.entries[3].base = start;
+        pak.entries[3].num_of_pages = countdown4kb;
+        pak.entries[3].page_size_in_byte = _4KB_PG_SIZE;
+        uint64_t countup4kb=(end-end_down_2mb)/_4KB_PG_SIZE;
+        pak.entries[4].base = end_down_2mb;
+        pak.entries[4].num_of_pages = countup4kb;
+        pak.entries[4].page_size_in_byte = _4KB_PG_SIZE;
+    }else{
+        uint64_t count4kbpgs=(end-start)/_4KB_PG_SIZE;
+        pak.entries[4].base = start;
+        pak.entries[4].num_of_pages = count4kbpgs;
+        pak.entries[4].page_size_in_byte = _4KB_PG_SIZE;
     }
-
-    /////////////////////////////////////////////////////////
-    // 3) 剩下全部按 4KB 页
-    /////////////////////////////////////////////////////////
-    if (start < end) {
-        pak.entryies[idx].base = start;
-        pak.entryies[idx].page_size_in_byte = _4KB_PG_SIZE;
-        pak.entryies[idx].num_of_pages =
-            (end - start) / _4KB_PG_SIZE;
-
-        idx++;
-    }
-
+    
     return OS_SUCCESS;
 }
 phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::page_state_t state, uint8_t align_log2)
@@ -148,9 +144,9 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
         
         // 自动向上取最近对齐粒度
         uint8_t a = [align_log2]()->uint8_t{
-            if (align_log2 < 12) return 12;          // 最小对齐是 4KB
-            if (align_log2 <= 20) return 21;         // 12~20 → 上调到 2MB
-            if (align_log2 <= 29) return 30;         // 21~29 → 上调到 1GB
+            if (align_log2 <= 12) return 12;          // 最小对齐是 4KB
+            if (align_log2 <= 21) return 21;         // 12~20 → 上调到 2MB
+            if (align_log2 <= 30) return 30;         // 21~29 → 上调到 1GB
 
             // 30以上按1GB处理（你的要求）
             return 30;
@@ -160,7 +156,7 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
         int status = OS_MEMRY_ALLOCATE_FALT;
         auto it = physeg_list->begin();
         PHYSEG current_seg = *it;
-        for(; it != physeg_list->end(); ++it){
+        do{
             
             if(current_seg.type == DRAM_SEG) {
                 if(a == 12) {
@@ -177,8 +173,11 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
                     module_global_lock.unlock();
                     return 0;
                 }
-            }
-        }
+                
+            }++it;
+            current_seg = *it;
+            
+        }while(it != physeg_list->end());
         
         // 未找到合适的内存区域
         module_global_lock.unlock();

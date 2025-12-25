@@ -36,6 +36,7 @@ uint64_t reverse_perbytes(uint64_t value) {
     }
     return result;
 }
+#ifdef KERNEL_MODE
 int strcmp(const char *str1, const char *str2, uint32_t max_strlen)
 {
     for (uint32_t i = 0; i < max_strlen; i++) {
@@ -48,6 +49,7 @@ int strcmp(const char *str1, const char *str2, uint32_t max_strlen)
     }
     return 0;
 }
+
 int strlen(const char *s)
 {
     int len = 0;
@@ -55,6 +57,7 @@ int strlen(const char *s)
         len++;
     return len;
 }
+#endif
 int get_first_true_bit_index(bitset512_t *bitmap) {//记得用bitreserve改写
     for (int i = 0; i < 8; i++) {
         uint64_t chunk = (*bitmap)[i]; // 获取第i个64位块
@@ -292,53 +295,6 @@ not_aligned_3bits:
     }
 }
 // 获取2bit宽度位图中指定索引的值（返回0-3）
-uint8_t getentry_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint16_t index) {
-    uint8_t byte = bitmap[index >> 2];  // 每个字节包含4个2bit条目
-    uint8_t shift = (index & 3) * 2;    // 计算在字节内的偏移（0,2,4,6）
-    return (byte >> shift) & 3;         // 提取2bit值
-}
-
-// 设置2bit宽度位图中指定索引的值
-void setentry_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t value, uint16_t index) {
-    uint8_t& byte = bitmap[index >> 2];     // 获取对应的字节引用
-    uint8_t shift = (index & 3) * 2;        // 计算偏移量
-    byte = (byte & ~(3 << shift)) |         // 清除原有值
-           ((value & 3) << shift);          // 设置新值
-}
-
-// 设置2bit宽度位图中连续多个条目的值
-// 优化后的批量设置2bit宽度位图函数
-void setentries_entry2bits_width(pgsbitmap_entry2bits_width& bitmap, uint8_t value, uint16_t start_index, uint16_t len_in_entries) {
-    value &= 3;  // 确保值在0-3范围内
-    
-    // 创建64位填充模式（每个2bit都是value）
-    uint64_t fillpattern = 0;
-    for (int i = 0; i < 32; i++) {  // 64位可容纳32个2bit条目
-        fillpattern |= (static_cast<uint64_t>(value) << (i * 2));
-    }
-    
-    uint16_t i = start_index;
-    uint16_t end_index = start_index + len_in_entries;
-    
-    // 处理起始未对齐部分（按单个条目设置）
-    while (i < end_index && (i & 31)) {
-        setentry_entry2bits_width(bitmap, value, i);
-        i++;
-    }
-    
-    // 处理中间对齐部分（按64位块设置，每次设置32个条目）
-    uint64_t* map_64bit = reinterpret_cast<uint64_t*>(&bitmap[i >> 2]);
-    while (i + 31 < end_index) {
-        *map_64bit++ = fillpattern;
-        i += 32;
-    }
-    
-    // 处理剩余未对齐部分（按单个条目设置）
-    while (i < end_index) {
-        setentry_entry2bits_width(bitmap, value, i);
-        i++;
-    }
-}
 uint64_t align_up(uint64_t value, uint64_t alignment) {
     // 检查alignment是否为2的幂
     if ((alignment & (alignment - 1)) != 0) {

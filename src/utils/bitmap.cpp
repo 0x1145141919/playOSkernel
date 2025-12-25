@@ -1,3 +1,20 @@
+#include "util/bitmap.h"
+#include "lock.h"
+#include <cstdint>
+#include <cstring>
+
+// 添加__popcountdi2函数的实现（GCC内置函数）
+extern "C" int __popcountdi2(unsigned long x) {
+    // 使用位运算实现汉明重量(Hamming Weight)计算
+    x = x - ((x >> 1) & 0x5555555555555555UL);
+    x = (x & 0x3333333333333333UL) + ((x >> 2) & 0x3333333333333333UL);
+    x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0fUL;
+    x = x + (x >> 8);
+    x = x + (x >> 16);
+    x = x + (x >> 32);
+    return x & 0x7f;
+}
+
 #include "util/Ktemplats.h"
 #ifdef KERNEL_MODE
 #include "memory/kpoolmemmgr.h"

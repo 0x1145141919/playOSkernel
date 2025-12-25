@@ -8,6 +8,7 @@ namespace PAGE_TBALE_LV{
     constexpr bool LV_4=true;
     constexpr bool LV_5=false;
 }
+constexpr uint16_t KERNEL_SPACE_PCID=0;
 extern bool pglv_4_or_5;//true代表4级页表，false代表5级页表,在KspacMapMgr.cpp存在
 enum cache_strategy_t:uint8_t
 {
@@ -27,7 +28,7 @@ struct cache_table_idx_struct_t
 struct seg_to_pages_info_pakage_t{
         struct pages_info_t{
             vaddr_t vbase;
-            phyaddr_t base;
+            phyaddr_t phybase;
             uint64_t page_size_in_byte;
             uint64_t num_of_pages;
         };
@@ -84,7 +85,6 @@ struct VM_DESC
     phyaddr_t phys_start;  // 当 map_type=MAP_PHYSICAL 时有效
                            // MAP_NONE 没有意义
     pgaccess access;       // 页权限/缓存策略
-    uint8_t is_bigseg:1;        // 是否为大段映射（延迟加载）
     uint8_t committed_full:1;   // 物理页是否完全已经分配（lazy allocation 用）
     uint8_t is_vaddr_alloced:1;    // 虚拟地址是否由地址空间管理器分配（否则为固定映射）
     uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
@@ -115,11 +115,12 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     int enable_VM_desc(VM_DESC desc);
     int disable_VM_desc(VM_DESC desc);
     int second_stage_init();//new完之后马上最快的速度调用此接口，并且接受返回值进行分析
+    int build_identity_map_ONLY_IN_gKERNELSPACE();//uefi运行时服务依赖于这个构建的恒等映射
     uint64_t get_occupyied_size(){
         return occupyied_size;
     }
     phyaddr_t vaddr_to_paddr(vaddr_t vaddr);
-    void load_pml4_to_cr3();//这个接口会直接把当前页表加载到cr3寄存器
+    void unsafe_load_pml4_to_cr3(uint16_t pcid);//这个接口会直接把当前页表加载到cr3寄存器
     ~AddressSpace();//如果cr3还装载这这个页表，删除会在堆里释放根表，虽然不会马上报错但是极度危险，最好别这么干
 };
 extern AddressSpace*gKernelSpace;
@@ -223,7 +224,7 @@ static void invalidate_seg();
 /**
  * 
  */
-static int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC& vmentry);
+static int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC vmentry);
 
 static int enable_VMentry(VM_DESC& vmentry);
 //这个函数的职责是根据vmentry的内容撤销对应的页表项映射，只对对应的页表结构进行操作
@@ -242,7 +243,7 @@ static int _4lv_pte_4KB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这�
 static int _4lv_pde_2MB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录指针边界
 
 static int _4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨父页表项指针边界
-void enable_DEFAULT_PAT_CONFIG();
+static void enable_DEFAULT_PAT_CONFIG();
 static int v_to_phyaddrtraslation_entry(vaddr_t vaddr,PageTableEntryUnion& result,uint32_t&page_size);
     public:
 static constexpr pgaccess PG_RW={1,1,1,0,1,WB};

@@ -237,6 +237,9 @@ vaddr_t kpoolmemmgr_t::get_virt(phyaddr_t addr)
     }
     return first_linekd_heap.tran_to_virt(addr);
 }
+kpoolmemmgr_t::kpoolmemmgr_t()
+{
+}
 kpoolmemmgr_t::~kpoolmemmgr_t()
 {
 }

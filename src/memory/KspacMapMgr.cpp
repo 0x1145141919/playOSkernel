@@ -6,6 +6,13 @@
 #include "linker_symbols.h"
 #include "VideoDriver.h"
 #include "util/OS_utils.h"
+static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
+// 定义KspaceMapMgr的静态成员变量
+KspaceMapMgr::kspace_vm_table_t* KspaceMapMgr::kspace_vm_table = nullptr;
+spinlock_cpp_t KspaceMapMgr::GMlock = spinlock_cpp_t();
+phyaddr_t KspaceMapMgr::kspace_uppdpt_phyaddr = 0;
+
+
 bool pglv_4_or_5=PAGE_TBALE_LV::LV_4;//true代表4级页表，false代表5级页表
 cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy)
 {   
@@ -57,8 +64,36 @@ int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
 
     if (vmentry.start >= vmentry.end) return OS_INVALID_PARAMETER;
 
-    // require that vstart % 1GB == phys_start % 1GB (与 seg_to_pages_info_get 的前置条件一致)
-    if ((vmentry.start % _1GB_SIZE) != (vmentry.phys_start % _1GB_SIZE))
+    auto vmentry_congruence_vlidation = [vmentry]()->bool {
+        enum PHY_SEG_MAX_PAGE:uint8_t{
+        PHY_SEG_MAX_PAGE_4KB=0,
+        PHY_SEG_MAX_PAGE_2MB,
+        PHY_SEG_MAX_PAGE_1GB
+    };
+        auto max_type_identifier=[vmentry]()->PHY_SEG_MAX_PAGE{
+        phyaddr_t phybase=vmentry.phys_start;
+        phyaddr_t phyend=phybase+vmentry.end-vmentry.start;
+
+        uint64_t base_1GB=align_up(phybase,_1GB_SIZE);
+        uint64_t end_1GB=align_down(phyend,_1GB_SIZE);
+        if(base_1GB<end_1GB){
+            return PHY_SEG_MAX_PAGE_1GB;
+        }
+        uint64_t base_2MB=align_up(phybase,_2MB_SIZE);
+        uint64_t end_2MB=align_down(phyend,_2MB_SIZE);
+        if(base_2MB<end_2MB){
+            return PHY_SEG_MAX_PAGE_2MB;
+        }
+        return PHY_SEG_MAX_PAGE_4KB;
+        };
+        switch(max_type_identifier())
+        {
+            case PHY_SEG_MAX_PAGE_4KB:return true;
+            case PHY_SEG_MAX_PAGE_2MB:return vmentry.start%_2MB_SIZE==vmentry.phys_start%_2MB_SIZE;
+            case PHY_SEG_MAX_PAGE_1GB:return vmentry.start%_1GB_SIZE==vmentry.phys_start%_1GB_SIZE;
+        }
+    };
+    if (!vmentry_congruence_vlidation())
         return OS_INVALID_PARAMETER;
 
     // Only implement 4-level paging path here
@@ -81,28 +116,30 @@ int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
 
         uint64_t psize = e.page_size_in_byte;
         // sanity check: vbase and base should be aligned to page size
-        if ((e.vbase % psize) != 0 || (e.base % psize) != 0) return OS_INVALID_PARAMETER;
+        if ((e.vbase % psize) != 0 || (e.phybase % psize) != 0) return OS_INVALID_PARAMETER;
 
         switch(e.page_size_in_byte) {
             case _1GB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pdpte_1GB_entries_set(e.base, e.vbase, count, vmentry.access);
+                rc = _4lv_pdpte_1GB_entries_set(e.phybase, e.vbase, count, vmentry.access);
                 break;
             }
             case _2MB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pde_2MB_entries_set(e.base, e.vbase, count, vmentry.access);
+                rc = _4lv_pde_2MB_entries_set(e.phybase, e.vbase, count, vmentry.access);
                 break;
             }
             case _4KB_SIZE: {
                 uint16_t count = static_cast<uint16_t>(e.num_of_pages);
-                rc = _4lv_pte_4KB_entries_set(e.base, e.vbase, count, vmentry.access);
+                rc = _4lv_pte_4KB_entries_set(e.phybase, e.vbase, count, vmentry.access);
                 break;
             }
             default:
                 return OS_INVALID_PARAMETER; // unknown page size
         }
-        if (rc != OS_SUCCESS) return rc;
+        if (rc != OS_SUCCESS) {
+            return rc;
+        }
     }
 
     // Optionally mark vmentry as enabled (if VM_DESC has such a field)
@@ -136,6 +173,7 @@ void *KspaceMapMgr::pgs_remapp(
         GMlock.unlock();  
         vmentry.start=new_base;
         vmentry.end=new_base+size+_4KB_SIZE*2;  
+        vmentry.is_out_bound_protective=true;
     }else
         {
         vaddr_t new_base=kspace_vm_table->alloc_available_space(size, addr%_1GB_SIZE);
@@ -173,78 +211,101 @@ void *KspaceMapMgr::pgs_remapp(
     if(status==OS_SUCCESS)return(void*)vmentry_copy.start; 
     return nullptr;
 }
-static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
-int KspaceMapMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC &vmentry)
-{
-    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.start % _1GB_SIZE != vmentry.phys_start % _1GB_SIZE)
-        return OS_INVALID_PARAMETER;
 
+int KspaceMapMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC vmentry)
+{
+    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE)
+        return OS_INVALID_PARAMETER;
+    constexpr uint64_t _4KB_PG_SIZE= _4KB_SIZE;
+    constexpr uint64_t _2MB_PG_SIZE = _2MB_SIZE;
+    constexpr uint64_t _1GB_PG_SIZE = _1GB_SIZE;
+    
     // initialize
     for (int i = 0; i < 5; i++) {
         result.entryies[i].vbase = 0;
-        result.entryies[i].base = 0;
+        result.entryies[i].phybase = 0;
         result.entryies[i].page_size_in_byte = 0;
         result.entryies[i].num_of_pages = 0;
     }
+    vaddr_t vbase=vmentry.start;
+    vaddr_t vend=vmentry.end;
+    uint64_t offset=vmentry.start-vmentry.phys_start;
+    vaddr_t start_up_2mb = align_up(vbase, _2MB_PG_SIZE);
+    vaddr_t end_down_2mb = align_down(vend, _2MB_PG_SIZE);
+    
+    vaddr_t start_up_1gb = align_up(vbase, _1GB_PG_SIZE);
+    vaddr_t end_down_1gb = align_down(vend, _1GB_PG_SIZE);
 
-    int idx = 0;
-
-    // Middle full 1GB-aligned region(s)
-    vaddr_t _1GB_base = align_up(vmentry.start, _1GB_SIZE);
-    vaddr_t _1GB_end = align_down(vmentry.end, _1GB_SIZE);
-
-    if (_1GB_end > _1GB_base) {
-        result.entryies[idx].vbase = _1GB_base;
-        result.entryies[idx].base = vmentry.phys_start + (_1GB_base - vmentry.start);
-        result.entryies[idx].page_size_in_byte = _1GB_SIZE;
-        result.entryies[idx].num_of_pages = (_1GB_end - _1GB_base) / _1GB_SIZE;
-        idx++;
+    bool is_cross_2mb_boud = false;
+    bool is_cross_1gb_boud = false;
+    
+    if (start_up_2mb <= end_down_2mb) {
+        is_cross_2mb_boud = true;
+        if (start_up_1gb <= end_down_1gb) {
+            is_cross_1gb_boud = true;
+        } else {
+            is_cross_1gb_boud = false;
+        }
+    } else {
+        is_cross_1gb_boud = false;
+        is_cross_2mb_boud = false;
     }
+    
 
-    // Helper lambda to process a leftover segment [seg_s, seg_e)
-    auto process_segment = [&](vaddr_t seg_s, vaddr_t seg_e) {
-        if (seg_e <= seg_s) return;
-        // 2MB aligned inner region
-        vaddr_t _2MB_base = align_up(seg_s, _2MB_SIZE);
-        vaddr_t _2MB_end = align_down(seg_e, _2MB_SIZE);
-
-        // head 4KB chunk (before first 2MB boundary)
-        if (_2MB_base > seg_s) {
-            if (idx >= 5) return; // defensive, shouldn't happen
-            result.entryies[idx].vbase = seg_s;
-            result.entryies[idx].base = vmentry.phys_start + (seg_s - vmentry.start);
-            result.entryies[idx].page_size_in_byte = _4KB_SIZE;
-            result.entryies[idx].num_of_pages = (_2MB_base - seg_s) / _4KB_SIZE;
-            idx++;
+    
+    if(is_cross_2mb_boud){
+        if(is_cross_1gb_boud){
+            // 处理跨越1GB边界的段
+            uint64_t countmid1gb=(end_down_1gb - start_up_1gb)/_1GB_PG_SIZE;
+            result.entryies[0].vbase = start_up_1gb;
+            result.entryies[0].page_size_in_byte = _1GB_PG_SIZE;
+            result.entryies[0].num_of_pages = countmid1gb;
+            result.entryies[0].phybase = start_up_1gb - offset;
+            
+            // 处理1GB区域之前的2MB区域
+            uint64_t count_down_2mb=(start_up_1gb - start_up_2mb)/_2MB_PG_SIZE;
+            result.entryies[1].vbase = start_up_2mb;
+            result.entryies[1].page_size_in_byte = _2MB_PG_SIZE;
+            result.entryies[1].num_of_pages = count_down_2mb;
+            result.entryies[1].phybase = start_up_2mb - offset;
+            
+            // 处理1GB区域之后的2MB区域
+            uint64_t count_up_2mb=(end_down_2mb - end_down_1gb)/_2MB_PG_SIZE;
+            result.entryies[2].vbase = end_down_1gb;
+            result.entryies[2].page_size_in_byte = _2MB_PG_SIZE;
+            result.entryies[2].num_of_pages = count_up_2mb;
+            result.entryies[2].phybase = end_down_2mb - offset;
+        }else{
+            // 处理仅跨越2MB边界的段
+            uint64_t count_2mb=(end_down_2mb - start_up_2mb)/_2MB_PG_SIZE;
+            result.entryies[2].vbase = start_up_2mb;
+            result.entryies[2].page_size_in_byte = _2MB_PG_SIZE;
+            result.entryies[2].num_of_pages = count_2mb;
+            result.entryies[2].phybase = start_up_2mb - offset;
         }
-
-        // middle 2MB-aligned pages
-        if (_2MB_end > _2MB_base) {
-            if (idx >= 5) return;
-            result.entryies[idx].vbase = _2MB_base;
-            result.entryies[idx].base = vmentry.phys_start + (_2MB_base - vmentry.start);
-            result.entryies[idx].page_size_in_byte = _2MB_SIZE;
-            result.entryies[idx].num_of_pages = (_2MB_end - _2MB_base) / _2MB_SIZE;
-            idx++;
-        }
-
-        // tail 4KB chunk (after last 2MB boundary)
-        if (_2MB_end < seg_e) {
-            if (idx >= 5) return;
-            result.entryies[idx].vbase = _2MB_end;
-            result.entryies[idx].base = vmentry.phys_start + (_2MB_end - vmentry.start);
-            result.entryies[idx].page_size_in_byte = _4KB_SIZE;
-            result.entryies[idx].num_of_pages = (seg_e - _2MB_end) / _4KB_SIZE;
-            idx++;
-        }
-    };
-
-    // Process lower leftover: [start, _1GB_base)
-    process_segment(vmentry.start, _1GB_base > vmentry.start ? _1GB_base : vmentry.start);
-
-    // Process upper leftover: [_1GB_end, end)
-    process_segment(_1GB_end < vmentry.end ? _1GB_end : vmentry.end, vmentry.end);
-
+        
+        // 处理起始部分的小页面
+        uint64_t countdown4kb=(start_up_2mb-vbase)/_4KB_PG_SIZE;
+        result.entryies[3].vbase = vbase;
+        result.entryies[3].page_size_in_byte = _4KB_PG_SIZE;
+        result.entryies[3].num_of_pages = countdown4kb;
+        result.entryies[3].phybase = vbase - offset;
+        
+        // 处理结束部分的小页面
+        uint64_t countup4kb=(vend-end_down_2mb)/_4KB_PG_SIZE;
+        result.entryies[4].vbase = end_down_2mb;
+        result.entryies[4].page_size_in_byte = _4KB_PG_SIZE;
+        result.entryies[4].num_of_pages = countup4kb;
+        result.entryies[4].phybase = end_down_2mb - offset;
+    }else{
+        // 仅使用4KB页面
+        uint64_t count4kbpgs=(vend-vbase)/_4KB_PG_SIZE;
+        result.entryies[4].vbase = vbase;
+        result.entryies[4].page_size_in_byte = _4KB_PG_SIZE;
+        result.entryies[4].num_of_pages = count4kbpgs;
+        result.entryies[4].phybase = vbase - offset;
+    }
+    
     return OS_SUCCESS;
 }
 int KspaceMapMgr::disable_VMentry(VM_DESC &vmentry)

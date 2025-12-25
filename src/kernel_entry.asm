@@ -34,27 +34,16 @@ extern KImgphybase
 extern _stack_top
 extern kernel_start
 global _kernel_Init
+global pml4_table_init
+global pml5_table_init
+SECTION .bootdata
+dq 0
+rep times 512
+
 SECTION .boottext
 _kernel_Init:
 bits 64
-mov eax, 1
-xor ecx, ecx
-cpuid
-test ecx, (1<<21)
-jz .skip_x2apic
 
-; 检测到 x2APIC
-mov ecx,1BH
-rdmsr
-or eax, 1 << 10
-wrmsr
-
-;验证是否开启x2apic
-rdmsr
-test eax, 1 << 10
-jz .skip_x2apic
-.falt_and_halt:
-hlt
 .skip_x2apic:
 %ifdef PG5LV_ENABLE
 ; 检查是否支持五级分页
@@ -83,7 +72,7 @@ hlt
 
 %else
     ; 使用四级分页
-    mov rax, pml4_table
+    mov rax, pml4_table_init
     mov cr3, rax
 
 
@@ -101,7 +90,7 @@ hlt
 
 SECTION .init_rodata
 align 0x1000
-pml4_table:
+pml4_table_init:
 dq pml4_table_pdpt_lowmem_rigon+0x3
 times 255 dq 0
 dq pml4_table_pdpt_lowmem_rigon+0x3
@@ -113,7 +102,7 @@ dq i*PAGE_SIZE_IN_LV_2+3+PS_MASK
 %assign i  i+1
 %endrep
 %undef i
-pml5_table:
+pml5_table_init:
 dq pml5_table_pml4_low+0x3
 times 255 dq 0
 dq pml5_table_pml4_low+0x3
@@ -121,4 +110,8 @@ times 255 dq 0
 pml5_table_pml4_low:
 dq pml4_table_pdpt_lowmem_rigon+0x3
 times 511 dq 0
+SECTION .init_stack
+align 0x1000
+dq 0
+rep times 512
 

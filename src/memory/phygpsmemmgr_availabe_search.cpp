@@ -324,7 +324,7 @@ int phymemspace_mgr::align2mb_pages_search(
                             return OS_SUCCESS;
                         }
                     } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
-                               p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST) {
+                               p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||p1->flags.state == PARTIAL) {
                         phyaddr_in_idx_t next_idx;
                         next_idx._1gb_idx = i1;
                         next_idx._2mb_idx = i2 + 1;
@@ -337,7 +337,7 @@ int phymemspace_mgr::align2mb_pages_search(
                         return OS_MEMRY_ALLOCATE_FALT;
                     }
                     continue;
-                } else if (p2->flags.state == FULL) {
+                } else if (p2->flags.state == FULL||p2->flags.state == PARTIAL) {
                     phyaddr_in_idx_t next_idx;
                     next_idx._1gb_idx = i1;
                     next_idx._2mb_idx = i2 + 1;
@@ -411,7 +411,7 @@ int phymemspace_mgr::align1gb_pages_search(
                 return OS_MEMRY_ALLOCATE_FALT;
             }
             continue;
-        } else if (p1->flags.state == FULL) {
+        } else if (p1->flags.state == FULL|| p1->flags.state == PARTIAL) {
             phyaddr_in_idx_t next_idx;
             next_idx._1gb_idx = i1 + 1;
             next_idx._2mb_idx = 0;

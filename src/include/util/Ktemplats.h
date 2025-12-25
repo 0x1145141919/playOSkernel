@@ -7,7 +7,9 @@
 #ifdef KERNEL_MODE
 #include "memory/kpoolmemmgr.h"
 #endif
-
+#ifdef USER_MODE
+#include <new>
+#endif
 
 namespace Ktemplats {
 
@@ -101,7 +103,10 @@ public:
         uint32_t hi = high_index(idx);
         if (hi >= HIGH_ENTRIES)return OS_BAD_FUNCTION;
         root_entry& e = m_root[hi];
-        if (!e.table)e.table=new sub_table();
+        if (!e.table){
+            e.table=new sub_table();
+            setmem(e.table->entries,sizeof(ValueT)*SUB_ENTRIES,0);
+        }
         uint32_t low = low_index(idx);
         if (e.table->used_map.bit_get(low)==false){
             e.table->used_map.bit_set(low,true);
@@ -140,10 +145,12 @@ public:
             delete e.table;
             e.table = nullptr;
             e.flags = 0;
+            return OS_SUCCESS;
         }
+        return OS_UNREACHABLE_CODE;
     }
 };
-    /*
+/*
  * Kernel generic doubly-linked list
  * --------------------------------
  * Design goals:

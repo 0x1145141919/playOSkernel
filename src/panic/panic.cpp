@@ -7,7 +7,11 @@
 #include <unistd.h>
 #endif 
 
+// 定义KernelPanicManager的静态成员变量
 int KernelPanicManager::shutdownDelay = 5; // 静态成员变量定义及初始化
+
+// 注意：global_gST已经在UefiRunTimeServices.cpp中定义，此处不再重复定义
+// EFI_SYSTEM_TABLE* global_gST = nullptr;
 
 void delay(uint64_t milliseconds)
 {

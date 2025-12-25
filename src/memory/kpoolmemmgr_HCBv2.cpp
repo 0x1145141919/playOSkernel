@@ -7,6 +7,7 @@
 #include "panic.h"
 #ifdef USER_MODE
 #include "stdlib.h"
+#include "kpoolmemmgr.h"
 #endif  
 #ifdef USER_MODE
     constexpr uint64_t FIRST_STATIC_HEAP_SIZE=1ULL<<24;
@@ -15,6 +16,10 @@
     bitmap_controller.Init();
 }
 #endif
+ kpoolmemmgr_t::HCB_v2::HCB_v2()
+{
+    
+}
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 {
     if(this!=&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)
@@ -42,7 +47,7 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
     if(this==&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
     bitmap_size_in_64bit_units=entries_count/64;
 #ifdef KERNEL_MODE
-    phyaddr_t bitmap_phybase=gPhyPgsMemMgr.pages_alloc(
+    phyaddr_t bitmap_phybase=phymemspace_mgr::pages_recycle(
         (bitmap_size_in_64bit_units*8)/4096,
         phymemspace_mgr::KERNEL
     );
@@ -60,6 +65,9 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
     byte_bitmap_base=(uint8_t*)this->bitmap;
     return OS_SUCCESS;
 }
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::HCB_bitmap()
+{
+}
 kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
 {
     byte_bitmap_base=nullptr;
@@ -71,7 +79,7 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
     if(status!=OS_SUCCESS){
         KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
     }
-    status=gPhyPgsMemMgr.pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
+    status=phymemspace_mgr::pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
     if(status!=OS_SUCCESS){
         KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
     }
@@ -287,11 +295,11 @@ int kpoolmemmgr_t::HCB_v2::second_stage_Init()
 {
     if(this==&kpoolmemmgr_t::first_linekd_heap)return OS_BAD_FUNCTION;
     #ifdef KERNEL_MODE
-    phybase=gPhyPgsMemMgr.pages_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL);
+    phybase=phymemspace_mgr::pages_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL);
     if(phybase==0)return OS_OUT_OF_MEMORY;
     vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
     if(vbase==0){
-        gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
+        phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
         return OS_MEMRY_ALLOCATE_FALT;
     }
     #endif
@@ -321,7 +329,7 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
     if(status!=OS_SUCCESS){
         KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
     }
-    status=gPhyPgsMemMgr.pages_recycle(phybase,total_size_in_bytes/4096);
+    status=phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
     if(status!=OS_SUCCESS){
         KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
     }
@@ -396,9 +404,9 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         aquire_alignment = 4;
     else if (alignment_log2 <= 7)
         aquire_alignment = 7;
-    else
+    else if (alignment_log2 <= 10)
         aquire_alignment = 10;
-
+    else aquire_alignment = alignment_log2;
     // 最终取较大者
     final_alignment_aquire = (size_alignment > aquire_alignment) ?
                              size_alignment : aquire_alignment;

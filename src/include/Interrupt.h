@@ -467,21 +467,15 @@ class local_processor {
      * 5.1 raw_send_ipi(..infopackage..)
      * 5.2 broadcast_exself_fixed_ipi(void(*)())
      * 6.自我ipi
-     * 7.ack_interrupt
-     * pcid管理相关接口，操作时必须确认本核心
-     * 先使用AddressSpace*table[4096]
-     * 后续做好调度器后改用位图
-     * 1.int enable_pcid()
-     * 2.uint16_t allocate_pcid(AddressSpace space)
-     * 3.int free_pcid(uint16_t pcid)
-     * 4.AddressSpace* get_pcid_space(uint16_t pcid)
      */
 
 };
 /**
  * 全局单例作为所有cpu的资源管理器，主要行为靠各个核心的Local_processor_Interrupt_mgr_t实现
- * 
+ * 硬件层面只考虑x2apic，所以硬件层面对于处理器只考虑x2apicid编号
+ * 但是系统逻辑层面使用processor_id对逻辑处理器编号
  */
+typedef uint16_t prcessor_id_t;
 class  ProccessorsManager_t { 
     private:
     static constexpr uint32_t max_processor_count=4096;
@@ -490,9 +484,11 @@ class  ProccessorsManager_t {
     static x2apicid_t bsp_apic_id;
     static local_processor *local_processor_interrupt_mgr_array[max_processor_count];
     static spinlock_cpp_t lock;
+    static prcessor_id_t*x2apicid_to_processor_id_array;
     public:
     static local_processor*get_currunt_mgr();//cpuid可以在内部查询apicid作为唯一标识，不需要额外参数
-    static local_processor*get_processor_mgr(x2apicid_t apic_id);//也允许拿别人的，但是注意锁，以及慎用
+    static local_processor*get_processor_mgr_by_x2apicid(x2apicid_t apic_id);//也允许拿别人的，但是注意锁，以及慎用
+    static local_processor*get_processor_mgr_by_processor_id(prcessor_id_t id);
     /**
      * 初始化函数，必须由bsp调用，大体思路有：
      * 解析madt表，注册bsp,
@@ -502,4 +498,5 @@ class  ProccessorsManager_t {
     static int unregist_core();
     static void*get_idt_readonly_ptr();//返回idt只读指针
     static void regist_interrupt_routine(void* routine,uint8_t vector);
+    static x2apicid_t tran_apic_id();
 };

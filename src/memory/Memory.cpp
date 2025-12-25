@@ -3,6 +3,11 @@
 #include "errno.h"
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
+#ifdef USER_MODE
+#include <stdio.h>  // 添加文件操作支持
+#include <string.h> // 添加字符串操作支持
+#include "Memory.h"
+#endif
 #define KEFLBASE 0x4000000
 #define DIRTY_ENTRY 1
 #define CLEAN_ENTRY 0
@@ -83,20 +88,22 @@ switch (EfiMemMap[i].Type)
          rootPhyMemDscptTbBsPtr[rootMapIndex].remapped_count = 0;
         rootPhyMemDscptTbBsPtr[rootMapIndex].VirtualStart = 0;
         rootPhyMemDscptTbBsPtr[rootMapIndex].Attribute = 0;
+        
         being_constructed_entry.PhysicalStart = EfiMemMap[i].PhysicalStart;
         being_constructed_entry.VirtualStart = 0;
         being_constructed_entry.Type = tmp_converted_type;
         being_constructed_entry.NumberOfPages = EfiMemMap[i].NumberOfPages;
+        if(i==EfiMemMapEntryCount-1){
+            rootPhyMemDscptTbBsPtr[rootMapIndex+1].remapped_count = 0;
+            rootPhyMemDscptTbBsPtr[rootMapIndex+1].VirtualStart = 0;
+            rootPhyMemDscptTbBsPtr[rootMapIndex+1].PhysicalStart = being_constructed_entry.PhysicalStart;
+            rootPhyMemDscptTbBsPtr[rootMapIndex+1].NumberOfPages = being_constructed_entry.NumberOfPages;
+            rootPhyMemDscptTbBsPtr[rootMapIndex+1].Type = being_constructed_entry.Type;
+
+        }
         rootMapIndex++;
     }
-   }
-ksystemramcpy(
-    rootPhyMemDscptTbBsPtr,
-    EfiMemMap,
-    rootPhymemTbentryCount*sizeof(phy_memDescriptor)
-);
-  rootPhymemTbentryCount = rootMapIndex;
-  EfiMemMapEntryCount = rootMapIndex;
+   }rootPhymemTbentryCount = rootMapIndex+1;
 max_phy_addr=rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].PhysicalStart+
 rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
 
@@ -104,6 +111,114 @@ rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
   
     this->flags.is_alloc_service_enabled = true;
 }
+
+
+#ifdef USER_MODE
+    // 专门用于用户空间初始化的Init函数
+    void GlobalMemoryPGlevelMgr_t::Init()
+{
+    // 打开文件
+    FILE *file = fopen("/home/pangsong/PS_git/OS_pj_uefi/kernel/logs/log_selftest.txt", "r");
+    if (!file) {
+        // 如果无法打开文件，使用默认初始化
+        this->flags.is_alloc_service_enabled = false;
+        this->flags.is_vaddr_enabled = true;
+        return;
+    }
+
+    // 跳过文件头信息
+    char line[512];
+    while (fgets(line, sizeof(line), file)) {
+        if (strstr(line, "Idx | Type") != NULL) {
+            break;  // 找到表格头部，开始解析数据
+        }
+    }
+    
+    // 跳过分隔线
+    fgets(line, sizeof(line), file);
+
+    // 临时存储内存描述符
+    EFI_MEMORY_DESCRIPTORX64 temp_descriptors[256];
+    uint64_t count = 0;
+
+    // 解析每一行数据
+    while (fgets(line, sizeof(line), file) && count < 256) {
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '-' || strstr(line, "Detailed Memory Map") != NULL) {
+            continue; // 跳过空行和分隔线
+        }
+
+        // 解析一行数据
+        unsigned int idx;
+        char type_str[64];
+        unsigned long long physical_start;
+        unsigned long long pages;
+        unsigned long long size;
+        char attributes[64];
+
+        int fields = sscanf(line, 
+            " %u | %s | 0x%llx | %llu | %llu MB | %s", 
+            &idx, type_str, &physical_start, &pages, &size, attributes);
+
+        if (fields < 4) {
+            // 尝试另一种格式
+            fields = sscanf(line, 
+                " %u | %s | 0x%llx | %llu | %llu MB |", 
+                &idx, type_str, &physical_start, &pages, &size);
+        }
+
+        if (fields >= 4) {
+            // 设置描述符
+            temp_descriptors[count].PhysicalStart = physical_start;
+            temp_descriptors[count].VirtualStart = physical_start;  // 在初始化时虚拟地址通常等于物理地址
+            temp_descriptors[count].NumberOfPages = pages;
+            temp_descriptors[count].ReservedA = 0;
+            temp_descriptors[count].ReservedB = 0;
+            
+            // 解析类型字符串并转换为PHY_MEM_TYPE枚举值
+            if (strcmp(type_str, "ConventionalMemory") == 0) {
+                temp_descriptors[count].Type = freeSystemRam;
+            } else if (strcmp(type_str, "LoaderCode") == 0) {
+                temp_descriptors[count].Type = EFI_LOADER_CODE;
+            } else if (strcmp(type_str, "LoaderData") == 0) {
+                temp_descriptors[count].Type = EFI_LOADER_DATA;
+            } else if (strcmp(type_str, "BootServicesCode") == 0) {
+                temp_descriptors[count].Type = EFI_BOOT_SERVICES_CODE;
+            } else if (strcmp(type_str, "BootServicesData") == 0) {
+                temp_descriptors[count].Type = EFI_BOOT_SERVICES_DATA;
+            } else if (strcmp(type_str, "RuntimeServicesCode") == 0) {
+                temp_descriptors[count].Type = EFI_RUNTIME_SERVICES_CODE;
+            } else if (strcmp(type_str, "RuntimeServicesData") == 0) {
+                temp_descriptors[count].Type = EFI_RUNTIME_SERVICES_DATA;
+            } else if (strcmp(type_str, "ACPIReclaimMemory") == 0) {
+                temp_descriptors[count].Type = EFI_ACPI_RECLAIM_MEMORY;
+            } else if (strcmp(type_str, "ACPIMemoryNVS") == 0) {
+                temp_descriptors[count].Type = EFI_ACPI_MEMORY_NVS;
+            } else if (strcmp(type_str, "MemoryMappedIO") == 0) {
+                temp_descriptors[count].Type = EFI_MEMORY_MAPPED_IO;
+            } else if (strcmp(type_str, "Reserved") == 0) {
+                temp_descriptors[count].Type = EFI_RESERVED_MEMORY_TYPE;
+            } else {
+                // 默认为保留内存类型
+                temp_descriptors[count].Type = EFI_RESERVED_MEMORY_TYPE;
+            }
+            
+            // 设置属性（这里简化处理，根据attributes字符串设置）
+            temp_descriptors[count].Attribute = 0;
+            if (strstr(attributes, "RUNTIME")) {
+                temp_descriptors[count].Attribute |= 0x8000000000000000ULL; // EFI_MEMORY_RUNTIME
+            }
+            
+            count++;
+        }
+    }
+    
+    fclose(file);
+    
+    // 调用内核空间的Init函数
+    Init(temp_descriptors, count);
+}
+#endif
+
 phy_memDescriptor *GlobalMemoryPGlevelMgr_t::getGlobalPhysicalMemoryInfo()
 {
     return rootPhyMemDscptTbBsPtr;
@@ -350,31 +465,7 @@ int GlobalMemoryPGlevelMgr_t::FixedPhyaddPgallocate(
     return 0;
 }
 
-int GlobalMemoryPGlevelMgr_t::defaultPhyaddPgallocate(
-    IN OUT phyaddr_t& addr,  // 通过引用修改addr
-    IN uint64_t size,
-    IN PHY_MEM_TYPE type)
-{
-        if (flags.is_alloc_service_enabled==0)
-    {
-       return -EINVAL;
-    }
-    const uint64_t requiredPages = (size + PAGE_SIZE_4KB - 1) / PAGE_SIZE_4KB;
-    
-    // 遍历查找合适的空闲块
-    for (uint64_t i = 2; i < rootPhymemTbentryCount; ++i) {
-        phy_memDescriptor* desc = &rootPhyMemDscptTbBsPtr[i];
-        
-        if (desc->Type == freeSystemRam && 
-            desc->NumberOfPages >= requiredPages) {
-            
-            addr = desc->PhysicalStart;  // 设置输出地址
-            return FixedPhyaddPgallocate(addr, size, type);
-        }
-    }
-    
-    return -ENOMEM;  // 没有找到合适的内存块
-}
+
 
 
 /**
@@ -493,7 +584,7 @@ const char *MemoryTypeToString(UINT32 type)
         case 17: return "OS_KERNEL_DATA";
         case 18: return "OS_KERNEL_CODE";
         case 19: return "OS_KERNEL_STACK";
-
+        case 24: return "OS_MEMSEG_HOLE";
         default: return "UnknownType";
     }
 }
@@ -665,3 +756,12 @@ int GlobalMemoryPGlevelMgr_t::descriptor_remapped_dec(phyaddr_t base) {
     return OS_SUCCESS;
 }
 
+EFI_MEMORY_DESCRIPTORX64 *GlobalMemoryPGlevelMgr_t::getEfiMemoryDescriptorTable()
+{
+    return EfiMemMap;
+}
+
+uint64_t GlobalMemoryPGlevelMgr_t::getEfiMemoryDescriptorTableEntryCount()
+{
+    return EfiMemMapEntryCount;
+}

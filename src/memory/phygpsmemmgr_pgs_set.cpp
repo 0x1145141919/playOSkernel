@@ -17,43 +17,61 @@ int phymemspace_mgr::pages_state_set(phyaddr_t base,
     if (num_of_4kbpgs == 0) return 0;
 
     // ---- Step 1: 切段 ----
-    seg_to_pages_info_pakage_t pak;
+    seg_to_pages_info_package_t pak;
     int r = phymemseg_to_pacage(base, num_of_4kbpgs, pak);
     if (r != 0) return r;
 
     // 定义四个lambda函数替换原来的成员函数
-    auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
-        page_size1gb_t& p1 = *top_1gb_table->get(idx_1gb);
-        if (!p1.flags.is_sub_valid)
-        {
-            page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];
-            if(!sub2){
-                return OS_OUT_OF_MEMORY;
-            }
-
-            kpoolmemmgr_t::clear(sub2);
-
-            p1.sub2mbpages = sub2;
-            p1.flags.is_sub_valid = 1;
-            p1.flags.state = PARTIAL;
+    /**
+     * 外部保证这个要拆分1GB表项的有效性
+     */
+auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
+    page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
+    if (!p1->flags.is_sub_valid)
+    {
+        page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];
+        if(!sub2){
+            return OS_OUT_OF_MEMORY;
         }
 
-        return OS_SUCCESS;
-    };
+        setmem(sub2, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t), 0);
 
-    auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2) -> int {
+        p1->sub2mbpages = sub2;
+        p1->flags.is_sub_valid = 1;
+        p1->flags.state = PARTIAL;
+        
+        // 只有在非acclaim_backhole操作时才初始化子页状态
+        if (flags.op != pages_state_set_flags_t::acclaim_backhole) {
+            page_state_t state = flags.params.if_mmio ? MMIO_FREE : FREE;
+            for(uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++){
+                sub2[i].flags.state = state;
+            }
+        }
+    }
+
+    return OS_SUCCESS;
+};
+   auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2) -> int {
         if (!p2.flags.is_sub_valid)
         {
             page_size4kb_t* sub4 = new page_size4kb_t[PAGES_4KB_PER_2MB];
             if (!sub4){return OS_OUT_OF_MEMORY;}
 
-            kpoolmemmgr_t::clear(sub4);
+            setmem(sub4, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t), 0);
 
             p2.sub_pages = sub4;
             p2.flags.is_sub_valid = 1;
             p2.flags.state = PARTIAL;
+            
+            // 只有在非acclaim_backhole操作时才初始化子页状态
+            if (flags.op != pages_state_set_flags_t::acclaim_backhole) {
+                page_state_t state = flags.params.if_mmio ? MMIO_FREE : FREE;
+                for(uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++) {
+                    sub4[i].flags.state = state;
+                }
+            }
         }
-        return 0;
+        return OS_SUCCESS;
     };
 
     auto try_fold_2mb_lambda = [flags](page_size2mb_t &p2) -> int {
@@ -206,7 +224,7 @@ int phymemspace_mgr::pages_state_set(phyaddr_t base,
     {// ---- Step 2: 遍历每个段条目 ----
     for (int i = 0; i < 5; i++)
     {
-        auto &ent = pak.entryies[i];
+        auto &ent = pak.entries[i];
         if (ent.num_of_pages == 0) continue;
 
         uint64_t pg4k_start = ent.base >> 12;
@@ -224,12 +242,26 @@ int phymemspace_mgr::pages_state_set(phyaddr_t base,
             // ===== 2MB 级 =====
             uint64_t idx_2mb = pg4k_start / PAGES_4KB_PER_2MB;
             uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
-
+            int status=0;
+            page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
+            if(p1==nullptr)
+            {
+                if(flags.op==pages_state_set_flags_t::acclaim_backhole)
+                {
+                    status=top_1gb_table->enable_idx(idx_1gb);
+                    if(status!=OS_SUCCESS)return status;
+                    p1 = top_1gb_table->get(idx_1gb);
+                    p1->flags.is_sub_valid=false;
+                }else{
+                    kputsSecure("_4kb_pages_state_set:attempt to create a new entry in no black hole mode\n");
+                    return OS_RESOURCE_CONFILICT;
+                }
+            }
             if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)
             return r;
 
             // ---- 调用真正的 2MB setter ----
-            page_size2mb_t *p2 = top_1gb_table->get(idx_1gb)->sub2mbpages;
+            page_size2mb_t *p2 = p1->sub2mbpages;
             r = _2mb_pages_state_set_lambda(idx_2mb % PAGES_2MB_PER_1GB,
                                      ent.num_of_pages,
                                      p2);
@@ -242,10 +274,23 @@ int phymemspace_mgr::pages_state_set(phyaddr_t base,
             // ===== 4KB 级 =====
             uint64_t idx_2mb = pg4k_start / PAGES_4KB_PER_2MB;
             uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
-
-            page_size1gb_t &p1 = *top_1gb_table->get(idx_1gb);
+            int status=0;
+            page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
+            if(p1==nullptr)
+            {
+                if(flags.op==pages_state_set_flags_t::acclaim_backhole)
+                {
+                    status=top_1gb_table->enable_idx(idx_1gb);
+                    if(status!=OS_SUCCESS)return status;
+                    p1 = top_1gb_table->get(idx_1gb);
+                    p1->flags.is_sub_valid=false;
+                }else{
+                    kputsSecure("_4kb_pages_state_set:attempt to create a new entry in no black hole mode\n");
+                    return OS_RESOURCE_CONFILICT;
+                }
+            }
             if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)return r;
-            page_size2mb_t &p2ent = p1.sub2mbpages[idx_2mb%PAGES_2MB_PER_1GB];
+            page_size2mb_t &p2ent = p1->sub2mbpages[idx_2mb%PAGES_2MB_PER_1GB];
             if((r=ensure_2mb_subtable_lambda(p2ent))!=OS_SUCCESS)return r;
           
             // ---- 调用 4KB setter ----
@@ -255,14 +300,14 @@ int phymemspace_mgr::pages_state_set(phyaddr_t base,
                                      p4);
             if (r != 0) return r;
                 try_fold_2mb_lambda(p2ent);
-                try_fold_1gb_lambda(p1);
+                try_fold_1gb_lambda(*p1);
             
         }
     }
     }else{
     for (int i = 0; i < 5; i++)
     {
-        auto &ent = pak.entryies[i];
+        auto &ent = pak.entries[i];
         if (ent.num_of_pages == 0) continue;
         
         

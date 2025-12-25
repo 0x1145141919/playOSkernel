@@ -10,6 +10,9 @@ class PhyAddrAccessor {
     static VM_DESC cache_tb[CACHE_VMDESC_MAX];
     static bool is_init_cr3();
     public:
+    #ifdef USER_MODE
+    PhyAddrAccessor();
+    #endif
     static uint8_t readu8(phyaddr_t addr);
     static uint16_t readu16(phyaddr_t addr);
     static uint32_t readu32(phyaddr_t addr);
@@ -19,3 +22,6 @@ class PhyAddrAccessor {
     static void writeu32(phyaddr_t addr,uint32_t value);
     static void writeu64(phyaddr_t addr,uint64_t value);
 }; 
+#ifdef USER_MODE
+    extern PhyAddrAccessor gAccessor;
+#endif

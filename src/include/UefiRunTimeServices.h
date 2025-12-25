@@ -22,7 +22,7 @@ class EFI_RT_SVS
             EFI_STATUS status,
             uint64_t data_size,
             void *data_ptr);
-        static void Init(EFI_SYSTEM_TABLE *sti, uint64_t mapver);
+        static int Init(EFI_SYSTEM_TABLE *sti, uint64_t mapver);
         static void rt_hotreset();
         static void rt_coldreset();
         static void rt_shutdown();

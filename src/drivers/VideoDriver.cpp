@@ -1119,7 +1119,7 @@ int kpnumSecure(void* numptr, int format, int len)
 { 
     if (!numptr) return -1;
     
-    uint32_t num = *(uint32_t*)numptr;
+    uint64_t num = *(uint64_t*)numptr;
     char buffer[64] = {0};
     
     switch (format) {
