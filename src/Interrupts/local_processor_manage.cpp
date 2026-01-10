@@ -1,12 +1,12 @@
-#include "Interrupt.h"
+#include "Interrupt_system/loacl_processor.h"
 #include "util/OS_utils.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/AddresSpace.h"
-#include "gSTResloveAPIs.h"
+#include "kout.h"
 #include "panic.h"
-#include "VideoDriver.h"
 #include "util/cpuid_intel.h"
 #include "msr_offsets_definitions.h"
+x64_local_processor *x86_smp_processors_container::local_processor_interrupt_mgr_array[x86_smp_processors_container::max_processor_count];
 static constexpr TSSDescriptorEntry kspace_TSS_entry = {
     .limit = sizeof(TSSentry) ,
     .base0 = 0,
@@ -23,10 +23,85 @@ static constexpr TSSDescriptorEntry kspace_TSS_entry = {
     .base3 = 0,
     .reserved2 = 0
 };
-local_processor::local_processor()
+void illeagale_interrupt_post(uint16_t vector)
+{
+    kio::bsp_kout<<kio::now<<"[x64_local_processor]illegal interrupt on vector"<<vector<<"and apicid:"<<query_apicid()<<kio::kendl;
+}
+template<uint8_t Vec>
+__attribute__((interrupt))
+void illegal_interrupt_handler(interrupt_frame* frame){
+    if(frame->cs&0x3){
+        kio::bsp_kout<<kio::now<<"[x64_local_processor]illegal interrupt on vector"<<Vec<<"and apicid:"<<query_apicid()<<kio::kendl;
+    }
+    illeagale_interrupt_post(Vec);
+}
+logical_idt template_idt[256];
+
+template<uint8_t Vec>
+struct illegal_idt_filler {
+    static void fill(logical_idt* idt) {
+        idt[Vec].handler   = (void*)illegal_interrupt_handler<Vec>;
+        idt[Vec].type      = 0xE;
+        idt[Vec].ist_index = 0;
+        idt[Vec].dpl       = 0;
+
+        illegal_idt_filler<Vec - 1>::fill(idt);
+    }
+};
+template<>
+struct illegal_idt_filler<0> {
+static void fill(logical_idt* idt) {
+        idt[0].handler   = (void*)illegal_interrupt_handler<0>;
+        idt[0].type      = 0xE;
+        idt[0].ist_index = 0;
+        idt[0].dpl       = 0;
+    }
+};
+
+void x86_smp_processors_container::template_idt_init(){
+    illegal_idt_filler<255>::fill(template_idt);
+    template_idt[ivec::DIVIDE_ERROR].handler=(void*)exception_handler_div_by_zero;
+    template_idt[ivec::NMI].handler=(void*)exception_handler_nmi;
+    template_idt[ivec::NMI].ist_index=3;
+    template_idt[ivec::BREAKPOINT].handler=(void*)exception_handler_breakpoint;
+    template_idt[ivec::BREAKPOINT].ist_index=4;
+    template_idt[ivec::BREAKPOINT].dpl=3;
+    template_idt[ivec::OVERFLOW].handler=(void*)exception_handler_overflow;
+    template_idt[ivec::OVERFLOW].dpl=3;
+    template_idt[ivec::INVALID_OPCODE].handler=(void*)exception_handler_invalid_opcode;
+    template_idt[ivec::DOUBLE_FAULT].handler=(void*)exception_handler_double_fault;
+    template_idt[ivec::DOUBLE_FAULT].ist_index=1;
+    template_idt[ivec::INVALID_TSS].handler=(void*)exception_handler_invalid_tss;
+    template_idt[ivec::GENERAL_PROTECTION_FAULT].handler=(void*)exception_handler_general_protection;
+    template_idt[ivec::PAGE_FAULT].handler=(void*)exception_handler_page_fault;
+    template_idt[ivec::MACHINE_CHECK].handler=(void*)exception_handler_machine_check;
+    template_idt[ivec::MACHINE_CHECK].ist_index=2;
+    template_idt[ivec::SIMD_FLOATING_POINT_EXCEPTION].handler=(void*)exception_handler_simd_floating_point;
+    template_idt[ivec::VIRTUALIZATION_EXCEPTION].handler=(void*)exception_handler_virtualization;
+    template_idt[ivec::LAPIC_TIMER].handler=(void*)timer_interrupt;
+    template_idt[ivec::IPI].handler=(void*)IPI;
+}
+int x86_smp_processors_container::regist_core()
+{
+    uint64_t bsp_specify=rdmsr(msr::apic::IA32_APIC_BASE);
+    if(bsp_specify&(1<<8)){
+        local_processor_interrupt_mgr_array[0]=new x64_local_processor(0);
+        return OS_SUCCESS;
+    }else{
+        for(uint32_t i=0;i<max_processor_count;i++){
+            if(!local_processor_interrupt_mgr_array[i]){
+                local_processor_interrupt_mgr_array[i]=new x64_local_processor(i);
+                return OS_SUCCESS;
+            }
+        }
+    }
+    return OS_RESOURCE_CONFILICT;
+}
+x64_local_processor::x64_local_processor(uint32_t alloced_id)
 {
     x2apicid_t id=query_x2apicid();
     this->apic_id=id;
+    this->processor_id=alloced_id;
     gdt.entries[K_cs_idx]=kspace_CS_entry;
     gdt.entries[K_ds_ss_idx]=kspace_DS_SS_entry;
     gdt.entries[U_cs_idx]=userspace_CS_entry;
@@ -42,17 +117,20 @@ local_processor::local_processor()
     vaddr_t ist1=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE,DF_STACKSIZE,KSPACE_RW_ACCESS,0,true);
     vaddr_t ist2=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE,MC_STACKSIZE,KSPACE_RW_ACCESS,0,true);
     vaddr_t ist3=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE,NMI_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-        KernelPanicManager::panic("[local_processor]init stack failed");
-    
-    tss.rsp0=rsp0+RSP0_STACKSIZE;
+    vaddr_t ist4=(vaddr_t)KspaceMapMgr::pgs_remapp(rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE+NMI_STACKSIZE,BP_DBG_STACKSIZE,KSPACE_RW_ACCESS,0,true);
+    if (!rsp0 || !ist1 || !ist2 || !ist3|| !ist4) {
+        KernelPanicManager::panic("[x64_local_processor]init stack failed");
+    }
+    constexpr uint16_t RESERVED_1PG_SIZE=0x1000;
+    tss.rsp0=rsp0+RSP0_STACKSIZE-RESERVED_1PG_SIZE;
     tss.ist[0]=0;
-    tss.ist[1]=ist1+DF_STACKSIZE;
-    tss.ist[2]=ist2+MC_STACKSIZE;
-    tss.ist[3]=ist3+NMI_STACKSIZE;
-    vaddr_t readonly_idt=(vaddr_t)ProccessorsManager_t::get_idt_readonly_ptr();
+    tss.ist[1]=ist1+DF_STACKSIZE-RESERVED_1PG_SIZE;
+    tss.ist[2]=ist2+MC_STACKSIZE-RESERVED_1PG_SIZE;
+    tss.ist[3]=ist3+NMI_STACKSIZE-RESERVED_1PG_SIZE;
+    tss.ist[4]=ist4+BP_DBG_STACKSIZE-RESERVED_1PG_SIZE;
     GDTR gdtr={
-        .base=reinterpret_cast<uint64_t>(&gdt),
-        .limit=sizeof(gdt)-1
+        .limit=sizeof(gdt)-1,
+        .base=reinterpret_cast<uint64_t>(&gdt)        
     };
     // 1. 加载新的 GDT
     asm volatile ("lgdt %0" : : "m"(gdtr) : "memory");
@@ -73,94 +151,66 @@ local_processor::local_processor()
         "mov %0, %%ds\n\t"
         "mov %0, %%es\n\t"
         "mov %0, %%ss\n\t"
+        "mov %0, %%fs\n\t"
+        "mov %0, %%gs\n\t"
         // FS/GS 特殊，通常用来放 per-cpu 数据，稍后设置
         : : "r"(uint64_t(K_ds_ss_idx << 3)) : "memory"
     );
+    auto tran_to_phy_IDT_ENTRY=[](logical_idt entry)->IDTEntry{
+        IDTEntry result={0};
+        result.offset_low=static_cast<uint16_t>(reinterpret_cast<uint64_t>(entry.handler)&0xFFFF);
+        result.offset_mid=static_cast<uint16_t>((reinterpret_cast<uint64_t>(entry.handler)>>16)&0xFFFF);
+        result.offset_high=static_cast<uint32_t>((reinterpret_cast<uint64_t>(entry.handler)>>32)&0xFFFFFFFF);
+        result.type=entry.type;
+        result.ist_index=entry.ist_index;
+        result.dpl=entry.dpl;
+        result.present=1;
+        result.segment_selector=K_cs_idx<<3;
+        return result;
+    };
+    for(uint16_t i=0;i<256;i++){
+        idt[i]=tran_to_phy_IDT_ENTRY(template_idt[i]);
+    }
     IDTR idtr={
-        .base=readonly_idt,
-        .limit=256*sizeof(IDTEntry)-1
+        .limit=256*sizeof(IDTEntry)-1,
+        .base=(uint64_t)idt
     };
     asm volatile("lidt %0"::"m"(idtr));
     uint16_t tss_selector = gdt_headcount << 3;
     asm volatile("ltr %0"::"m"(tss_selector));
+    fs_slot[L_PROCESSOR_GS_IDX]=(uint64_t)this;
+    wrmsr(msr::syscall::IA32_FS_BASE,(uint64_t)&fs_slot);
+    gs_slot[STACK_PROTECTOR_CANARY_IDX]=0x2345676543;//应该用rdrand搞一个随机值
+    wrmsr(msr::syscall::IA32_GS_BASE,(uint64_t)&gs_slot);
     if(is_x2apic_supported()){
         uint64_t ia32_apic_base=rdmsr(msr::apic::IA32_APIC_BASE);
         ia32_apic_base|=(1<<10);
         wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);
     }else{
-        kputsSecure("[local_processor]x2apic not supported,unsupportted CPU");
-        KernelPanicManager::panic("[local_processor]x2apic not supported");
+        kio::bsp_kout<<kio::now<<"[x64_local_processor]x2apic not supported"<<kio::kendl;
+        KernelPanicManager::panic("[x64_local_processor]x2apic not supported");
     }
 }
-uint64_t local_processor::rdtsc()
+
+int x64_local_processor::unsafe_handler_register_without_vecnum_chech(uint8_t vector, void *handler)
 {
-    uint32_t lo, hi;
+    idt[vector].offset_low = static_cast<uint16_t>(reinterpret_cast<uint64_t>(handler) & 0xFFFF);
+    idt[vector].offset_mid = static_cast<uint16_t>((reinterpret_cast<uint64_t>(handler) >> 16) & 0xFFFF);
+    idt[vector].offset_high = static_cast<uint32_t>((reinterpret_cast<uint64_t>(handler) >> 32) & 0xFFFFFFFF);
+    idt[vector].present = 1;
+    idt[vector].reserved3 = 0;
+    idt[vector].reserved2 = 0;
+    idt[vector].reserved1 = 0;
+    return 0;
+}
+
+int x64_local_processor::unsafe_handler_unregister_without_vecnum_chech(uint8_t vector)
+{
     
-    // 使用内联汇编读取时间戳计数器
-    // rdtsc 指令将 64 位时间戳存储在 EDX:EAX 寄存器对中
-    __asm__ __volatile__ (
-        "rdtsc"                  // 执行 rdtsc 指令
-        : "=a" (lo), "=d" (hi)   // 输出：lo = EAX, hi = EDX
-        :                         // 无输入
-        : "%ecx", "%ebx"         // 破坏的寄存器（某些编译器需要）
-    );
-    
-    // 将高低两部分组合成 64 位值
-    return ((uint64_t)hi << 32) | lo;
+    idt[vector].present = 0;
+    return 0;
 }
-void local_processor::set_tsc_ddline(uint64_t time)
+int x64_local_processor::template_init()
 {
-    wrmsr(msr::timer::IA32_TSC_DEADLINE,time);
-}
-void local_processor::raw_config_timer(timer_lvt_entry entry)
-{
-    wrmsr(msr::apic::IA32_X2APIC_LVT_TIMER,entry.raw);
-}
-
-void local_processor::raw_config_timer_init_count(initcout_reg_t count)
-{
-    wrmsr(msr::apic::IA32_X2APIC_TIMER_INITIAL_COUNT,(uint64_t)count);
-}
-
-void local_processor::raw_config_timer_divider(devide_reg_t reg)
-{
-    wrmsr(msr::apic::IA32_X2APIC_TIMER_DIVIDE_CONFIG,reg.raw);
-}
-
-current_reg_t local_processor::get_timer_current_count()
-{
-    return current_reg_t(rdmsr(msr::apic::IA32_X2APIC_TIMER_CURRENT_COUNT));
-}
-
-void local_processor::set_tsc_ddline_on_vec(uint8_t vector, uint64_t ddline)
-{
-    timer_lvt_entry entry=ddline_timer;
-    entry.param.vector=vector;
-    raw_config_timer(entry);
-    set_tsc_ddline(ddline);
-}
-
-void local_processor::set_tsc_ddline_default(uint64_t ddline)
-{
-    raw_config_timer(ddline_timer);
-    set_tsc_ddline(ddline);
-}
-
-void local_processor::cancel_tsc_ddline()
-{
-    wrmsr(msr::timer::IA32_TSC_DEADLINE,0);
-}
-
-void local_processor::raw_send_ipi(x2apic_icr_t icr)
-{
-    wrmsr(msr::apic::IA32_X2APIC_ICR,icr.raw);
-}
-
-void local_processor::broadcast_exself_fixed_ipi(void (*ipi_handler)())
-{
-    global_ipi_handler=ipi_handler;
-    asm volatile (
-        "sfence"    
-    );
-    raw_send_ipi(broadcast_exself_icr);
+    return 0;
 }

@@ -3,10 +3,10 @@
 #include "errno.h"
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
+#include "kout.h"
 #ifdef USER_MODE
 #include <stdio.h>  // 添加文件操作支持
 #include <string.h> // 添加字符串操作支持
-#include "Memory.h"
 #endif
 #define KEFLBASE 0x4000000
 #define DIRTY_ENTRY 1
@@ -591,29 +591,25 @@ const char *MemoryTypeToString(UINT32 type)
 
 // 打印单个内存描述符
 void PrintMemoryDescriptor(const EFI_MEMORY_DESCRIPTORX64* desc) {
-    // 1. 打印起始物理地址
-    kputsSecure("Start: 0x");
-    kpnumSecure((void*)&desc->PhysicalStart, UNHEX, sizeof(EFI_PHYSICAL_ADDRESS));
+    // 使用kio::kout进行输出
+    kio::bsp_kout << "Start: 0x" << (void*)desc->PhysicalStart;
     
-    // 2. 计算并打印终止物理地址
+    // 计算并打印终止物理地址
     UINT64 endAddress = desc->PhysicalStart + (desc->NumberOfPages * EFI_PAGE_SIZE);
-    kputsSecure(" - End: 0x");
-    kpnumSecure((void*)&endAddress, UNHEX, sizeof(UINT64));
+    kio::bsp_kout << " - End: 0x" << (void*)endAddress;
     
-    // 3. 打印内存类型和属性
-    kputsSecure(" Type: ");
-    kputsSecure((char*)MemoryTypeToString(desc->Type));
+    // 打印内存类型和属性
+    kio::bsp_kout << " Type: " << MemoryTypeToString(desc->Type);
     
-    kputsSecure(" Attr: 0x");
-    kpnumSecure((void*)&desc->Attribute, UNHEX, sizeof(UINT64));
+    kio::bsp_kout << " Attr: 0x" << (uint64_t)desc->Attribute;
     
-    // 4. 打印页数（可选）
-    kputsSecure(" Pages: ");
-    kpnumSecure((void*)&desc->NumberOfPages, UNDEC, sizeof(UINT64));
+    // 打印页数
+    kio::bsp_kout << " Pages: " << (uint64_t)desc->NumberOfPages;
     
     // 换行
-    kputsSecure("\n");
+    kio::bsp_kout << kio::kendl;
 }
+
 phyaddr_t GlobalMemoryPGlevelMgr_t::getMaxPhyaddr()
 {
     return max_phy_addr;

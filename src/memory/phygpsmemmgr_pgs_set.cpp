@@ -1,7 +1,7 @@
 #include "memory/phygpsmemmgr.h"
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
-#include "VideoDriver.h"
+#include "kout.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
@@ -188,12 +188,12 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     status=top_1gb_table->enable_idx(entry_base_idx+i);
                     if(status!=OS_SUCCESS){
                         //可能是内存不足或者参数非法越界
-                        kputsSecure("_1gb_pages_state_set:unable to alloc memory or out of bound\n");
+                        kio::bsp_kout<<"_1gb_pages_state_set:enable_idx failed for index:"<<entry_base_idx+i<<kio::kendl;
                         return OS_FAIL_PAGE_ALLOC;
                     }
                     _1=top_1gb_table->get(entry_base_idx+i);
                 }else{//非黑洞模式不得创建
-                    kputsSecure("_1gb_pages_state_set:attempt to create a new entry in no black hole mode\n");
+                    kio::bsp_kout<<"_1gb_pages_state_set:get failed for index:"<<entry_base_idx+i<<kio::kendl;
                     return OS_INVALID_FILE_MODE;
                 }
             }
@@ -253,13 +253,12 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     p1 = top_1gb_table->get(idx_1gb);
                     p1->flags.is_sub_valid=false;
                 }else{
-                    kputsSecure("_4kb_pages_state_set:attempt to create a new entry in no black hole mode\n");
+                    kio::bsp_kout<<"_4kb_pages_state_set:attempt to create a new entry in no black hole mode"<<kio::kendl;
                     return OS_RESOURCE_CONFILICT;
                 }
             }
             if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)
             return r;
-
             // ---- 调用真正的 2MB setter ----
             page_size2mb_t *p2 = p1->sub2mbpages;
             r = _2mb_pages_state_set_lambda(idx_2mb % PAGES_2MB_PER_1GB,
@@ -285,7 +284,7 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     p1 = top_1gb_table->get(idx_1gb);
                     p1->flags.is_sub_valid=false;
                 }else{
-                    kputsSecure("_4kb_pages_state_set:attempt to create a new entry in no black hole mode\n");
+                    kio::bsp_kout<<"_4kb_pages_state_set:attempt to create a new entry in no black hole mode"<<kio::kendl;
                     return OS_RESOURCE_CONFILICT;
                 }
             }

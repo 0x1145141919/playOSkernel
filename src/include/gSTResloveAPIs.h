@@ -13,7 +13,7 @@ constexpr const char* ACPI_MADT_SIGNATURE = "APIC";
 constexpr const char* ACPI_DSDT_SIGNATURE = "DSDT";
 constexpr const char* ACPI_SSDT_SIGNATURE = "SSDT";
 constexpr const char* ACPI_MCFG_SIGNATURE = "MCFG";
-
+constexpr const char* ACPI_HPET_SIGNATURE = "HPET";
 
 
 struct RSDP_struct{
@@ -122,7 +122,13 @@ struct MCFG_Table {
     uint8_t  Reserved[8];               // 保留字段
     // 后续是设备配置空间描述符数组
 } __attribute__((packed));
-
+struct HPET_Table {
+        struct ACPI_Table_Header Header;
+        uint32_t  Hardware_Rev_ID;         // 硬件修订ID
+        uint32_t  reserved;
+        phyaddr_t Base_Address;            // HPET寄存器的物理基地址
+        uint32_t reserved2;
+    }__attribute__((packed));
 // 将4字符ACPI签名转换为uint32（小端序）
 constexpr uint32_t make_acpi_signature(const char* str) {
     return static_cast<uint32_t>(str[0]) |
@@ -139,6 +145,7 @@ static constexpr uint32_t MADT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_MADT_
 static constexpr uint32_t DSDT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_DSDT_SIGNATURE); // 'DSDT'
 static constexpr uint32_t SSDT_SIGNATURE_UINT32 = make_acpi_signature(ACPI_SSDT_SIGNATURE); // 'SSDT'
 static constexpr uint32_t MCFG_SIGNATURE_UINT32 = make_acpi_signature(ACPI_MCFG_SIGNATURE); // 'MCFG'
+static constexpr uint32_t HPET_SIGNATURE_UINT32 = make_acpi_signature(ACPI_HPET_SIGNATURE);
 
 class acpimgr_t {
 private:
@@ -153,6 +160,7 @@ private:
     uint32_t MADT_OFFSET;
     uint32_t DSDT_OFFSET;
     uint32_t MCFG_OFFSET;
+    uint32_t HPET_OFFSET;
     vaddr_t acpi_seg_vbase;
     uint64_t acpi_seg_size;
     phyaddr_t acpi_seg_pbase;   

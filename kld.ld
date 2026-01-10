@@ -80,8 +80,8 @@ SECTIONS {
     . = ALIGN(4096);
     _rodata_end = . ;
     } > VRAM :rodata
-
     . = ALIGN(4096);
+    
     _stack_lma = ALIGN(LOADADDR(.rodata) + SIZEOF(.rodata),4096);
     .stack :  AT( _stack_lma){
         _stack_bottom = .;

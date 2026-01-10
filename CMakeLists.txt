@@ -12,9 +12,9 @@ if(NOT NASM_EXECUTABLE)
     message(FATAL_ERROR "NASM assembler not found!")
 endif()
 
-add_definitions(
-    #-DPG5LV_ENABLE
-)
+
+    add_definitions(-D_GNU_SOURCE)  # 有时候需要这个
+
 # 设置 NASM 编译选项（例如：-f elf64 或 -f win32）
 set(NASM_FLAGS "-f elf64")
 # 定义汇编文件编译规则
@@ -49,6 +49,12 @@ set(SRC_COMMON
     src/drivers/VideoDriver.cpp
     src/drivers/PortDriver.cpp
     src/utils/kintrin.cpp
+    src/panic/panic.cpp
+    src/utils/bitmap.cpp
+    src/utils/lock.cpp
+    src/utils/RB_btree.cpp
+    src/kout.cpp
+    src/utils/intel_cpuid.cpp
 )
 
 # 添加gnu-efi作为外部项目
@@ -72,16 +78,16 @@ add_subdirectory(src/fs)
 # 内核可执行文件
 add_executable(kernel.elf
     src/efi_about/UefiRunTimeServices.cpp
-    ${CMAKE_SOURCE_DIR}/src/kinit.cpp
+    src/kinit.cpp
         src/utils/kcirclebufflogMgr.cpp
-        src/Processor/processor_self_manage.cpp
         src/kernel_entry.asm
-        src/Interrupts/Interrupt_Init.cpp
-        src/Processor/processor_Ks_stacks_mgr.cpp
-        src/panic/panic.cpp
+        src/utils/int128_div.cpp
+        #src/Interrupts/Interrupt_Init.cpp
         src/Interrupts/exceptions_handler.cpp
+        src/Interrupts/local_processor_manage.cpp
+        src/drivers/HPET.cpp
+        src/utils/time.cpp
         src/acpi_subsystems/acpimgr.cpp
-        src/Interrupts/io_apic_mgr.cpp
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
@@ -90,6 +96,7 @@ add_executable(mkinitramfs
     src/drivers/MemoryDisk.cpp
      ${SRC_COMMON}
 )
+
 target_include_directories(
     mkinitramfs PRIVATE
     "/usr/include/efi"
@@ -124,6 +131,43 @@ target_compile_options(
     -DUSER_MODE
     -fsanitize=address
 )
+
+add_executable(memmoduletest
+    src/tests/test_memmodule.cpp
+    src/memory/phygpsmemmgr_availabe_search.cpp
+    src/memory/phygpsmemmgr.cpp
+    src/memory/phygpsmemmgr_pgcount_modify.cpp
+    src/memory/phygpsmemmgr_pgs_set.cpp
+    src/memory/phygpsmemmgr_seg_managment.cpp
+    src/memory/phypgsmemmgr_alloc.cpp
+    src/memory/PhyAddrAccessor.cpp
+    src/memory/Memory.cpp
+    src/memory/KspacMapMgr.cpp 
+    src/memory/KspacMapMgr_pagediretct_operate.cpp
+    ${SRC_COMMON}
+)
+target_include_directories(
+    memmoduletest PRIVATE
+    "/usr/include/"
+    "/usr/include/efi"
+     "${CMAKE_SOURCE_DIR}/src/include"
+)
+target_compile_options(
+    memmoduletest PRIVATE
+    -fsanitize=address
+    -fsanitize=undefined
+    -fsanitize=leak
+    -fno-omit-frame-pointer
+    -DUSER_MODE
+)
+
+target_link_options(memmoduletest PRIVATE
+    -lstdc++  # 显式链接C++标准库
+    -fsanitize=address
+    -fsanitize=undefined
+    -fsanitize=leak
+)
+
 target_link_libraries(kernel.elf PRIVATE 
     ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
@@ -148,6 +192,7 @@ set(KERNEL_LINK_OPTS
     -fno-builtin
     -fno-rtti
     -fno-asynchronous-unwind-tables
+    -ftls-model=local-exec
     -static
     -T${CMAKE_SOURCE_DIR}/kld.ld
     -lgcc
@@ -163,14 +208,17 @@ endif()
 target_compile_options(kernel.elf PRIVATE 
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra  -mgeneral-regs-only
     -ffreestanding
+    -fno-stack-protector 
     -fno-exceptions
     -fno-builtin
     -fno-rtti
     -static
+    -mgeneral-regs-only
+    -ftls-model=local-exec
+    -fno-lto
     -fpermissive
     -fno-PIC
     -DKERNEL_MODE>
-       
 $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
 )
 target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})

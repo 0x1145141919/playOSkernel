@@ -1,4 +1,5 @@
-#include "Interrupt.h"
+#include "Interrupt_system/Interrupt.h"
+#include "kout.h"
 #include "util/OS_utils.h"
 #include "VideoDriver.h"
 #include "panic.h"
@@ -24,13 +25,17 @@ __attribute__((interrupt)) void exception_handler_div_by_zero(interrupt_frame* f
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
-    kputsSecure("[EXCEPTION] some exception happened: Divide by zero\n");
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
+    kio::bsp_kout << "[EXCEPTION] some exception happened: Divide by zero" << kio::kendl;
     if(frame->cs&0x3){
-        kputsSecure("[USER] ");
+        kio::bsp_kout << "[USER] ";
         //用户态异常有待处理
         return;
     }else{
-        kputsSecure("[KERNEL] ");
+        kio::bsp_kout << "[KERNEL] ";
         KernelPanicManager::panic("Divide by zero", regs);
     }
         
@@ -57,13 +62,17 @@ __attribute__((interrupt)) void exception_handler_invalid_opcode(interrupt_frame
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
-    kputsSecure("[EXCEPTION] some exception happened: Invalid Opcode (#UD)\n");
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
+    kio::bsp_kout << "[EXCEPTION] some exception happened: Invalid Opcode (#UD)" << kio::kendl;
     if(frame->cs&0x3){
-        kputsSecure("[USER] ");
+        kio::bsp_kout << "[USER] ";
         //用户态异常有待处理
         return;
     }else{
-        kputsSecure("[KERNEL] ");
+        kio::bsp_kout << "[KERNEL] ";
         KernelPanicManager::panic("Invalid Opcode", regs);
     }
 }
@@ -89,18 +98,20 @@ __attribute__((interrupt)) void exception_handler_general_protection(interrupt_f
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
     
-    kputsSecure("[EXCEPTION] some exception happened: General Protection (#GP)\n");
-    kputsSecure("Error code: ");
-    kpnumSecure(&error_code, UNHEX, sizeof(error_code));
-    kputsSecure("\n");
+    kio::bsp_kout << "[EXCEPTION] some exception happened: General Protection (#GP)" << kio::kendl;
+    kio::bsp_kout << "Error code: 0x" << error_code << kio::kendl;
     
     if(frame->cs&0x3){
-        kputsSecure("[USER] ");
+        kio::bsp_kout << "[USER] ";
         //用户态异常有待处理
         return;
     }else{
-        kputsSecure("[KERNEL] ");
+        kio::bsp_kout << "[KERNEL] ";
         KernelPanicManager::panic("General Protection", regs);
     }
 }
@@ -126,13 +137,15 @@ __attribute__((interrupt)) void exception_handler_double_fault(interrupt_frame* 
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
     
-    kputsSecure("[EXCEPTION] some exception happened: Double Fault (#DF)\n");
-    kputsSecure("Error code: ");
-    kpnumSecure(&error_code, UNHEX, sizeof(error_code));
-    kputsSecure("\n");
+    kio::bsp_kout << "[EXCEPTION] some exception happened: Double Fault (#DF)" << kio::kendl;
+    kio::bsp_kout << "Error code: 0x" << error_code << kio::kendl;
     
-    kputsSecure("[KERNEL] ");
+    kio::bsp_kout << "[KERNEL] ";
     KernelPanicManager::panic("Double Fault", regs);
 }
 
@@ -157,30 +170,31 @@ __attribute__((interrupt)) void exception_handler_page_fault(interrupt_frame* fr
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
-    
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
     // 获取导致页错误的线性地址
     uint64_t fault_addr;
     __asm__ volatile("mov %%cr2, %0" : "=r"(fault_addr));
     
-    kputsSecure("[EXCEPTION] some exception happened: Page Fault (#PF)\n");
-    kputsSecure("Error code: ");
-    kpnumSecure(&error_code, UNHEX, sizeof(error_code));
-    kputsSecure("\n");
-    kputsSecure("Fault address: 0x");
-    kpnumSecure(&fault_addr, UNHEX, sizeof(fault_addr));
-    kputsSecure("\n");
+    kio::bsp_kout << "[EXCEPTION] some exception happened: Page Fault (#PF)" << kio::kendl;
+    kio::bsp_kout << "Error code: 0x" << error_code << kio::kendl;
+    kio::bsp_kout << "Fault address: 0x" << fault_addr << kio::kendl;
     
     if(frame->cs&0x3){
-        kputsSecure("[USER] ");
+        kio::bsp_kout << "[USER] ";
         //用户态异常有待处理
         return;
     }else{
-        kputsSecure("[KERNEL] ");
+        kio::bsp_kout << "[KERNEL] ";
         KernelPanicManager::panic("Page Fault", regs);
     }
 }
 
-// 无效TSS异常 (#TS)
+__attribute__((interrupt))void exception_handler_machine_check(interrupt_frame *frame)
+{
+} // 无效TSS异常 (#TS)
 __attribute__((interrupt)) void exception_handler_invalid_tss(interrupt_frame* frame, uint64_t error_code)
 {
     pt_regs regs;
@@ -201,7 +215,10 @@ __attribute__((interrupt)) void exception_handler_invalid_tss(interrupt_frame* f
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
-    
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
     kputsSecure("[EXCEPTION] some exception happened: Invalid TSS (#TS)\n");
     kputsSecure("Error code: ");
     kpnumSecure(&error_code, UNHEX, sizeof(error_code));
@@ -238,7 +255,11 @@ __attribute__((interrupt)) void exception_handler_simd_floating_point(interrupt_
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
-    
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
+
     kputsSecure("[EXCEPTION] some exception happened: SIMD Floating-Point (#XM)\n");
     
     if(frame->cs&0x3){
@@ -272,7 +293,10 @@ __attribute__((interrupt)) void exception_handler_virtualization(interrupt_frame
     regs.r9 = frame->r9;
     regs.r10 = frame->r10;
     regs.r11 = frame->r11;
-    
+    regs.r12 = frame->r12;
+    regs.r13 = frame->r13;
+    regs.r14 = frame->r14;
+    regs.r15 = frame->r15;
     kputsSecure("[EXCEPTION] some exception happened: Virtualization (#VE)\n");
     kputsSecure("Error code: ");
     kpnumSecure(&error_code, UNHEX, sizeof(error_code));
@@ -290,4 +314,20 @@ __attribute__((interrupt)) void exception_handler_virtualization(interrupt_frame
 __attribute__((interrupt)) void IPI(interrupt_frame* frame, uint64_t error_code)
 {
     global_ipi_handler();
+}
+__attribute__((interrupt)) void exception_handler_breakpoint(interrupt_frame* frame)
+{
+    // 处理断点异常的代码
+}
+__attribute__((interrupt)) void exception_handler_nmi(interrupt_frame* frame)
+{
+
+}
+__attribute__((interrupt)) void exception_handler_overflow(interrupt_frame* frame)
+{
+    // 处理溢出异常的代码
+}
+__attribute__((interrupt)) void timer_interrupt(interrupt_frame* frame)
+{
+    // 处理溢出异常的代码
 }

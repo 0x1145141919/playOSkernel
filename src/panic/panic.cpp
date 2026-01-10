@@ -3,6 +3,7 @@
 #include <efi.h>
 #include <efilib.h>
 #include "UefiRunTimeServices.h"
+#include "kout.h"
 #ifdef USER_MODE
 #include <unistd.h>
 #endif 
@@ -50,70 +51,50 @@ void KernelPanicManager::setShutdownDelay(int seconds) {
  * 打印寄存器信息
  */
 void KernelPanicManager::dumpRegisters(const pt_regs& regs){
-    kputsSecure((char*)"Register dump:");
-    kputsSecure((char*)"");
+    kio::bsp_kout << "Register dump:" << kio::kendl;
 
-    kputsSecure((char*)"RAX: 0x");
-    kpnumSecure((void*)&regs.rax, UNHEX, 8);
-    kputsSecure((char*)", RBX: 0x");
-    kpnumSecure((void*)&regs.rbx, UNHEX, 8);
-    kputsSecure((char*)", RCX: 0x");
-    kpnumSecure((void*)&regs.rcx, UNHEX, 8);
-    kputsSecure((char*)" ");
+    kio::bsp_kout.shift_hex();
+    kio::bsp_kout << "RAX: 0x" << regs.rax 
+                  << ", RBX: 0x" << regs.rbx 
+                  << ", RCX: 0x" << regs.rcx 
+                  << kio::kendl;
 
-    kputsSecure((char*)"RDX: 0x");
-    kpnumSecure((void*)&regs.rdx, UNHEX, 8);
-    kputsSecure((char*)", RSI: 0x");
-    kpnumSecure((void*)&regs.rsi, UNHEX, 8);
-    kputsSecure((char*)", RDI: 0x");
-    kpnumSecure((void*)&regs.rdi, UNHEX, 8);
-    kputsSecure((char*)" ");
+    kio::bsp_kout << "RDX: 0x" << regs.rdx 
+                  << ", RSI: 0x" << regs.rsi 
+                  << ", RDI: 0x" << regs.rdi 
+                  << kio::kendl;
 
-    kputsSecure((char*)"RBP: 0x");
-    kpnumSecure((void*)&regs.rbp, UNHEX, 8);
-    kputsSecure((char*)", RSP: 0x");
-    kpnumSecure((void*)&regs.rsp, UNHEX, 8);
-    kputsSecure((char*)", RIP: 0x");
-    kpnumSecure((void*)&regs.rip, UNHEX, 8);
-    kputsSecure((char*)" ");
+    kio::bsp_kout << "RBP: 0x" << regs.rbp 
+                  << ", RSP: 0x" << regs.rsp 
+                  << ", RIP: 0x" << regs.rip 
+                  << kio::kendl;
 
-    kputsSecure((char*)"R8:  0x");
-    kpnumSecure((void*)&regs.r8, UNHEX, 8);
-    kputsSecure((char*)", R9:  0x");
-    kpnumSecure((void*)&regs.r9, UNHEX, 8);
-    kputsSecure((char*)", R10: 0x");
-    kpnumSecure((void*)&regs.r10, UNHEX, 8);
-    kputsSecure((char*)"");
+    kio::bsp_kout << "R8:  0x" << regs.r8 
+                  << ", R9:  0x" << regs.r9 
+                  << ", R10: 0x" << regs.r10 
+                  << kio::kendl;
 
-    kputsSecure((char*)"R11: 0x");
-    kpnumSecure((void*)&regs.r11, UNHEX, 8);
-    kputsSecure((char*)", R12: 0x");
-    kpnumSecure((void*)&regs.r12, UNHEX, 8);
-    kputsSecure((char*)", R13: 0x");
-    kpnumSecure((void*)&regs.r13, UNHEX, 8);
-    kputsSecure((char*)"");
+    kio::bsp_kout << "R11: 0x" << regs.r11 
+                  << ", R12: 0x" << regs.r12 
+                  << ", R13: 0x" << regs.r13 
+                  << kio::kendl;
 
-    kputsSecure((char*)"R14: 0x");
-    kpnumSecure((void*)&regs.r14, UNHEX, 8);
-    kputsSecure((char*)", R15: 0x");
-    kpnumSecure((void*)&regs.r15, UNHEX, 8);
-    kputsSecure((char*)"");
+    kio::bsp_kout << "R14: 0x" << regs.r14 
+                  << ", R15: 0x" << regs.r15 
+                  << kio::kendl;
 
-    kputsSecure((char*)"CS:  0x");
-    kpnumSecure((void*)&regs.cs, UNHEX, 2);
-    kputsSecure((char*)", SS:  0x");
-    kpnumSecure((void*)&regs.ss, UNHEX, 2);
-    kputsSecure((char*)", EFLAGS: 0x");
-    kpnumSecure((void*)&regs.eflags, UNHEX, 4);
-    kputsSecure((char*)" ");
+    kio::bsp_kout << "CS:  0x" << (uint16_t)regs.cs 
+                  << ", SS:  0x" << (uint16_t)regs.ss 
+                  << ", EFLAGS: 0x" << (uint32_t)regs.eflags 
+                  << kio::kendl;
 }
 
 /**
  * 触发内核恐慌，打印错误信息并停机（无额外信息）
  */
 void KernelPanicManager::panic(const char* message){
-    kputsSecure((char*)"======= KERNEL PANIC =======");
-    kputsSecure((char*)message);
+    kio::bsp_kout << "======= KERNEL PANIC =======" << kio::kendl;
+    kio::bsp_kout << message << kio::kendl;
 #ifdef USER_MODE
  _exit(1);
 #endif 
@@ -130,9 +111,9 @@ void KernelPanicManager::panic(const char* message){
  * 触发内核恐慌，打印错误信息和寄存器信息并停机
  */
 void KernelPanicManager::panic(const char* message, const pt_regs& regs){
-    kputsSecure((char*)"\n======= KERNEL PANIC =======\n");
-    kputsSecure((char*)message);
-    kputsSecure((char*)"");
+    kio::bsp_kout << "\n======= KERNEL PANIC =======\n" << kio::kendl;
+    kio::bsp_kout << message << kio::kendl;
+    kio::bsp_kout << "" << kio::kendl;
 
     dumpRegisters(regs);
     #ifdef USER_MODE
@@ -140,7 +121,7 @@ void KernelPanicManager::panic(const char* message, const pt_regs& regs){
 #endif 
     #ifdef KERNEL_MODE
 // 等待一段时间
-    delay(shutdownDelay * 1000);
+    //delay(shutdownDelay * 1000);
 
     EFI_RT_SVS::rt_shutdown();
 #endif 
@@ -151,9 +132,9 @@ void KernelPanicManager::panic(const char* message, const pt_regs& regs){
  * 带信息包的内核恐慌函数
  */
 void KernelPanicManager::panic(const char* message, const panic_info_t& info){
-    kputsSecure((char*)"\n======= KERNEL PANIC =======\n");
-    kputsSecure((char*)message);
-    kputsSecure((char*)"\n");
+    kio::bsp_kout << "\n======= KERNEL PANIC =======\n" << kio::kendl;
+    kio::bsp_kout << message << kio::kendl;
+    kio::bsp_kout << "\n" << kio::kendl;
 
     // 如果信息包中包含寄存器信息，则打印寄存器状态
     if (info.has_regs) {

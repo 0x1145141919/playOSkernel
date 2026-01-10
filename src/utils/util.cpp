@@ -389,6 +389,46 @@ static inline uint64_t atomic_read64_rmb(volatile void *addr)
     return val;
 }
 
+/* 带回读验证的8位原子写入 */
+static void atomic_write8_rdbk(volatile void *addr, uint8_t val)
+{
+    *(volatile uint8_t *)addr = val;
+    uint8_t read_val;
+    do {
+        read_val = *(volatile uint8_t *)addr;
+    } while(read_val != val);  // 等待直到回读值与写入值一致
+}
+
+/* 带回读验证的16位原子写入 */
+static void atomic_write16_rdbk(volatile void *addr, uint16_t val)
+{
+    *(volatile uint16_t *)addr = val;
+    uint16_t read_val;
+    do {
+        read_val = *(volatile uint16_t *)addr;
+    } while(read_val != val);  // 等待直到回读值与写入值一致
+}
+
+/* 带回读验证的32位原子写入 */
+static void atomic_write32_rdbk(volatile void *addr, uint32_t val)
+{
+    *(volatile uint32_t *)addr = val;
+    uint32_t read_val;
+    do {
+        read_val = *(volatile uint32_t *)addr;
+    } while(read_val != val);  // 等待直到回读值与写入值一致
+}
+
+/* 带回读验证的64位原子写入 */
+static void atomic_write64_rdbk(volatile void *addr, uint64_t val)
+{
+    *(volatile uint64_t *)addr = val;
+    uint64_t read_val;
+    do {
+        read_val = *(volatile uint64_t *)addr;
+    } while(read_val != val);  // 等待直到回读值与写入值一致
+}
+
 uint64_t rdmsr(uint32_t offset)
 {
     uint32_t value_high, value_low; 
@@ -406,4 +446,9 @@ void wrmsr(uint32_t offset, uint64_t value)
                  : "c" (offset),
                    "a" (value_low),
                    "d" (value_high));
+}
+uint64_t rdtsc() {
+    unsigned int lo, hi;
+    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((uint64_t)hi << 32) | lo;
 }

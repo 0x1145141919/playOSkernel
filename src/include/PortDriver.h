@@ -7,6 +7,7 @@ extern "C" {
 
 void serial_puts(const char* str);
 void serial_init_stage1();
+void serial_putc(char c);
 #ifdef __cplusplus
 }
 #endif

@@ -68,6 +68,9 @@ int acpimgr_t::Init(EFI_SYSTEM_TABLE *st)
         case MCFG_SIGNATURE_UINT32:
         MCFG_OFFSET = (uint64_t)((MCFG_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
         break;
+        case HPET_SIGNATURE_UINT32:
+        HPET_OFFSET = (uint64_t)((HPET_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
+        break;
         default:
         break;
        }
@@ -98,6 +101,8 @@ void *acpimgr_t::get_acpi_table(char *signature)
         return (void*)(acpi_seg_vbase+DSDT_OFFSET);
     case MCFG_SIGNATURE_UINT32:
         return (void*)(acpi_seg_vbase+MCFG_OFFSET);
+    case HPET_SIGNATURE_UINT32:
+        return (void*)(acpi_seg_vbase+HPET_OFFSET);
     default:
         // 对于未直接作为类成员的SSDT表或其他表，可以在XSDT中查找
         XSDT_Table*vXSDT = (XSDT_Table*)(acpi_seg_vbase+XSDT_OFFSET);

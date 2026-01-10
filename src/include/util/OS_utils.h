@@ -38,17 +38,21 @@ extern "C" void __wrap___stack_chk_fail(void);
 uint64_t align_up(uint64_t value, uint64_t alignment);
 extern const uint8_t bit_reverse_table[256];
 uint64_t reverse_perbytes(uint64_t value) ;
-static void atomic_write8_wmb(volatile void *addr, uint8_t val);
-static void atomic_write16_wmb(volatile void *addr, uint16_t val);
-static void atomic_write32_wmb(volatile void *addr, uint32_t val);
-static void atomic_write64_wmb(volatile void *addr, uint64_t val);
-static uint8_t atomic_read8_rmb(volatile void *addr);
-static uint16_t atomic_read16_rmb(volatile void *addr);
-static uint32_t atomic_read32_rmb(volatile void *addr);
-static uint64_t atomic_read64_rmb(volatile void *addr);
-static uint64_t rdmsr(uint32_t offset);
-static void wrmsr(uint32_t offset,uint64_t value);
-
+void atomic_write8_wmb(volatile void *addr, uint8_t val);
+void atomic_write16_wmb(volatile void *addr, uint16_t val);
+void atomic_write32_wmb(volatile void *addr, uint32_t val);
+void atomic_write64_wmb(volatile void *addr, uint64_t val);
+uint8_t atomic_read8_rmb(volatile void *addr);
+uint16_t atomic_read16_rmb(volatile void *addr);
+uint32_t atomic_read32_rmb(volatile void *addr);
+uint64_t atomic_read64_rmb(volatile void *addr);
+void atomic_write8_rdbk(volatile void *addr, uint8_t val);
+void atomic_write16_rdbk(volatile void *addr, uint16_t val);
+void atomic_write32_rdbk(volatile void *addr, uint32_t val);
+void atomic_write64_rdbk(volatile void *addr, uint64_t val);
+uint64_t rdmsr(uint32_t offset);
+void wrmsr(uint32_t offset,uint64_t value);
+uint64_t rdtsc();
 #ifdef USER_MODE
 // 将内存描述符表从文本格式转换为gBaseMemMgr.Init函数所需的格式
 void print_memory_descriptor_for_gbasememmgr(const char* input_file_path);
