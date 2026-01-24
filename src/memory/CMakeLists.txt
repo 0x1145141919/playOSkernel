@@ -36,12 +36,14 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../include
         -fno-builtin
         -fno-rtti
         -fno-PIC
+        -mgeneral-regs-only
          -fno-stack-protector
         #-fno-asynchronous-unwind-tables
          -DKERNEL_MODE
          -DPGLV_4
+         -DPRINT_OUT
          $<$<CONFIG:Debug>:-g -O0 -gdwarf-4>
-         $<$<CONFIG:Release>:-O3>
+         $<$<CONFIG:Release>:-O2>
          
     )
 

@@ -1,5 +1,4 @@
 #include "util/bitmap.h"
-#include "lock.h"
 #include <cstdint>
 #include <cstring>
 
@@ -38,17 +37,63 @@ bool bitmap_t::bit_get(uint64_t bit_idx)
 
 void bitmap_t::bits_set(uint64_t start_bit_idx, uint64_t bit_count, bool value)
 {
-    for(uint64_t i = start_bit_idx; i < start_bit_idx + bit_count; i++)
-    {
-        bit_set(i, value);
+    uint64_t end_bit_idx = start_bit_idx + bit_count;
+    
+    // 处理起始部分，直到下一个64位边界
+    while((start_bit_idx < end_bit_idx) && ((start_bit_idx & 0x3F) != 0)) {
+        bit_set(start_bit_idx, value);
+        start_bit_idx++;
+    }
+    
+    // 如果还有剩余位需要设置，且至少有一个完整的64位单元
+    if(start_bit_idx < end_bit_idx) {
+        uint64_t start_u64_idx = start_bit_idx >> 6;
+        uint64_t end_u64_idx = end_bit_idx >> 6;
+        
+        // 处理完整的64位单元
+        if(start_u64_idx < end_u64_idx) {
+            uint64_t u64_count = end_u64_idx - start_u64_idx;
+            u64s_set(start_u64_idx, u64_count, value);
+            start_bit_idx = end_u64_idx << 6; // 更新start_bit_idx到处理完的64位边界
+        }
+        
+        // 处理最后不足64位的部分
+        while(start_bit_idx < end_bit_idx) {
+            bit_set(start_bit_idx, value);
+            start_bit_idx++;
+        }
     }
 }
 
 void bitmap_t::bytes_set(uint64_t start_byte_idx, uint64_t byte_count, bool value)
 {
-    uint8_t to_fill_value= value ? BYTE_FULL : 0x00;
-    for(uint64_t i = start_byte_idx; i < start_byte_idx + byte_count; i++)
-    byte_bitmap_base[i]= to_fill_value;
+    uint64_t end_byte_idx = start_byte_idx + byte_count;
+    uint8_t to_fill_value = value ? BYTE_FULL : 0x00;
+    
+    // 处理起始部分，直到下一个8字节(64位)边界
+    while((start_byte_idx < end_byte_idx) && ((start_byte_idx & 0x7) != 0)) {
+        byte_bitmap_base[start_byte_idx] = to_fill_value;
+        start_byte_idx++;
+    }
+    
+    // 如果还有剩余字节需要设置，且至少有一个完整的64位单元
+    if(start_byte_idx < end_byte_idx) {
+        uint64_t start_u64_idx = start_byte_idx >> 3;
+        uint64_t end_u64_idx = end_byte_idx >> 3;
+        
+        // 处理完整的64位(8字节)单元
+        if(start_u64_idx < end_u64_idx) {
+            uint64_t u64_count = end_u64_idx - start_u64_idx;
+            u64s_set(start_u64_idx, u64_count, value);
+            start_byte_idx = end_u64_idx << 3; // 更新start_byte_idx到处理完的8字节边界
+        }
+        
+        // 处理最后不足8字节的部分
+        while(start_byte_idx < end_byte_idx) {
+            byte_bitmap_base[start_byte_idx] = to_fill_value;
+            start_byte_idx++;
+        }
+    }
 }
 
 void bitmap_t::u64s_set(uint64_t start_u64_idx, uint64_t u64_count, bool value)

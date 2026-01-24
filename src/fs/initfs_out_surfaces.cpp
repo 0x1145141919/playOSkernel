@@ -223,7 +223,7 @@ int init_fs_t::Mkfs()
 int init_fs_t::CreateFile(Visitor_t executor, char *relative_path)
 {
     int status=OS_SUCCESS;
-    uint64_t path_len=strlen(relative_path);
+    uint64_t path_len=strlen_in_kernel(relative_path);
     if(path_len==0||relative_path[0]!='/')
     {
         return OS_INVALID_PARAMETER;
@@ -322,7 +322,7 @@ int init_fs_t::DeleteFile(Visitor_t executor, char *relative_path)
 {
     int status=OS_SUCCESS;
     Inode target_file_inode;
-    uint64_t old_len=strlen(relative_path);
+    uint64_t old_len=strlen_in_kernel(relative_path);
     
     // 边界检查，确保不会发生数组越界
     if (old_len == 0) {
@@ -402,7 +402,7 @@ int init_fs_t::DeleteDir(Visitor_t executor, char* relative_path)
 {
     int status=OS_SUCCESS;
     Inode target_dir_inode;
-    uint64_t path_len=strlen(relative_path);
+    uint64_t path_len=strlen_in_kernel(relative_path);
     
     // 边界检查，确保不会发生数组越界
     if (path_len == 0) {
@@ -531,7 +531,7 @@ int init_fs_t::OpenFile(Visitor_t executor, char *relative_path, FileID_t &in_fs
     FilePathAnalyzer path_analyzer(
         root_inode,
         relative_path,
-        strlen(relative_path),
+        strlen_in_kernel(relative_path),
         executor
     );
     int analyze_status;
@@ -615,10 +615,86 @@ init_fs_t::~init_fs_t()
 {
     delete[] SuperClusterArray;
 }
+
+int init_fs_t::opened_file_entry_search_by_id(FileID_t in_fs_id, init_fs_opened_file_entry& result_entry)
+{//ai生成未检验
+    if (in_fs_id >= opened_file_array_max_count) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    if (!opened_file_table[in_fs_id].is_valid_entry) {
+        return OS_NOT_EXIST;
+    }
+    
+    result_entry = opened_file_table[in_fs_id];
+    return OS_SUCCESS;
+}
+
+int init_fs_t::opened_file_entry_set_by_id(FileID_t in_fs_id, init_fs_opened_file_entry& result_entry)
+{//ai生成未检验
+    if (in_fs_id >= opened_file_array_max_count) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    if (!opened_file_table[in_fs_id].is_valid_entry) {
+        return OS_NOT_EXIST;
+    }
+    
+    opened_file_table[in_fs_id] = result_entry;
+    return OS_SUCCESS;
+}
+
+int init_fs_t::opened_file_entry_disable_by_id(FileID_t in_fs_id)
+{//ai生成未检验
+    if (in_fs_id >= opened_file_array_max_count) {
+        return OS_INVALID_PARAMETER;
+    }
+    
+    if (!opened_file_table[in_fs_id].is_valid_entry) {
+        return OS_NOT_EXIST;
+    }
+    
+    opened_file_table[in_fs_id].is_valid_entry = false;
+    opened_file_count--;
+    return OS_SUCCESS;
+}
+
+int init_fs_t::opened_file_entry_search_by_bgidx_and_inodeidx(
+    uint32_t bgidx,
+    uint32_t inode_idx,
+    init_fs_opened_file_entry& result_entry)
+{//ai生成未检验
+    for (uint32_t i = 0; i < opened_file_array_max_count; i++) {
+        if (opened_file_table[i].is_valid_entry &&
+            opened_file_table[i].block_group_index == bgidx &&
+            opened_file_table[i].inode_idx == inode_idx) {
+            result_entry = opened_file_table[i];
+            return OS_SUCCESS;
+        }
+    }
+    
+    return OS_NOT_EXIST;
+}
+
+int init_fs_t::opened_file_entry_alloc_a_new_entry(init_fs_opened_file_entry& new_entry, FileID_t& alloced_entry)
+{//ai生成未检验
+    for (uint32_t i = 0; i < opened_file_array_max_count; i++) {
+        if (!opened_file_table[i].is_valid_entry) {
+            opened_file_table[i] = new_entry;
+            opened_file_table[i].is_valid_entry = true;
+            alloced_entry = i;
+            opened_file_count++;
+            return OS_SUCCESS;
+        }
+    }
+    
+    return OS_OUT_OF_RESOURCE;
+}
+
 int init_fs_t::CreateDir(Visitor_t executor, char *relative_path)
 {
     int status=OS_SUCCESS;
-    uint64_t path_len=strlen(relative_path);
+    uint64_t path_len=strlen_in_kernel(relative_path);
     if(path_len==0||relative_path[0]!='/')
     {
         return OS_INVALID_PARAMETER;

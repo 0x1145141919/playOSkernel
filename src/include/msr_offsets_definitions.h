@@ -5,6 +5,7 @@
 // 来源: Intel® 64 and IA-32 Architectures Software Developer's Manual Volume 4
 
 namespace msr {
+    constexpr uint32_t IA32_EFER = 0xC0000080;  
     // APIC相关寄存器
     namespace apic {
         constexpr uint32_t IA32_APIC_BASE = 0x1B;           // APIC Base Address Register // APIC基地址寄存器

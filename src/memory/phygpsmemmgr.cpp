@@ -3,8 +3,8 @@
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
-#include "VideoDriver.h"
 #include "memory/phyaddr_accessor.h"
+#include "util/kout.h"
 #ifdef USER_MODE
 #include <elf.h>
 #include <stdio.h>
@@ -272,8 +272,10 @@ int phymemspace_mgr::Init()
     {
         if(base[i].PhysicalStart<0x100000)continue;
         seg_type_t seg_state;
+        bool will_soon_regist_soon=false;
         switch(base[i].Type)
-        {
+        {   
+            case OS_KERNEL_DATA:will_soon_regist_soon=true;
             case freeSystemRam:seg_state=DRAM_SEG;break;
             case EFI_RUNTIME_SERVICES_DATA:
             case EFI_RUNTIME_SERVICES_CODE:
@@ -294,7 +296,14 @@ int phymemspace_mgr::Init()
         status=blackhole_acclaim(segbase,seg.NumberOfPages,seg_state,flags);//i==8时候出现了错误,问题在于有时候会跨越2mb段会跨越两个1gb表项但是没能正确处理
         
         if(status!=OS_SUCCESS)return status;
-
+        if(will_soon_regist_soon){
+            if(seg_state==DRAM_SEG){
+                pages_state_set_flags_t low1mb_pgs_set = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
+                status=pages_state_set(segbase,seg.NumberOfPages,KERNEL_PERSIST,low1mb_pgs_set);
+                if(status!=OS_SUCCESS)return status;
+                kio::bsp_kout<<kio::now<<"kernel soon regist at"<<(void*)segbase<<kio::kendl;
+            }
+        }
     }
     low1mb_mgr=new low1mb_mgr_t();
     pages_state_set_flags_t low1mb_pgs_set = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};

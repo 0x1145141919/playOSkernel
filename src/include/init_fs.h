@@ -2,7 +2,7 @@
 #include "BlockDevice.h"
 #include <cstdint>
 #include "MemoryDisk.h"
-#include "lock.h"
+#include "util/lock.h"
 typedef uint64_t FileID_t;
 enum inode_op_type:int{
     INODE_OP_READ=0,

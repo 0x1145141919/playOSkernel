@@ -1,7 +1,7 @@
 #include "memory/phygpsmemmgr.h"
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
-#include "kout.h"
+#include "util/kout.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;

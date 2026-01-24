@@ -5,11 +5,10 @@
 #include "memory/phyaddr_accessor.h"
 #include "os_error_definitions.h"
 #include "linker_symbols.h"
-#include "VideoDriver.h"
 #include "util/OS_utils.h"
 #include "panic.h"
 #include "msr_offsets_definitions.h"
-
+#include "util/kptrace.h"
 #ifdef USER_MODE
 #include <elf.h>
 #include <stdio.h>
@@ -50,8 +49,11 @@ int KspaceMapMgr::Init()
     if(result==0)goto regist_segment_fault;
     result=(vaddr_t)pgs_remapp((uint64_t)&_stack_lma,(&__klog_end-&_stack_bottom),PG_RW,(vaddr_t)&_stack_bottom);
     if(result==0)goto regist_segment_fault;
+    result=(vaddr_t)pgs_remapp(ksymmanager::get_phybase(),align_up(sizeof(symbol_entry)*ksymmanager::get_entry_count(),4096),PG_R,ksymmanager::get_virtbase());
+    if(result==0)goto regist_segment_fault;
     result=(vaddr_t)pgs_remapp(0,basic_seg_size,PG_RW,0,true);
     if(result==0)goto regist_segment_fault;
+
     PhyAddrAccessor::BASIC_DESC.start=result;
 #endif
 #ifdef USER_MODE

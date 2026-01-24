@@ -2,7 +2,8 @@
 #include "stdint.h"
 #include "memory/Memory.h"
 #include "memory/pgtable45.h"
-#include <lock.h>
+#include <util/lock.h>
+#include "memmodule_err_definitions.h"
 #include "util/RB_btree.h"
 namespace PAGE_TBALE_LV{
     constexpr bool LV_4=true;
@@ -90,6 +91,74 @@ struct VM_DESC
     uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
 };
 int VM_vaddr_cmp(VM_DESC* a,VM_DESC* b);
+namespace MEMMODULE_LOCAIONS{
+    namespace ADDRESSPACE_EVENTS{
+        constexpr uint8_t EVENT_CODE_INIT=0x0;
+        constexpr uint8_t EVENT_CODE_ENABLE_VMENTRY=0x1;
+        constexpr uint8_t EVENT_CODE_DISABLE_VMENTRY=0x2;
+        constexpr uint8_t EVENT_CODE_TRAN_TO_PHY=0x3;
+        constexpr uint8_t EVENT_CODE_PAGES_SET=0x4;
+        constexpr uint8_t EVENT_CODE_UNREGIST=0xff;
+        namespace ENABLE_VMENTRY_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_INVALID_PAGETABLE_ENTRY=0x1;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY_TRY_TO_MAP_LOW_MEM_WHO_NOT_gKernelSpace=0x2;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY_CANT_SPLIT=0x4;
+                constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;
+                    
+                }
+            namespace FATAL_REASONS{
+                    constexpr uint16_t REASON_CODE_TRY_TO_GET_SUB_PAGE_IN_ATOM_PAGE=0x1;//AddressSpace的设计的能力有限，
+                    //只能根据喂进来的VM_DESC指定物理地址虚拟地址建立页表结构，
+                    //但是能够对已经确定的大页试图向下建立小页报错，这是种严重错误，
+                    //但是诱因可能是外部调用错误，地址段覆盖，所以这个不会内部panic,
+                    //但是调用者必须有意识，出现这个错误码可以考虑重开
+                    constexpr uint16_t REASON_CODE_PAGES_SET_FALT=0x2;
+                    constexpr uint16_t REASON_CODE_INVALID_PAGE_SIZE=0x4;
+                }            
+        }
+        namespace TRAN_TO_PHY_RESULTS_CODE{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_NOT_ALLOW_KSPACE_VA=0x1;
+                constexpr uint16_t REASON_CODE_NOT_PRESENT_ENTRY=0x2;  
+                constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;   
+                }
+        }
+        namespace DISABLE_VMENTRY_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_INVALID_PAGETABLE_ENTRY=0x1;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY_TRY_TO_MAP_LOW_MEM_WHO_NOT_gKernelSpace=0x2;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY_CANT_SPLIT=0x4;
+                constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;
+                    
+                }
+            namespace FATAL_REASONS{
+                    constexpr uint16_t REASON_CODE_TRY_TO_GET_SUB_PAGE_IN_ATOM_PAGE=0x1;//AddressSpace的设计的能力有限，
+                    //只能根据喂进来的VM_DESC指定物理地址虚拟地址建立页表结构，
+                    //但是能够对已经确定的大页试图向下建立小页报错，这是种严重错误，
+                    //但是诱因可能是外部调用错误，地址段覆盖，所以这个不会内部panic,
+                    //但是调用者必须有意识，出现这个错误码可以考虑重开
+                    constexpr uint16_t REASON_CODE_PAGES_SET_FALT=0x2;
+                    constexpr uint16_t REASON_CODE_INVALID_PAGE_SIZE=0x4;
+                    constexpr uint16_t REASON_CODE_TRY_TO_GET_SUB_PAGE_OF_NOT_PRESENT_PAGE=0x5;
+                    constexpr uint16_t REASON_CODE_TRY_TO_CLEAR_UNPRESENT_PAGE=0x6;
+                    constexpr uint16_t REASON_CODE_CONSISTENCY_VIOLATION_WHEN_CLEAR_PAGE_TABLE_ENTRY=0x7;
+                    constexpr uint16_t REASON_CODE_OTHER_PAGES_SET_FATAL=0x8;
+                }   
+        }
+        
+    }
+    constexpr uint8_t LOCATION_CODE_KSPACE_MAP_MGR_VMENTRY_RBTREE=17;
+    namespace KSPACE_MAP_MGR_EVENTS_CODE{
+
+    }
+    constexpr uint8_t LOCATION_CODE_KSPACE_MAP_MGR_PGS_PAGE_TABLE=18;
+    namespace KSPACE_MAP_MGR_PGS_PAGE_TABLE_EVENTS_CODE{
+
+    }
+};
 /**
  * 此类的职责就是创建虚拟地址空间，管理虚拟地址空间，
  * 此类的职责有且仅一个功能，就是管理相应的低一般虚拟地址空间，
@@ -99,8 +168,8 @@ int VM_vaddr_cmp(VM_DESC* a,VM_DESC* b);
  * 最多提供一个打印实际映射表的接口
  */
 class AddressSpace//到时候进程管理器可以用这个类创建，但是内核空间还是受内核空间管理器管理
-{ private:
-    PageTableEntryUnion *pml4;//这个是虚拟地址
+{   
+    private:
     phyaddr_t pml4_phybase;
     uint64_t occupyied_size;
     constexpr static uint64_t PAGE_LV4_USERSPACE_SIZE=0x00007FFFFFFFFFFF+1;
@@ -109,23 +178,33 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     static constexpr uint32_t _2MB_SIZE=1ULL<<21;
     static constexpr uint32_t _1GB_SIZE=1ULL<<30;
     spinrwlock_cpp_t lock;
-    
+    KURD_t   default_kurd();
+    KURD_t   default_success();
+    KURD_t   default_fail();
+    KURD_t   default_fatal();
+    int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC desc);
     public:
     AddressSpace();
-    int enable_VM_desc(VM_DESC desc);
-    int disable_VM_desc(VM_DESC desc);
-    int second_stage_init();//new完之后马上最快的速度调用此接口，并且接受返回值进行分析
-    int build_identity_map_ONLY_IN_gKERNELSPACE();//uefi运行时服务依赖于这个构建的恒等映射
+    KURD_t enable_VM_desc(VM_DESC desc);
+    KURD_t disable_VM_desc(VM_DESC desc);
+    struct tlb_invalidate_flags{
+        uint64_t hardware_addresspace_id;
+        uint16_t if_not_currunt_space:1;
+        uint16_t if_hardware_addresspace_id_valid:1;
+    };
+    static KURD_t invalidate_tlb_of_VM_desc(VM_DESC desc,tlb_invalidate_flags flags);
+    KURD_t second_stage_init();//new完之后马上最快的速度调用此接口，并且接受返回值进行分析
+    KURD_t build_identity_map_ONLY_IN_gKERNELSPACE();//uefi运行时服务依赖于这个构建的恒等映射
     uint64_t get_occupyied_size(){
         return occupyied_size;
     }
-    phyaddr_t vaddr_to_paddr(vaddr_t vaddr);
+    phyaddr_t vaddr_to_paddr(vaddr_t vaddr,KURD_t&kurd);
     void unsafe_load_pml4_to_cr3(uint16_t pcid);//这个接口会直接把当前页表加载到cr3寄存器
     ~AddressSpace();//如果cr3还装载这这个页表，删除会在堆里释放根表，虽然不会马上报错但是极度危险，最好别这么干
 };
 extern AddressSpace*gKernelSpace;
 constexpr ia32_pat_t DEFAULT_PAT_CONFIG={
-    .value=0x407050600070106
+    .value=0x0407050600070106
 };
 cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy);
 /**

@@ -13,7 +13,7 @@ int init_fs_t::path_analyze(char *path, Inode &inode,Visitor_t visitor)
 {   
     Inode root_inode;
     get_inode(fs_metainf->root_block_group_index,fs_metainf->root_directory_inode_index,root_inode);
-    FilePathAnalyzer path_analyzer(root_inode, path, strlen(path),visitor);//还暂时没有提供根inode的参数
+    FilePathAnalyzer path_analyzer(root_inode, path, strlen_in_kernel(path),visitor);//还暂时没有提供根inode的参数
     while (true)
     {
         int result = path_analyzer.the_next(this);
@@ -186,7 +186,7 @@ int init_fs_t::FilePathAnalyzer::the_next(init_fs_t *fs_instance)
         bool found = false;
         for (uint32_t i = 0; i < dir_entries_count; i++)
         {
-            if (strcmp((char*)index_content[i].filename, inode_name,fs_instance->MAX_FILE_NAME_LEN) == 0)//这里长度不要直接最大长度，应该改成文件长度
+            if (strcmp_in_kernel((char*)index_content[i].filename, inode_name,fs_instance->MAX_FILE_NAME_LEN) == 0)//这里长度不要直接最大长度，应该改成文件长度
             {
                 Inode next_inode;
                 int status=fs_instance->get_inode(

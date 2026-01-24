@@ -1,7 +1,7 @@
 #pragma once
 #include "stdint.h"
 #include "util/bitmap.h"
-#include <lock.h>
+#include <util/lock.h>
 //#include <new>
 typedef uint64_t size_t;
 typedef uint64_t phyaddr_t;
@@ -14,6 +14,23 @@ enum data_type_t:uint8_t
     DT_ARRAY = 1,
     DT_STRUCT = 2,
     DT_CLASS = 3,
+};
+constexpr uint32_t PER_CPU_HEAP_COMPLEX_GS_INDEX=1;
+struct alloc_flags_t{
+    bool is_longtime;
+    bool is_crucial_variable;
+    bool vaddraquire;
+    bool force_first_linekd_heap;
+    bool is_when_realloc_force_new_addr;//在realloc中强制重新分配内存，非realloc接口忽视此位但是会忠实记录进入metadata,realloc中此位不设置会优先原地调整，原地调整解决则不会修改源地址和元数据flags
+    uint8_t align_log2;
+};
+constexpr alloc_flags_t default_flags={
+    .is_longtime=false,
+    .is_crucial_variable=false,
+    .vaddraquire=true,
+    .force_first_linekd_heap=false,
+    .is_when_realloc_force_new_addr=false,
+    .align_log2=4
 };
 class kpoolmemmgr_t
 {
@@ -55,10 +72,10 @@ private:
         struct alignas(16) data_meta{//每个被分配的都有元信息以及相应魔数
             //是分配在堆内，后面紧接着就是数据
             uint16_t data_size;
-            data_type_t data_type;
-            data_flags flags;
+            alloc_flags_t alloc_flags;
             uint64_t magic;
         };
+        static_assert(sizeof(data_meta)==16,"data_meta size must be 16 bytes");
         int first_linekd_heap_Init();//只能由first_linekd_heap调用的初始化
         //用指针检验是不是那个特殊堆
         HCB_v2(uint32_t apic_id);//给某个逻辑处理器初始化一个HCB
@@ -82,7 +99,7 @@ private:
          * 5.填写元数据
          * 
          */
-        int in_heap_alloc(void *&addr, uint32_t size,bool is_longtime=false, bool vaddraquire=true, uint8_t alignment=4);
+        int in_heap_alloc(void *&addr,uint32_t size,alloc_flags_t flags);
         /**
          * @brief 释放内存
          * 思路：
@@ -101,7 +118,7 @@ private:
          * 4.实在不行这个堆内存空间无法使用，返回错误码
          * 5.返回管理器的realloc接口的时候根据返回值尝试新堆alloc,释放原堆，或者内核恐慌，并且报告相关错误信息
          * */
-        int in_heap_realloc(void*&ptr,uint32_t new_size,bool vaddraquire=true,uint8_t alignment=4);
+        int in_heap_realloc(void*&ptr, uint32_t new_size,alloc_flags_t flags);
         uint32_t get_belonged_cpu_apicid();
         uint64_t get_used_bytes_count();
         bool is_full();
@@ -110,35 +127,42 @@ private:
         phyaddr_t tran_to_phy(void* addr);//这两个是通过HCB里面的虚拟基址，物理基址直接算出来的
         vaddr_t tran_to_virt(phyaddr_t addr);
     };
+    
     static bool is_able_to_alloc_new_hcb;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
     //这个位开启后会优先在cpu专属堆里面操作，再尝试first_linekd_heap
-    static class HCB_v2*HCB_ARRAY[HCB_ARRAY_MAX_COUNT];
-    static trylock_cpp_t HCB_LOCK_ARR[HCB_ARRAY_MAX_COUNT];//这个锁只有在尝试分配新的指针的时候才会用
     static HCB_v2 first_linekd_heap;
 public:
+    static constexpr uint32_t PER_CPU_HEAP_MAX_HCB_COUNT=32;
+    struct GS_per_cpu_heap_complex_t{
+        HCB_v2* hcb_array[PER_CPU_HEAP_MAX_HCB_COUNT];
+    };
+    static kpoolmemmgr_t::HCB_v2* find_hcb_by_address(void* ptr);
     static void enable_new_hcb_alloc();
-/**
- * @param vaddraquire true返回虚拟地址，false返回物理地址
- * @param alignment 实际对齐值=2<<alignment,最高支持到13，8kb对齐
- */
-   static void*kalloc(uint64_t size,bool is_longtime=false,bool vaddraquire=true,uint8_t alignment=4);
-   static void*realloc(void*ptr,uint64_t size,bool vaddraquire=true,uint8_t alignment=4);//根据表在优先在基地址不变的情况下尝试修改堆对象大小
-   //实在不行就创建一个新对象
-   static void clear(void*ptr);// 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
-   //别用这个清理new之后的对象
-   static int Init();//真正的初始化，全局对象手动初始化函数
-   static void kfree(void*ptr);
-   static phyaddr_t get_phy(vaddr_t addr );
-   static vaddr_t get_virt(phyaddr_t addr);
+    static kpoolmemmgr_t::GS_per_cpu_heap_complex_t *get_current_heap_complex();
+    /**
+     * @param vaddraquire true返回虚拟地址，false返回物理地址
+     * @param alignment 实际对齐值=2<<alignment,最高支持到13，8kb对齐
+     */
+    static void *kalloc(uint64_t size,alloc_flags_t flags=default_flags);
+    static void *realloc(void *ptr, uint64_t size,alloc_flags_t flags=default_flags); // 根据表在优先在基地址不变的情况下尝试修改堆对象大小
+    // 实在不行就创建一个新对象
+    static void clear(void *ptr); // 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
+    // 别用这个清理new之后的对象
+    static int Init(); // 真正的初始化，全局对象手动初始化函数
+    static int self_heap_init();
+    static void kfree(void *ptr);
+    static phyaddr_t get_phy(vaddr_t addr);
+    static vaddr_t get_virt(phyaddr_t addr);
     kpoolmemmgr_t();
     ~kpoolmemmgr_t();
 };
+
 constexpr int INDEX_NOT_EXIST = -100;
 // 全局 new/delete 操作符重载声明
 void* operator new(size_t size);
-void* operator new(size_t size, bool vaddraquire, uint8_t alignment = 3);
+void* operator new(size_t size,alloc_flags_t flags);
 void* operator new[](size_t size);
-void* operator new[](size_t size, bool vaddraquire, uint8_t alignment = 3);
+void* operator new[](size_t size,alloc_flags_t flags);
 void operator delete(void* ptr) noexcept;
 void operator delete(void* ptr, size_t) noexcept;
 void operator delete[](void* ptr) noexcept;

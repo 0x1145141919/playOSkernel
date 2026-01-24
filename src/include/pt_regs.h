@@ -1,43 +1,165 @@
 #pragma once
 #include<cstdint>
-//用于保存当前上下文（寄存器、栈等，由 pt_regs 结构体封装）
-struct pt_regs {
-    /*
-     * 第一部分：通用寄存器（软件手动压栈）
-     * 顺序：从 r15 到 rdi，与汇编 push 顺序一一对应
-     * 包含所有非易失性寄存器（r15~rbx）和易失性寄存器（r11~rdi）
-     */
-    uint64_t r15;
-    uint64_t r14;
-    uint64_t r13;
-    uint64_t r12;
-    uint64_t rbp;  // 栈基址寄存器（函数调用帧指针）
-    uint64_t rbx;  // 非易失性寄存器（需保存）
-    uint64_t r11;  // 易失性寄存器（函数调用临时值）
-    uint64_t r10;
-    uint64_t r9;
+/**
+ * 几个关于magic的abi规范：
+ * 1. self_specify_magic的高32位为0时标记无错误码的中断上下文，低32位标记向量号
+ * 2.interrupt_context_specify_magic，设计意图是在rbp中rbp+8的是非法地址，
+ * 但是是特定魔数，由此可以保证是那两种类型中断栈结构，由此又可以回溯
+ * 为了兼容五级分页规定[56:63]为0x80,[0:55]是自由安排
+ */
+namespace Interrupt_context
+ {
+constexpr uint64_t interrupt_context_specify_no_magic = 0x8000000000000000;
+constexpr uint64_t interrupt_context_specify_magic = 0x8000000000000001;
+struct x64_context_no_errcode {
+    uint64_t self_specify_magic;
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
     uint64_t r8;
-    uint64_t rax;  // 累加器（系统调用返回值常用）
-    uint64_t rcx;  // 计数器（函数第4参数）
-    uint64_t rdx;  // 数据寄存器（函数第3参数）
-    uint64_t rsi;  // 源变址寄存器（函数第2参数）
-    uint64_t rdi;  // 目的变址寄存器（函数第1参数）
-
-    /*
-     * 第二部分：软件扩展字段（非硬件自动压栈）
-     * orig_rax：用于区分系统调用（值为系统调用号，-1 表示非系统调用）
-     * 仅在系统调用或相关异常中有效
-     */
-    uint64_t orig_rax;
-
-    /*
-     * 第三部分：硬件自动压栈寄存器（Intel 64 架构强制顺序）
-     * 异常触发时 CPU 自动按此顺序压栈，软件不可修改
-     */
-    uint64_t rip;       // 指令指针（异常发生时的下一条指令地址）
-    uint64_t cs;        // 代码段寄存器（低 2 位为 CPL 特权级：0=内核态，3=用户态）
-    uint64_t eflags;    // 标志寄存器（64位实际为 rflags，兼容 32 位命名）
-    uint64_t rsp;       // 栈指针（异常发生时的栈顶地址，用户态/内核态）
-    uint64_t ss;        // 栈段寄存器（与 rsp 配合使用）
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+    uint64_t rbp;
+    uint64_t interrupt_context_specify_magic;// 用于标记无错误码的中断上下文,ptrace里面用于栈回溯开特例
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;    // 栈指针（仅特权级变化时压入）
+    uint64_t ss;     // 栈段选择子（仅特权级变化时压入）
 };
-
+struct x64_context {
+    uint64_t self_specify_magic;
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+    uint64_t rbp;
+    uint64_t interrupt_context_specify_magic;// 用于标记有错误码的中断上下文,ptrace里面用于栈回溯开特例
+    uint64_t errcode;
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;    // 栈指针（仅特权级变化时压入）
+    uint64_t ss;     // 栈段选择子（仅特权级变化时压入）
+};
+}
+namespace panic_context {
+    struct GDTR
+{
+    uint16_t limit;
+    uint64_t base;
+}__attribute__((packed));
+struct IDTR
+{
+    uint16_t limit;
+    uint64_t base;
+}__attribute__((packed));
+struct panic_error_specific_t{
+    uint32_t hardware_errorcode;
+    uint8_t interrupt_vec_num;
+    uint8_t is_hadware_interrupt:1;//非policy中断都有上下文，但是
+};    
+struct x64_context {
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsp;   
+    uint64_t rbp;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+    uint64_t rflags;
+    uint64_t rip;
+    GDTR gdtr;
+    IDTR idtr;
+    uint64_t IA32_EFER;
+    uint64_t cr4;
+    uint64_t cr3;
+    uint64_t cr2;
+    uint64_t cr0;
+    uint64_t fs_base;
+    uint64_t gs_base;
+    panic_error_specific_t specific;
+    uint16_t gs;         // ...
+    uint16_t fs;
+    uint16_t ss;
+    uint16_t ds;
+    uint16_t es;
+    uint16_t cs;
+};
+}
+struct x64_Interrupt_saved_context_no_errcode {//与Interrupt_context::x64_context_no_errcode必须完全等价，存在的意义是兼容C接口
+    uint64_t self_specify_magic;
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+    uint64_t rbp;
+    uint64_t interrupt_context_specify_magic;// 用于标记无错误码的中断上下文,ptrace里面用于栈回溯开特例
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;    // 栈指针（仅特权级变化时压入）
+    uint64_t ss;     // 栈段选择子（仅特权级变化时压入）
+};
+struct x64_Interrupt_saved_context{//与Interrupt_context::x64_context必须完全等价，存在的意义是兼容C接口
+    uint64_t self_specify_magic;
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+    uint64_t rbp;
+    uint64_t interrupt_context_specify_magic;// 用于标记有错误码的中断上下文,ptrace里面用于栈回溯开特例
+    uint64_t errcode;
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;    // 栈指针（仅特权级变化时压入）
+    uint64_t ss;     // 栈段选择子（仅特权级变化时压入）
+};

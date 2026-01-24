@@ -4,8 +4,8 @@
 #include "memory/kpoolmemmgr.h"
 #include "os_error_definitions.h"
 #include "linker_symbols.h"
-#include "VideoDriver.h"
 #include "util/OS_utils.h"
+#include "util/kptrace.h"
 static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 // 定义KspaceMapMgr的静态成员变量
 KspaceMapMgr::kspace_vm_table_t* KspaceMapMgr::kspace_vm_table = nullptr;
@@ -195,6 +195,7 @@ void *KspaceMapMgr::pgs_remapp(
     if (status!=OS_SUCCESS)
     {
         GMlock.unlock();
+        
         if(status==OS_OUT_OF_RESOURCE){
             kputsSecure("KspaceMapMgr::pgs_remapp:VM_add entryies out of resource\n");
         }

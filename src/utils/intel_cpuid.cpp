@@ -27,3 +27,8 @@ bool is_x2apic_supported(){
     cpuid(&eax, &ebx, &ecx, &edx);
     return ecx & (1 << 21);
 }
+bool is_avx_supported(){
+    uint32_t eax=1, ebx, ecx=0, edx;
+    cpuid(&eax, &ebx, &ecx, &edx);
+    return ecx & (1 << 28);
+}

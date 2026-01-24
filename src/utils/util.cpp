@@ -36,8 +36,8 @@ uint64_t reverse_perbytes(uint64_t value) {
     }
     return result;
 }
-#ifdef KERNEL_MODE
-int strcmp(const char *str1, const char *str2, uint32_t max_strlen)
+
+int strcmp_in_kernel(const char *str1, const char *str2, uint32_t max_strlen)
 {
     for (uint32_t i = 0; i < max_strlen; i++) {
         if (str1[i] != str2[i]) {
@@ -50,14 +50,13 @@ int strcmp(const char *str1, const char *str2, uint32_t max_strlen)
     return 0;
 }
 
-int strlen(const char *s)
+int strlen_in_kernel(const char *s)
 {
     int len = 0;
     while (*s++)
         len++;
     return len;
 }
-#endif
 int get_first_true_bit_index(bitset512_t *bitmap) {//记得用bitreserve改写
     for (int i = 0; i < 8; i++) {
         uint64_t chunk = (*bitmap)[i]; // 获取第i个64位块
@@ -140,36 +139,48 @@ extern "C" void __wrap___stack_chk_fail(void)
 
 void ksystemramcpy(void*src,void*dest,size_t length)
 //最好用于内核内存空间内的内存拷贝，不然会出现未定义行为
-{  uint64_t remainder=length&0x7;
-    uint64_t count=length>>3;
-    //先范围重复判断
-    if(uint64_t(src)>uint64_t(dest)){
-    low_to_high:
-    for(uint64_t i=0;i<count;i++)
-    {
-        ((uint64_t*)dest)[i]=((uint64_t*)src)[i];
-    }
-    for(uint64_t i=0;i<remainder;i++)
-    {
-        ((uint8_t*)dest)[length-remainder+i]=((uint8_t*)src)[length-remainder+i];
-    }
-    return ;
-}else//源地址低目标地址高的时候就需要内存由高到低复制
-//大多数情况源地址目标地址都对齐的情况下，先复制余数项（一次一字节）再续复制非余数项（一次八字节）
 {
-if((uint64_t(src)+length>uint64_t(dest)))
-{
-    for(uint64_t i=0;i<remainder;i++)
-    {
-        ((uint8_t*)dest)[length-i-1]=((uint8_t*)src)[length-i-1];
+    // 如果源地址和目标地址相同或者长度为0，无需复制
+    if (src == dest || length == 0) {
+        return;
     }
-    for (int i = count-1; i >= 0; i--)
-    {
-        ((uint64_t*)dest)[i]=((uint64_t*)src)[i];
+
+    // 检查内存区域是否有重叠
+    bool overlap = (uint8_t*)src < (uint8_t*)dest + length && (uint8_t*)dest < (uint8_t*)src + length;
+
+    if (!overlap) {
+        // 没有重叠，可以直接使用rep movsb
+        asm volatile (
+            "rep movsb"
+            : "=&D"(dest), "=&S"(src), "=&c"(length)
+            : "0"(dest), "1"(src), "2"(length)
+            : "memory"
+        );
+    } else {
+        // 存在重叠，需要根据src和dest的相对位置决定复制方向
+        if (src < dest) {
+            // 从后往前复制，避免覆盖未复制的数据
+            src = (uint8_t*)src + length - 1;
+            dest = (uint8_t*)dest + length - 1;
+            
+            asm volatile (
+                "std\n\t"           // 设置方向标志位，使地址递减
+                "rep movsb\n\t"     // 执行复制
+                "cld"               // 清除方向标志位，恢复默认递增
+                : "=&D"(dest), "=&S"(src), "=&c"(length)
+                : "0"(dest), "1"(src), "2"(length)
+                : "memory"
+            );
+        } else {
+            // 从前往后复制
+            asm volatile (
+                "rep movsb"
+                : "=&D"(dest), "=&S"(src), "=&c"(length)
+                : "0"(dest), "1"(src), "2"(length)
+                : "memory"
+            );
+        }
     }
-    
-}else goto low_to_high;
-}
 }
 /**
  * 此函数只会对物理内存描述符表中的物理内存起始地址按照低到高排序
@@ -305,7 +316,7 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 /* 带写屏障的8位原子写入 */
-static inline void atomic_write8_wmb(volatile void *addr, uint8_t val)
+ void atomic_write8_wmb(volatile void *addr, uint8_t val)
 {
     asm volatile("sfence\n\t"
                  "movb %1, %0"
@@ -315,7 +326,7 @@ static inline void atomic_write8_wmb(volatile void *addr, uint8_t val)
 }
 
 /* 带写屏障的16位原子写入 */
-static inline void atomic_write16_wmb(volatile void *addr, uint16_t val)
+  void atomic_write16_wmb(volatile void *addr, uint16_t val)
 {
     asm volatile("sfence\n\t"
                  "movw %1, %0"
@@ -325,7 +336,7 @@ static inline void atomic_write16_wmb(volatile void *addr, uint16_t val)
 }
 
 /* 带写屏障的32位原子写入 */
-static inline void atomic_write32_wmb(volatile void *addr, uint32_t val)
+ void atomic_write32_wmb(volatile void *addr, uint32_t val)
 {
     asm volatile("sfence\n\t"
                  "movl %1, %0"
@@ -334,7 +345,7 @@ static inline void atomic_write32_wmb(volatile void *addr, uint32_t val)
                  : "memory");
 }
 /* 带写屏障的64位原子写入 */
-static inline void atomic_write64_wmb(volatile void *addr, uint64_t val)
+  void atomic_write64_wmb(volatile void *addr, uint64_t val)
 {
     asm volatile("sfence\n\t"
                  "movq %1, %0"
@@ -343,7 +354,7 @@ static inline void atomic_write64_wmb(volatile void *addr, uint64_t val)
                  : "memory");
 }
 /* 带读屏障的8位原子读取 */
-static inline uint8_t atomic_read8_rmb(volatile void *addr)
+  uint8_t atomic_read8_rmb(volatile void *addr)
 {
     uint8_t val;
     asm volatile("movb %1, %0\n\t"
@@ -355,7 +366,7 @@ static inline uint8_t atomic_read8_rmb(volatile void *addr)
 }
 
 /* 带读屏障的16位原子读取 */
-static inline uint16_t atomic_read16_rmb(volatile void *addr)
+ uint16_t atomic_read16_rmb(volatile void *addr)
 {
     uint16_t val;
     asm volatile("movw %1, %0\n\t"
@@ -367,7 +378,7 @@ static inline uint16_t atomic_read16_rmb(volatile void *addr)
 }
 
 /* 带读屏障的32位原子读取 */
-static inline uint32_t atomic_read32_rmb(volatile void *addr)
+  uint32_t atomic_read32_rmb(volatile void *addr)
 {
     uint32_t val;
     asm volatile("movl %1, %0\n\t"
@@ -378,7 +389,7 @@ static inline uint32_t atomic_read32_rmb(volatile void *addr)
     return val;
 }
 /* 带读屏障的64位原子读取 */
-static inline uint64_t atomic_read64_rmb(volatile void *addr)
+  uint64_t atomic_read64_rmb(volatile void *addr)
 {
     uint64_t val;
     asm volatile("movq %1, %0\n\t"
@@ -390,7 +401,7 @@ static inline uint64_t atomic_read64_rmb(volatile void *addr)
 }
 
 /* 带回读验证的8位原子写入 */
-static void atomic_write8_rdbk(volatile void *addr, uint8_t val)
+ void atomic_write8_rdbk(volatile void *addr, uint8_t val)
 {
     *(volatile uint8_t *)addr = val;
     uint8_t read_val;
@@ -400,7 +411,7 @@ static void atomic_write8_rdbk(volatile void *addr, uint8_t val)
 }
 
 /* 带回读验证的16位原子写入 */
-static void atomic_write16_rdbk(volatile void *addr, uint16_t val)
+ void atomic_write16_rdbk(volatile void *addr, uint16_t val)
 {
     *(volatile uint16_t *)addr = val;
     uint16_t read_val;
@@ -410,7 +421,7 @@ static void atomic_write16_rdbk(volatile void *addr, uint16_t val)
 }
 
 /* 带回读验证的32位原子写入 */
-static void atomic_write32_rdbk(volatile void *addr, uint32_t val)
+ void atomic_write32_rdbk(volatile void *addr, uint32_t val)
 {
     *(volatile uint32_t *)addr = val;
     uint32_t read_val;
@@ -420,7 +431,7 @@ static void atomic_write32_rdbk(volatile void *addr, uint32_t val)
 }
 
 /* 带回读验证的64位原子写入 */
-static void atomic_write64_rdbk(volatile void *addr, uint64_t val)
+void atomic_write64_rdbk(volatile void *addr, uint64_t val)
 {
     *(volatile uint64_t *)addr = val;
     uint64_t read_val;
@@ -451,4 +462,30 @@ uint64_t rdtsc() {
     unsigned int lo, hi;
     __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
     return ((uint64_t)hi << 32) | lo;
+}
+uint64_t read_gs_u64(size_t index)
+{
+    uint64_t value = 0;
+    uint64_t offset = index * sizeof(uint64_t);
+    
+    asm volatile(
+        "movq %%gs:(%[offset]), %[value]"
+        : [value] "=r" (value)
+        : [offset] "r" (offset)
+        : "memory"
+    );
+    return value;
+}
+
+void gs_u64_write(uint32_t index, uint64_t value)
+{
+    uint64_t offset = index * sizeof(uint64_t);
+    
+    asm volatile(
+        "movq %[val], %%gs:(%[offset])"
+        :
+        : [offset] "r" (offset),
+          [val] "r" (value)
+        : "memory"
+    );
 }

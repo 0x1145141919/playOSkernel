@@ -1,4 +1,4 @@
-#include "lock.h"
+#include "util/lock.h"
 
 void spinlock_cpp_t::lock()
  {

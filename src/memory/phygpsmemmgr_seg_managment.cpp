@@ -3,7 +3,6 @@
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
-#include "VideoDriver.h"
 int phymemspace_mgr::PHYSEG_LIST_ITEM::add_seg(PHYSEG &seg)
 {
     // 空链表

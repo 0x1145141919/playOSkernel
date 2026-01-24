@@ -2,11 +2,26 @@
 #include <stdint.h>
 #include "memory/Memory.h"
 #include "Interrupt_system/Interrupt.h"
-#include "lock.h"
+#include "util/lock.h"
+#include "Interrupt_errors.h"
 namespace gdtentry
 {
     constexpr uint8_t execute_only_type = 0b1001;
     constexpr uint8_t read_write_type = 0b0011;
+}
+namespace INTERRUPT_SUB_MODULES_LOCATIONS{
+    namespace PROCESSORS_EVENT_CODE{
+        constexpr uint8_t EVENT_CODE_RUNTIME_RESGIS=1;
+        constexpr uint8_t EVENT_CODE_APS_INIT = 2;
+        namespace APS_INIT_RESULTS_CODE{
+            namespace RETRY_REASON_CODE{
+                constexpr uint16_t RETRY_REASON_CODE_DEPENDIES_NOT_INITIALIZED = 1;
+            }
+            namespace PARTIAL_SUCCESS_CODE{
+                constexpr uint8_t PARTIAL_SUCCESS_CODE_SOME_APS_NOT_TIME_OUT = 1;
+            }
+        }
+    }
 }
 typedef uint16_t u16;
 typedef uint32_t x2apicid_t;
@@ -152,17 +167,7 @@ typedef uint64_t FS_struct[6];
 constexpr uint8_t  STACK_PROTECTOR_CANARY_IDX = 0x5;
 class x64_local_processor {//承担部分当前核心状态机切换维护的语义
     private:
-    static constexpr uint8_t K_cs_idx = 0x1;
-    static constexpr uint8_t K_ds_ss_idx = 0x2;
-    static constexpr uint8_t U_cs_idx = 0x3;
-    static constexpr uint8_t U_ds_ss_idx = 0x4;
-    static constexpr uint32_t  RSP0_STACKSIZE= 0x8000;
-    static constexpr uint32_t  DF_STACKSIZE= 0x2000;
-    static constexpr uint32_t  MC_STACKSIZE= 0x3000;
-    static constexpr uint32_t  NMI_STACKSIZE= 0x3000;
-    static constexpr uint32_t  BP_DBG_STACKSIZE= 0x3000;
-    static constexpr uint32_t  total_stack_size= BP_DBG_STACKSIZE+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE+NMI_STACKSIZE;
-    static constexpr uint32_t  L_PROCESSOR_GS_IDX= 0;
+    
     IDTEntry idt[256];
     x64GDT gdt;
     TSSentry tss;
@@ -177,7 +182,22 @@ class x64_local_processor {//承担部分当前核心状态机切换维护的语
         bool is_x2apic_supported;
     }processor_features;
     spinlock_cpp_t  lock;
+    KURD_t default_kurd();
+    KURD_t default_success();
+    KURD_t default_fail();
+    KURD_t default_fatal();
     public:
+    static constexpr uint8_t K_cs_idx = 0x1;
+    static constexpr uint8_t K_ds_ss_idx = 0x2;
+    static constexpr uint8_t U_cs_idx = 0x3;
+    static constexpr uint8_t U_ds_ss_idx = 0x4;
+    static constexpr uint32_t  RSP0_STACKSIZE= 0x8000;
+    static constexpr uint32_t  DF_STACKSIZE= 0x2000;
+    static constexpr uint32_t  MC_STACKSIZE= 0x3000;
+    static constexpr uint32_t  NMI_STACKSIZE= 0x3000;
+    static constexpr uint32_t  BP_DBG_STACKSIZE= 0x3000;
+    static constexpr uint32_t  total_stack_size= BP_DBG_STACKSIZE+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE+NMI_STACKSIZE;
+    static constexpr uint32_t  L_PROCESSOR_GS_IDX= 0;
     static int template_init();
     x64_local_processor(uint32_t alloced_id);
     int unsafe_handler_register_without_vecnum_chech(uint8_t vector,void*handler);
@@ -203,6 +223,10 @@ class  x86_smp_processors_container {
     static uint32_t bsp_apic_id;
     static x64_local_processor *local_processor_interrupt_mgr_array[max_processor_count];
     static spinlock_cpp_t lock;
+    static KURD_t default_kurd();
+    static KURD_t default_success();
+    static KURD_t default_fail();
+    static KURD_t default_fatal();
     public:
     static x64_local_processor*get_currunt_mgr();//使用内部gs的结构体对应的
     static x64_local_processor*get_processor_mgr_by_processor_id(prcessor_id_t id);
@@ -212,8 +236,10 @@ class  x86_smp_processors_container {
      * 初始化函数，必须由bsp调用，大体思路有：
      * 解析madt表,一个核心一个核心地初始化
      */
-    static int AP_Init_one_by_one();
-    static int regist_core();//程序指针进去会自动查询apicid,是否是bsp核心，分配processor_id并且在对应processor——id的引索的local_processor注册
+    static KURD_t AP_Init_one_by_one();
+    static int regist_core(uint32_t processor_id );//程序指针进去会自动查询apicid,是否是bsp核心，分配processor_id并且在对应processor——id的引索的local_processor注册
     //bsp核心必然会分配一个为0的processor_id
     static int unregist_core();
 };
+extern uint64_t ap_hlt_word;
+

@@ -1,7 +1,7 @@
 #pragma once
 #include "stdint.h"
 #include "memory/Memory.h"
-#include <lock.h>
+#include <util/lock.h>
 #include <util/Ktemplats.h>
 typedef  uint64_t phyaddr_t;
 
@@ -11,7 +11,10 @@ typedef  uint64_t phyaddr_t;
  * 必然存在下级页
  * 2mbPARTIAL中页在4kb子表有效且存在时全部非free时应标记为full，
  * 1gb大页在2mb中页原子页中全部非free且非原子页全部为full时则应该标记为full，
- *  */
+ * 新增专门的空闲页管理系统，为此引入BUDDY_USED类型，所以BUDDY本质上是FREE/PARTIAL的变种，但是不参与基础页框分配，所以不需要改变类型
+ * BUDDY_USED类型 设计意图是在原来的通用扫描逻辑中，提供大页跳过，由此BUDDY_USED可以为2mb中页（无论是否原子）,1gb大页（无论是否原子），4kb小页
+ * 在非原子BUDDY_USED1GB大页/2mb中页下，原子页视图可以为dram上合法的占用类型
+ * */
 /**
  *整个模块有两个核心数据结构：
     static PHYSEG_LIST_ITEM*physeg_list;与
@@ -37,7 +40,8 @@ class phymemspace_mgr{
     //技术债
     enum page_state_t:uint8_t {
         RESERVED = 0, // 保留页,不能动,特意设计成这个数码来保证在clear之后默认就是如此
-        FREE,   // 空闲页   
+        FREE,   // 空闲页 
+        BUDDY_USED,   // 伙伴页使用中,  
         PARTIAL,// 仅大页可用，代表子表是否存在state,refcount存在不完全相同
         FULL,
         MMIO_FREE,
@@ -91,10 +95,8 @@ class phymemspace_mgr{
         uint64_t user_file;
         uint64_t user_anonymous;
         uint64_t dma;
-
         uint64_t total_mmio;
         uint64_t mmio_used;
-
         uint64_t total_firmware;
         uint64_t total_reserved;
     };
@@ -275,15 +277,31 @@ class phymemspace_mgr{
         */
     /**
      * 函数的分配逻辑是由前向后面扫的时候优先在PARTIAL/对应相同state的预分配大页中分配，而后再染色free原子大页
+     * 基于那个多级表的线性扫描法，不浪费但是时间复杂度O(n)，
      */
     static phyaddr_t pages_alloc(uint64_t numof_4kbpgs,page_state_t state,uint8_t align_log2=12);
     static int pages_mmio_regist(phyaddr_t phybase,uint64_t numof_4kbpgs);//只能从标记为MMIO_FREE的内存中注册为mmio
     static int pages_recycle(phyaddr_t phybase,uint64_t numof_4kbpgs);
     static int pages_mmio_unregist(phyaddr_t phybase,uint64_t numof_4kbpgs);
+    struct pages_dram_regist_flags_t{
+        seg_type_t type;
+        
+    };
+    static int pages_dram_regist(phyaddr_t phybase,uint64_t numof_4kbpgs);
+    static int pages_dram_unregist(phyaddr_t phybase,uint64_t numof_4kbpgs);
     static int phypg_refcount_dec(phyaddr_t base);
     static int phypg_refcount_inc(phyaddr_t base);
     static int phypg_mapcount_dec(phyaddr_t base);
     static int phypg_mapcount_inc(phyaddr_t base);
+    struct free_segs_t{
+        uint64_t count;
+        struct entry_t{ 
+            phyaddr_t base;
+            uint64_t size;
+        };
+        entry_t*entries;
+    };
+    static free_segs_t*free_segs_get();//慎用，此函数会锁住整个模块扫描整个模块的表汇报内容
     static int blackhole_acclaim(
         phyaddr_t base,
         uint64_t numof_4kbpgs,

@@ -24,10 +24,9 @@ void linearTBSerialInsert(
     uint32_t entrysize,
     uint64_t entryCount = 1
 ) ;
-#ifdef KERNEL_MODE
-int strcmp(const char *str1, const char *str2,uint32_t max_strlen=4096);
-int strlen(const char *s);
-#endif
+
+int strcmp_in_kernel(const char *str1, const char *str2,uint32_t max_strlen=4096);
+int strlen_in_kernel(const char *s);
 int get_first_true_bit_index(bitset512_t* bitmap);
 int get_first_zero_bit_index(bitset512_t *bitmap) ;
 bool getbit_entry1bit_width(bitset512_t* bitmap,uint16_t index);
@@ -53,6 +52,8 @@ void atomic_write64_rdbk(volatile void *addr, uint64_t val);
 uint64_t rdmsr(uint32_t offset);
 void wrmsr(uint32_t offset,uint64_t value);
 uint64_t rdtsc();
+uint64_t read_gs_u64(size_t index);
+void gs_u64_write(uint32_t index, uint64_t value);
 #ifdef USER_MODE
 // 将内存描述符表从文本格式转换为gBaseMemMgr.Init函数所需的格式
 void print_memory_descriptor_for_gbasememmgr(const char* input_file_path);

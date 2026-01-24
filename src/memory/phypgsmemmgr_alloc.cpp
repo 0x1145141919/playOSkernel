@@ -1,9 +1,9 @@
 #include "memory/phygpsmemmgr.h"
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
-#include "VideoDriver.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
+#include "util/kout.h"
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
 static constexpr uint64_t PAGES_4KB_PER_1GB = PAGES_4KB_PER_2MB * PAGES_2MB_PER_1GB; // 262144
@@ -346,7 +346,7 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
             status=del_no_atomig_1GB_pg(align_down_base/_1GB_PG_SIZE);
             if(status!=OS_SUCCESS)
             {
-                kputsSecure("[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail\n");
+                kio::bsp_kout<<"[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail"<<kio::kendl;
                 module_global_lock.unlock();
                 return status;
             }
@@ -356,7 +356,7 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
             status=del_no_atomig_1GB_pg(align_down_base/_1GB_PG_SIZE);
             if(status!=OS_SUCCESS)
             {
-                kputsSecure("[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail\n");
+                kio::bsp_kout<<"[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail"<<kio::kendl;
                 module_global_lock.unlock();
                 return status;
             }
@@ -366,7 +366,7 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
             status=del_no_atomig_1GB_pg((align_up_end-_1GB_PG_SIZE)/_1GB_PG_SIZE);
             if(status!=OS_SUCCESS)
             {
-                kputsSecure("[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail\n");
+                kio::bsp_kout<<"[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail"<<kio::kendl;
                 module_global_lock.unlock();
                 return status;
             }

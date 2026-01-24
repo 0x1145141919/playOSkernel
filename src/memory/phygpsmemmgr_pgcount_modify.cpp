@@ -1,7 +1,6 @@
 #include "memory/phygpsmemmgr.h"
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
-#include "VideoDriver.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
 

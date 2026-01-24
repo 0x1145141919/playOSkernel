@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "fixed_interrupt_vectors.h"
+#include "pt_regs.h"
 extern void (*global_ipi_handler)();
 /**
  * 中断管理器，管理着每个cpu的中断描述符表和本地apic
@@ -7,42 +8,43 @@ extern void (*global_ipi_handler)();
  */
  // namespace gdtentry
 struct interrupt_frame {
-    uint64_t rip;    // 指令指针
-    uint64_t cs;     // 代码段选择子
-    uint64_t rflags; // CPU标志
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
     uint64_t rsp;    // 栈指针（仅特权级变化时压入）
     uint64_t ss;     // 栈段选择子（仅特权级变化时压入）
-    uint64_t rax;
-    uint64_t rbx;
-    uint64_t rcx;
-    uint64_t rdx;
-    uint64_t rdi;
-    uint64_t rsi;
-    uint64_t rbp;
-    uint64_t r8;
-    uint64_t r9;
-    uint64_t r10;
-    uint64_t r11;
-    uint64_t r12;
-    uint64_t r13;
-    uint64_t r14;
-    uint64_t r15;
 };
-__attribute__((interrupt)) void exception_handler_div_by_zero(interrupt_frame* frame);
-__attribute__((interrupt)) void exception_handler_breakpoint(interrupt_frame* frame);
-__attribute__((interrupt)) void exception_handler_nmi(interrupt_frame* frame);
-__attribute__((interrupt)) void exception_handler_breakpoint(interrupt_frame* frame);
-__attribute__((interrupt)) void exception_handler_overflow(interrupt_frame* frame);
-__attribute__((interrupt)) void exception_handler_invalid_opcode(interrupt_frame* frame);        // #UD
-__attribute__((interrupt)) void exception_handler_general_protection(interrupt_frame* frame, uint64_t error_code); // #GP
-__attribute__((interrupt)) void exception_handler_double_fault(interrupt_frame* frame, uint64_t error_code);       // #DF
-__attribute__((interrupt)) void exception_handler_page_fault(interrupt_frame* frame, uint64_t error_code);         // #PF
-__attribute__((interrupt)) void exception_handler_machine_check(interrupt_frame* frame);        // #MC
-__attribute__((interrupt)) void exception_handler_invalid_tss(interrupt_frame* frame, uint64_t error_code);        // #TS
-__attribute__((interrupt)) void exception_handler_simd_floating_point(interrupt_frame* frame);    // #XM
-__attribute__((interrupt)) void exception_handler_virtualization(interrupt_frame* frame, uint64_t error_code);     // #VE
-__attribute__((interrupt)) void timer_interrupt(interrupt_frame* frame);
-__attribute__((interrupt)) void IPI(interrupt_frame* frame, uint64_t error_code);
 
-
-
+extern "C" void div_by_zero_cpp_enter(x64_Interrupt_saved_context_no_errcode*frame);
+extern "C" void debug_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void nmi_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void breakpoint_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void overflow_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void invalid_opcode_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);        // #UD
+extern "C" void double_fault_cpp_enter(x64_Interrupt_saved_context* frame); // #DF
+extern "C" void invalid_tss_cpp_enter(x64_Interrupt_saved_context* frame);   // #TS    
+extern "C" void general_protection_cpp_enter(x64_Interrupt_saved_context* frame); // #GP
+extern "C" void page_fault_cpp_enter(x64_Interrupt_saved_context* frame);         // #PF
+extern "C" void machine_check_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);        // #MC
+extern "C" void simd_floating_point_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);    // #XM
+extern "C" void virtualization_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);     // #VE
+extern "C" void Control_Protection_cpp_enter(x64_Interrupt_saved_context* frame);
+extern "C" void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void ipi_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void asm_panic_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+// 汇编定义的异常处理入口点
+extern "C" char div_by_zero_bare_enter;
+extern "C" char breakpoint_bare_enter;
+extern "C" char nmi_bare_enter;
+extern "C" char overflow_bare_enter;
+extern "C" char invalid_opcode_bare_enter;
+extern "C" char general_protection_bare_enter;
+extern "C" char double_fault_bare_enter;
+extern "C" char page_fault_bare_enter;
+extern "C" char machine_check_bare_enter;
+extern "C" char invalid_tss_bare_enter;
+extern "C" char simd_floating_point_bare_enter;
+extern "C" char virtualization_bare_enter;
+extern "C" char timer_bare_enter;
+extern "C" char ipi_bare_enter;
+extern "C" char asm_panic_bare_enter;

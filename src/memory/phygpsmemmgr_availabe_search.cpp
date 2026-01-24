@@ -1,7 +1,8 @@
 #include "memory/phygpsmemmgr.h"
 #include "os_error_definitions.h"
 #include "util/OS_utils.h"
-#include "VideoDriver.h"
+#include "util/kptrace.h"
+#include "util/kout.h"
 #include "memory/kpoolmemmgr.h"
 #include "linker_symbols.h"
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
@@ -66,7 +67,7 @@ int phymemspace_mgr::align4kb_pages_search(
 
         page_size1gb_t* p1 = top_1gb_table->get(cur1._1gb_idx);
         if (p1 == nullptr) {
-            kputsSecure("Consistency violation between top_1gb_table and physeg_list");
+            kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]top_1gb_table is null in align4kb_pages_search idx = "<<cur1._1gb_idx<<kio::kendl;
             return OS_MEMRY_ALLOCATE_FALT;
         }
 
@@ -98,7 +99,7 @@ int phymemspace_mgr::align4kb_pages_search(
                 next_idx._4kb_idx = 0;
                 expected_next_phys = idx_to_phyaddr(next_idx);
             } else  { // 其他注册/保留/非法
-                kputsSecure("illegal pagestate when scanning 1gb atomic entry");
+                kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]illegal pagestate when scanning 1gb atomic entry which 1gbidx:"<<cur1._1gb_idx<<kio::kendl;
                 result_base = 0;
                 return OS_MEMRY_ALLOCATE_FALT;
             }
@@ -111,12 +112,12 @@ int phymemspace_mgr::align4kb_pages_search(
             accummulated_count = 0;
             expected_next_phys = idx_to_phyaddr(next_idx);
             continue;
-        }
-        if(p1->flags.state == PARTIAL)
+        }else  if(p1->flags.state == PARTIAL)
         {// PARTIAL at 1GB: need to iterate 2MB entries inside this 1GB
         page_size2mb_t* p2base = p1->sub2mbpages;
         if (p2base == nullptr) {
-            kputsSecure("Inconsistent PARTIAL 1GB without sub2mbpages");
+            kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent PARTIAL 1GB without sub2mbpages, at index: "
+                         <<cur1._1gb_idx<<", base address: 0x"<<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             return OS_MEMRY_ALLOCATE_FALT;
         }
 
@@ -152,8 +153,11 @@ int phymemspace_mgr::align4kb_pages_search(
                     next_idx._2mb_idx = i2 + 1;
                     next_idx._4kb_idx = 0;
                     expected_next_phys = idx_to_phyaddr(next_idx);
+                    
                 } else {//剩下的类型不应该出现在dram里面
-                    kputsSecure("illegal pagestate when scanning 2mb entry");
+                    kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Illegal page state ("<<p2->flags.state<<") when scanning 2MB atomic entry at index: "
+                                 <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
+                                 <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                     result_base = 0;
                     return OS_MEMRY_ALLOCATE_FALT;
                 }
@@ -165,12 +169,13 @@ int phymemspace_mgr::align4kb_pages_search(
                 next_idx._2mb_idx = i2 + 1;
                 next_idx._4kb_idx = 0;
                 expected_next_phys = idx_to_phyaddr(next_idx);
-            }
-            if(p2->flags.state == PARTIAL)
+            }else if(p2->flags.state == PARTIAL)
             {// PARTIAL at 2MB: iterate 4KB entries
             page_size4kb_t* p4base = p2->sub_pages;
             if (p4base == nullptr) {
-                kputsSecure("Inconsistent PARTIAL 2MB without sub_pages");
+                kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent PARTIAL 2MB without sub_pages, at index: "
+                             <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
+                             <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                 return OS_MEMRY_ALLOCATE_FALT;
             }
 
@@ -186,7 +191,9 @@ int phymemspace_mgr::align4kb_pages_search(
                 page_size4kb_t* p4 = p4base + i4;
                 if (p4->flags.is_sub_valid) {
                     // 4KB 层不应当有 sub_valid（按你的注释），视为一致性错误
-                    kputsSecure("4KB entry marked is_sub_valid unexpectedly");
+                    kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]4KB entry marked is_sub_valid unexpectedly, at index: "
+                                 <<"1GB:"<<cur4._1gb_idx<<", 2MB:"<<cur4._2mb_idx<<", 4KB:"<<cur4._4kb_idx
+                                 <<", base address: "<<(void*)idx_to_phyaddr(cur4)<<kio::kendl;
                     return OS_MEMRY_ALLOCATE_FALT;
                 }
 
@@ -208,20 +215,27 @@ int phymemspace_mgr::align4kb_pages_search(
                     accummulated_count = 0;
                     expected_next_phys = p4_base + P4K;
                 } else { //剩下的类型不应该出现在DRAM段里面
-                    kputsSecure("illegal pagestate when scanning 1GB entry");
+                    kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Illegal page state ("<<p4->flags.state<<") when scanning 4KB entry at index: "
+                                 <<"1GB:"<<cur4._1gb_idx<<", 2MB:"<<cur4._2mb_idx<<", 4KB:"<<cur4._4kb_idx
+                                 <<", base address: "<<(void*)idx_to_phyaddr(cur4)<<kio::kendl;
                     result_base = 0;
                     return OS_MEMRY_ALLOCATE_FALT;
                 }
             } // end for i4
 
             }else{
-                kputsSecure("illegal pagestate when scanning 2MB entry"); 
+                
+                kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Illegal page state ("<<p2->flags.state<<") when scanning 2MB entry in dram seg, at index: "
+                             <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
+                             <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
+                self_trace();
                 result_base = 0;
                 return OS_MEMRY_ALLOCATE_FALT;
             }
         } // end for i2
         }else{
-            kputsSecure("illegal pagestate when scanning 1GB entry in dram seg");
+            kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Illegal page state ("<<p1->flags.state<<") when scanning 1GB entry in dram seg, at index: "
+                         <<cur1._1gb_idx<<", base address: "<<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             result_base = 0;
             return OS_MEMRY_ALLOCATE_FALT;
         }
@@ -277,7 +291,9 @@ int phymemspace_mgr::align2mb_pages_search(
                 accummulated_count = 0;
                 expected_next_phys = idx_to_phyaddr(next_idx);
             } else { // 非法
-                kputsSecure("illegal pagestate when scanning 1GB atomic entry");
+                kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Illegal page state when scanning 1GB atomic entry, at index: "
+                             <<cur1._1gb_idx<<", base address: "
+                             <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
                 result_base = 0;
                 return OS_MEMRY_ALLOCATE_FALT;
             }
@@ -290,12 +306,12 @@ int phymemspace_mgr::align2mb_pages_search(
             accummulated_count = 0;
             expected_next_phys = idx_to_phyaddr(next_idx);
             continue;
-        }
-
-        if (p1->flags.state == PARTIAL) {
+        }else  if (p1->flags.state == PARTIAL) {
             page_size2mb_t *p2base = p1->sub2mbpages;
             if (p2base == nullptr) {
-                kputsSecure("Inconsistent PARTIAL 1GB without sub2mbpages");
+                kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Inconsistent PARTIAL 1GB without sub2mbpages, at index: "
+                             <<cur1._1gb_idx<<", base address: "
+                             <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
                 return OS_MEMRY_ALLOCATE_FALT;
             }
 
@@ -332,7 +348,9 @@ int phymemspace_mgr::align2mb_pages_search(
                         accummulated_count = 0;
                         expected_next_phys = idx_to_phyaddr(next_idx);
                     } else {
-                        kputsSecure("illegal pagestate when scanning 2mb entry");
+                        kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Illegal page state ("<<p2->flags.state<<") when scanning 2MB entry at index: "
+                                     <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
+                                     <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                         result_base = 0;
                         return OS_MEMRY_ALLOCATE_FALT;
                     }
@@ -345,13 +363,17 @@ int phymemspace_mgr::align2mb_pages_search(
                     accummulated_count = 0;
                     expected_next_phys = idx_to_phyaddr(next_idx);
                 } else {
-                    kputsSecure("illegal pagestate when scanning 2MB entry");
+                    kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Illegal page state when scanning 2MB entry, at index: "
+                                 <<"1GB:"<<cur1._1gb_idx<<", 2MB:"<<cur2._2mb_idx
+                                 <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl; 
                     result_base = 0;
                     return OS_MEMRY_ALLOCATE_FALT;
                 }
             } // end for i2
         } else {
-            kputsSecure("illegal pagestate when scanning 1GB entry in dram seg");
+            kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Illegal page state when scanning 1GB entry in dram seg, at index: "
+                         <<cur1._1gb_idx<<", base address: "
+                         <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             result_base = 0;
             return OS_MEMRY_ALLOCATE_FALT;
         }
@@ -406,7 +428,9 @@ int phymemspace_mgr::align1gb_pages_search(
                 accummulated_count = 0;
                 expected_next_phys = idx_to_phyaddr(next_idx);
             } else { // 非法
-                kputsSecure("illegal pagestate when scanning 1GB atomic entry");
+                kio::bsp_kout<<"[phymemspace_mgr::align1gb_pages_search]Illegal page state when scanning 1GB atomic entry, at index: "
+                             <<cur1._1gb_idx<<", base address: "
+                             <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
                 result_base = 0;
                 return OS_MEMRY_ALLOCATE_FALT;
             }
@@ -420,7 +444,9 @@ int phymemspace_mgr::align1gb_pages_search(
             expected_next_phys = idx_to_phyaddr(next_idx);
             continue;
         } else {
-            kputsSecure("illegal pagestate when scanning 1GB entry in dram seg");
+            kio::bsp_kout<<"[phymemspace_mgr::align1gb_pages_search]Illegal page state when scanning 1GB entry in dram seg, at index: "
+                         <<cur1._1gb_idx<<", base address: "
+                         <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             result_base = 0;
             return OS_MEMRY_ALLOCATE_FALT;
         }

@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include "memory/Memory.h"
-#include "VideoDriver.h"
+#include "core_hardwares/VideoDriver.h"
 typedef struct {
     uint32_t signature;          // 标识符，例如 'BOOTINFO'
     uint32_t total_size;         // 整个数据结构的总大小
@@ -19,7 +19,11 @@ typedef struct {
     EFI_SYSTEM_TABLE* gST_ptr;
 
     EFI_MEMORY_DESCRIPTORX64* memory_map_ptr;    
-        uint32_t mapversion;        // 内存映射版本// 其他元数据
+    uint64_t ksymbols_table_phy_ptr;
+    uint32_t ksymbols_entry_count;
+    uint32_t ksymbols_entry_size;
+
+    uint32_t mapversion;        // 内存映射版本// 其他元数据
     uint64_t flags;
     uint64_t checksum;           // 可选的数据校验
 } BootInfoHeader;

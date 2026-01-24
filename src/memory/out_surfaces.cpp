@@ -16,35 +16,39 @@ int __wrapped_pgs_free(void*vbase,uint64_t _4kbpgscount){
     if(status!=OS_SUCCESS)return OS_MEMORY_FREE_FAULT;
     return phymemspace_mgr::pages_recycle(pbase,_4kbpgscount);
 }
-void* __wrapped_heap_alloc(uint64_t size, bool is_longtime, bool vaddraquire, uint8_t alignment) {
-    return kpoolmemmgr_t::kalloc(size,is_longtime, vaddraquire, alignment);
+void* __wrapped_heap_alloc(uint64_t size,alloc_flags_t flags=default_flags) {
+    return kpoolmemmgr_t::kalloc(size,flags);
 }
 void __wrapped_heap_free(void*addr){
     kpoolmemmgr_t::kfree(addr);
 }
-void* __wrapped_heap_realloc(void*addr,uint64_t size,bool vaddraquire,uint8_t alignment) {
-    return kpoolmemmgr_t::realloc(addr, size, vaddraquire, alignment);
+void* __wrapped_heap_realloc(void*addr,uint64_t size,alloc_flags_t flags) {
+    return kpoolmemmgr_t::realloc(addr, size, flags);
 }
 void* operator new(size_t size) {
 
-    return __wrapped_heap_alloc(size,false, true, 4);
-
-}
-void* operator new(size_t size, bool vaddraquire, uint8_t alignment) {
-
-        return kpoolmemmgr_t::kalloc(size, vaddraquire, alignment);
+    return __wrapped_heap_alloc(size,default_flags);
 
 }
 
-void* operator new[](size_t size) {
+void *operator new(size_t size, alloc_flags_t flags)
+{
+    return __wrapped_heap_alloc(size,flags);
+}
+void *operator new[](size_t size)
+{
 
-    return kpoolmemmgr_t::kalloc(size,false, true, 4);
- 
+    return kpoolmemmgr_t::kalloc(size,default_flags);
+}
+
+void *operator new[](size_t size, alloc_flags_t flags)
+{
+    return __wrapped_heap_alloc(size,flags);
 }
 
 void* operator new[](size_t size, bool vaddraquire, uint8_t alignment) {
 
-        return kpoolmemmgr_t::kalloc(size, vaddraquire, alignment);
+        return kpoolmemmgr_t::kalloc(size, default_flags);
 
 }
 

@@ -3,9 +3,14 @@
 /kernel.elf
 *.o
 *.a
+*.so.*
 *.so
+*.ts
 *.out
 *.d
+*.make
+*.cmake
+*.elf
 /src/memory/CMakeFiles
 /CMakeCache.txt
 /CMakeFiles/
@@ -26,7 +31,8 @@
 /logs
 *.swp
 *~
-
+/gnu-efi-prefix
+/outsbmodules
 # 日志文件
 /*.log
 /log*.txt

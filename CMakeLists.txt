@@ -34,7 +34,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DEBUG_LINK_FLAGS "-g")
 else()
     message(STATUS "Building in RELEASE mode")
-    add_compile_options(-O3)
+    add_compile_options(-O2)
 endif()
 # 语言特定的选项（可选）
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c23")          # C 标准
@@ -46,14 +46,14 @@ set(CMAKE_KEEP_BUILD_FILES ON)
 set(SRC_COMMON
  #USERMODE需要替换成对应的标准库
     src/utils/util.cpp
-    src/drivers/VideoDriver.cpp
-    src/drivers/PortDriver.cpp
+    src/core_hardwares/VideoDriver.cpp
+    src/core_hardwares/PortDriver.cpp
     src/utils/kintrin.cpp
-    src/panic/panic.cpp
+    src/panic.cpp
     src/utils/bitmap.cpp
     src/utils/lock.cpp
     src/utils/RB_btree.cpp
-    src/kout.cpp
+    src/utils/kout.cpp
     src/utils/intel_cpuid.cpp
 )
 
@@ -67,27 +67,51 @@ ExternalProject_Add(
     INSTALL_COMMAND ""     # 不安装
     BUILD_IN_SOURCE TRUE   # 在源目录构建
 )
-
+add_custom_target(kernel_resources
+)
+add_custom_target(ksymbols
+    COMMAND ./symbols_dumper
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "运行自定义目标"
+)
+add_dependencies(ksymbols symbols_dumper)
+add_custom_target(initramfs
+    COMMAND ./mkinitramfs
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "运行自定义目标"
+)
+add_dependencies(initramfs mkinitramfs)
+add_dependencies(kernel_resources 
+    kernel.elf 
+    initramfs
+    ksymbols
+) 
 # 获取gnu-efi构建目录路径
 ExternalProject_Get_Property(gnu-efi SOURCE_DIR)
 set(GNU_EFI_SOURCE_DIR ${SOURCE_DIR})
 add_subdirectory(src/memory)
 add_subdirectory(outsbmodules/tinySTL)
 add_subdirectory(src/fs)
-
+add_executable(symbols_dumper
+    build_utils/ksymbols_dumper.cpp
+)
 # 内核可执行文件
 add_executable(kernel.elf
-    src/efi_about/UefiRunTimeServices.cpp
+    src/firmware/UefiRunTimeServices.cpp
     src/kinit.cpp
         src/utils/kcirclebufflogMgr.cpp
         src/kernel_entry.asm
         src/utils/int128_div.cpp
-        #src/Interrupts/Interrupt_Init.cpp
+        src/Interrupts/lapic.cpp
         src/Interrupts/exceptions_handler.cpp
-        src/Interrupts/local_processor_manage.cpp
-        src/drivers/HPET.cpp
-        src/utils/time.cpp
-        src/acpi_subsystems/acpimgr.cpp
+        src/Processor/local_processor_manage.cpp
+        src/firmware/APIC_convert_functions.cpp
+        src/firmware/APIC_table_analyzer.cpp
+        src/Interrupts/Sysdef_exception_entries.asm
+        src/core_hardwares/HPET.cpp
+        src/time.cpp
+        src/utils/kptrace.cpp
+        src/firmware/acpimgr.cpp
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
@@ -111,7 +135,6 @@ target_compile_options(
 # 链接gnu-efi库
 target_link_libraries(mkinitramfs PRIVATE
     fs_user_test
-    tinySTL
     -fsanitize=address
 )
 
@@ -132,46 +155,9 @@ target_compile_options(
     -fsanitize=address
 )
 
-add_executable(memmoduletest
-    src/tests/test_memmodule.cpp
-    src/memory/phygpsmemmgr_availabe_search.cpp
-    src/memory/phygpsmemmgr.cpp
-    src/memory/phygpsmemmgr_pgcount_modify.cpp
-    src/memory/phygpsmemmgr_pgs_set.cpp
-    src/memory/phygpsmemmgr_seg_managment.cpp
-    src/memory/phypgsmemmgr_alloc.cpp
-    src/memory/PhyAddrAccessor.cpp
-    src/memory/Memory.cpp
-    src/memory/KspacMapMgr.cpp 
-    src/memory/KspacMapMgr_pagediretct_operate.cpp
-    ${SRC_COMMON}
-)
-target_include_directories(
-    memmoduletest PRIVATE
-    "/usr/include/"
-    "/usr/include/efi"
-     "${CMAKE_SOURCE_DIR}/src/include"
-)
-target_compile_options(
-    memmoduletest PRIVATE
-    -fsanitize=address
-    -fsanitize=undefined
-    -fsanitize=leak
-    -fno-omit-frame-pointer
-    -DUSER_MODE
-)
-
-target_link_options(memmoduletest PRIVATE
-    -lstdc++  # 显式链接C++标准库
-    -fsanitize=address
-    -fsanitize=undefined
-    -fsanitize=leak
-)
-
 target_link_libraries(kernel.elf PRIVATE 
     ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
-    tinySTL
     fs_static
 )
 
@@ -219,6 +205,7 @@ target_compile_options(kernel.elf PRIVATE
     -fpermissive
     -fno-PIC
     -DKERNEL_MODE>
+    -DPGLV_4>
 $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
 )
 target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})

@@ -33,6 +33,7 @@ namespace time
         static bool get_if_hpet_initialized();
         static hardware_time_base_token processor_regist();
         static miusecond_time_stamp_t get_stamp(hardware_time_base_token token);
+        static void timer_polling_spin_delay(uint64_t mius);
     };
     extern hardware_time_base_token*bsp_token;
 }

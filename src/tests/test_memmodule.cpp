@@ -2,7 +2,6 @@
 #include "memory/kpoolmemmgr.h"
 #include "util/cpuid_intel.h"
 #include "util/OS_utils.h"
-#include "VideoDriver.h"
 #include "memory/AddresSpace.h"
 #include "memory/phygpsmemmgr.h"
 #include <cstdio>

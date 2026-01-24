@@ -4,6 +4,7 @@
 #include "util/OS_utils.h"
 #ifdef USER_MODE
 #include <cstdio>
+#include <cstring>
 #endif
 // 确保结构体类型在使用前已定义
 
@@ -250,7 +251,7 @@ int init_fs_t::dir_content_search_by_name(Inode be_searched_dir_inode, char *fil
     inode_content_read(be_searched_dir_inode,0,be_searched_dir_inode.file_size,(uint8_t*)dir_content);
     for(int i=0;i<be_searched_dir_inode.file_size/sizeof(FileEntryinDir);i++)
     {
-        if(strcmp((char*)dir_content[i].filename,filename,MAX_FILE_NAME_LEN)==0)
+        if(strcmp_in_kernel((char*)dir_content[i].filename,filename,MAX_FILE_NAME_LEN)==0)
         {
             result_entry=dir_content[i];
             delete[] dir_content;
@@ -284,7 +285,7 @@ int init_fs_t::dir_content_delete_by_name(Inode &dir_inode, FileEntryinDir&del_e
     uint64_t old_entry_count=old_size/sizeof(FileEntryinDir);
     for(int i=0;i<old_entry_count;i++)
     {
-        if(strcmp((char*)dir_content[i].filename,(char*)del_entry.filename,MAX_FILE_NAME_LEN)==0)
+        if(strcmp_in_kernel((char*)dir_content[i].filename,(char*)del_entry.filename,MAX_FILE_NAME_LEN)==0)
         {
             uint64_t new_size=old_size-sizeof(FileEntryinDir);
             ksystemramcpy(
