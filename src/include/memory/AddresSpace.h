@@ -97,7 +97,8 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t EVENT_CODE_ENABLE_VMENTRY=0x1;
         constexpr uint8_t EVENT_CODE_DISABLE_VMENTRY=0x2;
         constexpr uint8_t EVENT_CODE_TRAN_TO_PHY=0x3;
-        constexpr uint8_t EVENT_CODE_PAGES_SET=0x4;
+        constexpr uint8_t EVENT_CODE_INVALIDATE_TLB=0x4;
+        constexpr uint8_t EVENT_CODE_BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE=0x5;
         constexpr uint8_t EVENT_CODE_UNREGIST=0xff;
         namespace ENABLE_VMENTRY_RESULTS{
             namespace FAIL_REASONS{
@@ -148,7 +149,19 @@ namespace MEMMODULE_LOCAIONS{
                     constexpr uint16_t REASON_CODE_OTHER_PAGES_SET_FATAL=0x8;
                 }   
         }
-        
+        namespace INVALIDATE_TLB_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_BAD_VM_ENTRY=0x1; 
+            }
+            namespace FATAL_REASONS{ 
+                constexpr uint16_t REASON_CODE_INVALID_PAGE_SIZE=0x4;
+            }
+        }
+        namespace BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_NOT_gKERNELSPACE=1;
+            }
+        }
     }
     constexpr uint8_t LOCATION_CODE_KSPACE_MAP_MGR_VMENTRY_RBTREE=17;
     namespace KSPACE_MAP_MGR_EVENTS_CODE{
@@ -192,7 +205,7 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
         uint16_t if_not_currunt_space:1;
         uint16_t if_hardware_addresspace_id_valid:1;
     };
-    static KURD_t invalidate_tlb_of_VM_desc(VM_DESC desc,tlb_invalidate_flags flags);
+    KURD_t invalidate_tlb_of_VM_desc(VM_DESC desc,tlb_invalidate_flags flags);
     KURD_t second_stage_init();//new完之后马上最快的速度调用此接口，并且接受返回值进行分析
     KURD_t build_identity_map_ONLY_IN_gKERNELSPACE();//uefi运行时服务依赖于这个构建的恒等映射
     uint64_t get_occupyied_size(){

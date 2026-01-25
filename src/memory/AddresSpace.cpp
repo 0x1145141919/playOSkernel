@@ -30,6 +30,71 @@ KURD_t AddressSpace::default_fatal()
     fatal=set_fatal_result_level(fatal);
     return fatal;
 }
+KURD_t AddressSpace::invalidate_tlb_of_VM_desc(VM_DESC desc, tlb_invalidate_flags flags)
+{
+    KURD_t success=default_success();
+   KURD_t fail=default_fail();
+   KURD_t fatal=default_fatal();
+   success.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+   fail.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+   fatal.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+    seg_to_pages_info_pakage_t info_package;
+    int stauts=seg_to_pages_info_get(info_package,desc);
+    if(stauts){
+        fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
+    auto x64_invalidate_tlb=[flags](vaddr_t vaddr){
+    if(flags.if_not_currunt_space){
+        // 刷新其他地址空间的TLB（使用PCID和INVPCID指令）
+        if(flags.if_hardware_addresspace_id_valid){
+            // 使用INVPCID指令刷新指定PCID的TLB项
+            // INVPCID type 0: 使单个PCID的单个地址无效
+            struct {
+                uint64_t pcid;
+                uint64_t vaddr;
+            } descriptor = {
+                .pcid = flags.hardware_addresspace_id & 0xFFF,
+                .vaddr = vaddr
+            };
+            
+            asm volatile(
+                "invpcid (%1), %0"
+                : 
+                : "r"(0ULL),  // type=0: INVPCID_TYPE_INDIV_ADDR
+                  "r"(&descriptor)
+                : "memory"
+            );
+        } else {
+            // 如果没有指定有效的PCID，回退到普通的INVLPG
+            asm volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+        }
+    } else {
+        // 刷新当前地址空间的TLB
+        asm volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+    }
+};
+    for(int i=0;i<5;i++){
+        switch(info_package.entryies[i].page_size_in_byte){
+            case _4KB_SIZE:
+            case _2MB_SIZE:
+            case _1GB_SIZE:
+            {
+                seg_to_pages_info_pakage_t::pages_info_t& entry=info_package.entryies[i];
+                for(uint64_t i=0;i<entry.num_of_pages;i++){
+                    vaddr_t vaddr=entry.vbase+i*entry.page_size_in_byte;
+                    x64_invalidate_tlb(vaddr);
+                }
+            }
+            default:
+            {
+                fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::INVALIDATE_TLB_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
+                return fatal;
+            }   
+        }
+    }
+    return success;
+}
 AddressSpace::AddressSpace()
 {
 }
@@ -898,9 +963,13 @@ int AddressSpace::second_stage_init()
     occupyied_size=0;
     return OS_SUCCESS;
 }
-int AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
+KURD_t AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
 {
-    if(this!=gKernelSpace)return OS_BAD_FUNCTION;
+    KURD_t fail=default_fail();
+    if(this!=gKernelSpace){
+        fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE::FAIL_REASONS::REASON_CODE_NOT_gKERNELSPACE;
+        return fail;
+    }
     VM_DESC identity_desc={
         .start=0,
         .end=0x1000000000,

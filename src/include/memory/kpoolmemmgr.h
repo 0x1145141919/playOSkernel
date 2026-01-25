@@ -1,6 +1,7 @@
 #pragma once
 #include "stdint.h"
 #include "util/bitmap.h"
+#include "memmodule_err_definitions.h"
 #include <util/lock.h>
 //#include <new>
 typedef uint64_t size_t;
@@ -32,6 +33,12 @@ constexpr alloc_flags_t default_flags={
     .is_when_realloc_force_new_addr=false,
     .align_log2=4
 };
+namespace MEMMODULE_LOCAIONS
+{
+    constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR=4;//[4~7]是kpoolmemmgr的子模块
+    constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR_HCB=5;
+    constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR_HCB_BITMAP=6;//INIT事件涉及到KURD,但是不是这个层面产生的，是页框系统的
+}
 class kpoolmemmgr_t
 {
 private:
@@ -43,18 +50,27 @@ private:
             // 活跃分配魔数（推荐）
         uint32_t belonged_to_cpu_apicid=0;//只考虑x2apic的32位apic_id
         static constexpr uint64_t MAGIC_ALLOCATED    = 0xDEADBEEFCAFEBABEull;
+        enum HCB_bitmap_error_code_t:uint8_t
+        {
+            SUCCESS=0,
+            HCB_BITMAP_BAD_PARAM=1,
+            AVALIBLE_MEMSEG_SEARCH_FAIL=2,
+            TOO_BIG_MEM_DEMAND=3,
+        };
+        
         class HCB_bitmap:public bitmap_t
         { 
+            HCB_bitmap_error_code_t param_checkment(uint64_t bit_idx,uint64_t bit_count);
             public:
-            int Init();
-            int second_stage_Init(
+            int Init();//只有第一个堆的初始化会调用此函数，所以不用KURD
+            KURD_t second_stage_Init(
                 uint32_t entries_count
             );
             HCB_bitmap();
             ~HCB_bitmap();
-            int continual_avaliable_u64s_search_higher_alignment(uint64_t u64idx_align_log2,uint64_t u64_count,uint64_t&result_base_idx);
-            bool target_bit_seg_is_avaliable(uint64_t bit_idx,uint64_t bit_count);//考虑用uint64_t来优化扫描，扫描的时候要加锁
-            int bit_seg_set(uint64_t bit_idx,uint64_t bit_count,bool value);//优化的set函数，中间会解析，然后调用对应的bits_set，bytes_set，u64s_set，并且会参数检查，加锁
+            HCB_bitmap_error_code_t continual_avaliable_u64s_search_higher_alignment(uint64_t u64idx_align_log2,uint64_t u64_count,uint64_t&result_base_idx);
+            bool target_bit_seg_is_avaliable(uint64_t bit_idx,uint64_t bit_count,HCB_bitmap_error_code_t&err);//考虑用uint64_t来优化扫描，扫描的时候要加锁
+            HCB_bitmap_error_code_t bit_seg_set(uint64_t bit_idx,uint64_t bit_count,bool value);//优化的set函数，中间会解析，然后调用对应的bits_set，bytes_set，u64s_set，并且会参数检查，加锁
             friend class HCB_v2;
         };
         HCB_bitmap bitmap_controller;
@@ -80,11 +96,11 @@ private:
         //用指针检验是不是那个特殊堆
         HCB_v2(uint32_t apic_id);//给某个逻辑处理器初始化一个HCB
         HCB_v2();
-        int second_stage_Init();
+        KURD_t second_stage_Init();
         ~HCB_v2();
         //分配之后对于数据区的清零操作
         //必须是魔数有效才会操作
-        int clear(void*ptr);
+        KURD_t clear(void*ptr);
         /**
          * @brief 分配内存  
          * 思路：
@@ -99,7 +115,7 @@ private:
          * 5.填写元数据
          * 
          */
-        int in_heap_alloc(void *&addr,uint32_t size,alloc_flags_t flags);
+        KURD_t in_heap_alloc(void *&addr,uint32_t size,alloc_flags_t flags);
         /**
          * @brief 释放内存
          * 思路：
@@ -108,7 +124,7 @@ private:
          * 3.释放数据
          * 4.出了函数，在内核池管理器内核恐慌，并且报告相关错误信息
          */
-        int free(void*ptr);
+        KURD_t free(void*ptr);
         /**
          * @brief 重新分配内存
          * 思路：
@@ -118,14 +134,14 @@ private:
          * 4.实在不行这个堆内存空间无法使用，返回错误码
          * 5.返回管理器的realloc接口的时候根据返回值尝试新堆alloc,释放原堆，或者内核恐慌，并且报告相关错误信息
          * */
-        int in_heap_realloc(void*&ptr, uint32_t new_size,alloc_flags_t flags);
+        KURD_t in_heap_realloc(void*&ptr, uint32_t new_size,alloc_flags_t flags);
         uint32_t get_belonged_cpu_apicid();
         uint64_t get_used_bytes_count();
         bool is_full();
         void count_used_bytes();
         bool is_addr_belong_to_this_hcb(void* addr);
         phyaddr_t tran_to_phy(void* addr);//这两个是通过HCB里面的虚拟基址，物理基址直接算出来的
-        vaddr_t tran_to_virt(phyaddr_t addr);
+        vaddr_t tran_to_virt(phyaddr_t addr);//地址翻译函数若没有命中就返回垃圾值
     };
     
     static bool is_able_to_alloc_new_hcb;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
@@ -143,13 +159,13 @@ public:
      * @param vaddraquire true返回虚拟地址，false返回物理地址
      * @param alignment 实际对齐值=2<<alignment,最高支持到13，8kb对齐
      */
-    static void *kalloc(uint64_t size,alloc_flags_t flags=default_flags);
+    static void *kalloc(uint64_t size,alloc_flags_t flags=default_flags);//这两个的KURD还是要返回，但是是在返回的指针中，不过要通过检查对齐来判断可不可能是KURD
     static void *realloc(void *ptr, uint64_t size,alloc_flags_t flags=default_flags); // 根据表在优先在基地址不变的情况下尝试修改堆对象大小
     // 实在不行就创建一个新对象
     static void clear(void *ptr); // 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
     // 别用这个清理new之后的对象
-    static int Init(); // 真正的初始化，全局对象手动初始化函数
-    static int self_heap_init();
+    static int Init(); // 真正的初始化，全局对象手动初始化函数，但是是全局单例，设计上都是依赖静态资源，理论上这个模块初始化不可能失败，不引入KURD
+    static KURD_t self_heap_init();
     static void kfree(void *ptr);
     static phyaddr_t get_phy(vaddr_t addr);
     static vaddr_t get_virt(phyaddr_t addr);
