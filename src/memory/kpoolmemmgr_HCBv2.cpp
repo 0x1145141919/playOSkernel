@@ -20,6 +20,16 @@
 {
     
 }
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::param_checkment(uint64_t bit_idx, uint64_t bit_count)
+{
+    if(bit_idx+bit_count>bitmap_size_in_64bit_units*64){
+        return kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t::HCB_BITMAP_BAD_PARAM;
+    }
+    if(bit_count>bitmap_size_in_64bit_units*64){
+        return kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t::TOO_BIG_MEM_DEMAND;
+    }
+    return kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t::SUCCESS;
+}
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 {
     if(this!=&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)
@@ -44,6 +54,7 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 
 int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
 {
+    
     if(this==&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
     bitmap_size_in_64bit_units=entries_count/64;
 #ifdef KERNEL_MODE
@@ -89,7 +100,8 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
 #endif
     this->bitmap=nullptr;
 }
-int kpoolmemmgr_t::HCB_v2::HCB_bitmap::
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
+ kpoolmemmgr_t::HCB_v2::HCB_bitmap::
 continual_avaliable_u64s_search_higher_alignment(
     uint64_t u64idx_align_log2,
     uint64_t u64_count,
@@ -97,7 +109,7 @@ continual_avaliable_u64s_search_higher_alignment(
 )
 {
     if (u64_count == 0)
-        return OS_NOT_EXIST;
+        return SUCCESS;
 
     const uint64_t total_u64s = bitmap_size_in_64bit_units;
 
@@ -128,7 +140,7 @@ continual_avaliable_u64s_search_higher_alignment(
                 if (aligned_base >= seg_base_u64_idx &&
                     aligned_base + u64_count <= seg_end) {
                     result_base_idx = aligned_base;
-                    return OS_SUCCESS;
+                    return SUCCESS;
                 }
             }
 
@@ -147,20 +159,23 @@ continual_avaliable_u64s_search_higher_alignment(
         if (aligned_base >= seg_base_u64_idx &&
             aligned_base + u64_count <= seg_end) {
             result_base_idx = aligned_base;
-            return OS_SUCCESS;
+            return SUCCESS;
         }
     }
 
-    return OS_NOT_EXIST;
+    return AVALIBLE_MEMSEG_SEARCH_FAIL;
 }
 
-bool kpoolmemmgr_t::HCB_v2::HCB_bitmap::target_bit_seg_is_avaliable(uint64_t bit_idx, uint64_t bit_count)
+bool kpoolmemmgr_t::HCB_v2::HCB_bitmap::target_bit_seg_is_avaliable
+(uint64_t bit_idx, 
+    uint64_t bit_count,
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t&err)
 {
     if (bit_count == 0) return true;
-
-    uint64_t total_bits = bitmap_size_in_64bit_units * 64;
-    if (bit_idx >= total_bits || bit_idx + bit_count > total_bits)
+    err=param_checkment(bit_idx,bit_count);
+    if(err!=SUCCESS){
         return false;
+    }
 
     bitmap_rwlock.read_lock();
 
@@ -225,13 +240,15 @@ bool kpoolmemmgr_t::HCB_v2::HCB_bitmap::target_bit_seg_is_avaliable(uint64_t bit
     return true;
 }
 
-int kpoolmemmgr_t::HCB_v2::HCB_bitmap::bit_seg_set(uint64_t bit_idx, uint64_t bit_count, bool value)
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
+ kpoolmemmgr_t::HCB_v2::HCB_bitmap::bit_seg_set(uint64_t bit_idx, uint64_t bit_count, bool value)
 {
-    if (bit_count == 0) return OS_SUCCESS;
+    if (bit_count == 0) return SUCCESS;
 
-    uint64_t total_bits = bitmap_size_in_64bit_units * 64;
-    if (bit_idx >= total_bits || bit_idx + bit_count > total_bits)
-        return OS_INVALID_PARAMETER;
+    HCB_bitmap_error_code_t status=param_checkment(bit_idx,bit_count);
+    if(status!=SUCCESS){
+        return status;
+    }
 
     bitmap_rwlock.write_lock();
 
@@ -263,7 +280,7 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::bit_seg_set(uint64_t bit_idx, uint64_t bi
     }
 
     bitmap_rwlock.write_unlock();
-    return OS_SUCCESS;
+    return SUCCESS;
 }
 
 int kpoolmemmgr_t::HCB_v2::first_linekd_heap_Init()
@@ -291,9 +308,18 @@ kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t apic_id)
   total_size_in_bytes=0x200000;
   belonged_to_cpu_apicid=apic_id;
 }
-int kpoolmemmgr_t::HCB_v2::second_stage_Init()
+KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
 {
-    if(this==&kpoolmemmgr_t::first_linekd_heap)return OS_BAD_FUNCTION;
+    KURD_t success=default_success();
+    KURD_t  fail=default_fail();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INIT;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INIT;
+    fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INIT;
+    if(this==&kpoolmemmgr_t::first_linekd_heap){
+        fail.module_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::INIT_RESULTS::FAIL_RESONS::REASON_CODE_first_linekd_heap_NOT_ALLOWED;
+        return fail;
+    }
     #ifdef KERNEL_MODE
     phybase=phymemspace_mgr::pages_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL,21);
     if(phybase==0)return OS_OUT_OF_MEMORY;
@@ -310,7 +336,7 @@ int kpoolmemmgr_t::HCB_v2::second_stage_Init()
     if(vbase==NULL)return OS_OUT_OF_MEMORY;
     phybase=vbase;
     #endif
-    int status=bitmap_controller.second_stage_Init(
+    KURD_t status=bitmap_controller.second_stage_Init(
         total_size_in_bytes/bytes_per_bit
     );
     return status;
@@ -334,22 +360,58 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
         KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
     }
 }
-int kpoolmemmgr_t::HCB_v2::clear(void *ptr)
+KURD_t kpoolmemmgr_t::HCB_v2::clear(void *ptr)
 {
-    if (!ptr) return OS_INVALID_PARAMETER;
+    KURD_t success=default_success();
+    KURD_t  fail=default_fail();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_CLEAR;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_CLEAR;
+    fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_CLEAR;
+    if (!is_addr_belong_to_this_hcb(ptr)){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::CLEAR_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;
+    }
 
     // ptr 是用户可见地址，meta 在其前面
     data_meta *meta = (data_meta *)((uint8_t *)ptr - sizeof(data_meta));
     if (meta->magic != MAGIC_ALLOCATED)
     {
-        return OS_HEAP_OBJ_DESTROYED;
+        fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::CLEAR_RESULTS::FATAL_REASONS::REASON_CODE_METADATA_DESTROYED;
+        return fatal;
     }
 
     // 清零用户数据区域（不清 meta）
     // setmem 的原型假设为 setmem(void* addr, size_t size, int value)
     setmem(ptr, meta->data_size, 0);
 
-    return OS_SUCCESS;
+    return success;
+}
+KURD_t kpoolmemmgr_t::HCB_v2::default_kurd()
+{
+    return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR_HCB,0,0,err_domain::CORE_MODULE);
+}
+
+KURD_t kpoolmemmgr_t::HCB_v2::default_success()
+{
+    KURD_t kurd=default_kurd();
+    kurd.result=SUCCESS;
+    kurd.level=level_code::INFO;
+    return kurd;
+}
+
+KURD_t kpoolmemmgr_t::HCB_v2::default_fail()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_result_fail_and_error_level(kurd);
+    return kurd;
+}
+
+KURD_t kpoolmemmgr_t::HCB_v2::default_fatal()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_fatal_result_level(kurd);
+    return kurd;
 }
 
 /**
@@ -365,23 +427,38 @@ int kpoolmemmgr_t::HCB_v2::clear(void *ptr)
  * @param alignment 对齐要求，实际对齐值为2^alignment字节对齐，最大支持10(1024字节对齐)
  * @return int OS_SUCCESS表示成功分配，其他值表示分配失败
  */
-int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
+KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     void *&addr,
     uint32_t size,
     alloc_flags_t flags)
 {
+    KURD_t success=default_success();
+    KURD_t  fail=default_fail();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_ALLOC;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_ALLOC;
+    fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_ALLOC;
     // -----------------------------
     // 基本参数与边界检查
     // -----------------------------
     if (flags.align_log2 >=32)
-        return OS_INVALID_PARAMETER;
+        {
+            fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_TOO_HIGH_ALIGN_DEMAND;
+            return fail;
+        }
     if (size == 0)
-        return OS_INVALID_PARAMETER;
-    if(size>=1ULL<<16)return OS_INVALID_PARAMETER;//64k,一次最大分配
+        {
+            fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SIZE_DEMAND_IS_ZERO;
+            return fail;
+        }
+    if(size>=1ULL<<16){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SIZE_DEMAND_TOO_LARGE;
+        return fail;
+    }
     // 常量定义（在内核空间必须为常量或宏）
     static constexpr uint32_t SMALL_UNIT_BYTES=16;
-    static constexpr uint8_t MID_UNIT_BYTES = 1U << 7;
-    static constexpr uint32_t LARGE_UNIT_BYTES = 1U << 10;
+    static constexpr uint32_t MID_UNIT_BYTES = SMALL_UNIT_BYTES<<3;
+    static constexpr uint32_t LARGE_UNIT_BYTES = MID_UNIT_BYTES<<3;
     // -----------------------------
     // 计算对齐方式
     // -----------------------------
@@ -424,7 +501,10 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         status = bitmap_controller.continual_avaliable_bits_search(serial_bits_count, base_bit_idx);
         bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
-            return OS_INHEAP_NOT_ENOUGH_MEMORY;
+            {
+                fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
+                return fail;
+            }
         bitmap_controller.bit_seg_set(base_bit_idx, serial_bits_count,true);
         bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit+=serial_bits_count;
@@ -440,7 +520,10 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         status = bitmap_controller.continual_avaliable_bytes_search(serial_bytes_count, base_byte_idx);
         bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
-            return OS_INHEAP_NOT_ENOUGH_MEMORY;
+            {
+                fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
+                return fail;
+            }
 
         bitmap_controller.bit_set(7 + (base_byte_idx << 3) , true);
         bitmap_controller.used_bit_count_lock.lock();
@@ -460,7 +543,10 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         status = bitmap_controller.continual_avaliable_u64s_search(serial_u64_count, base_u64_idx);
         bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
-            return OS_INHEAP_NOT_ENOUGH_MEMORY;
+            {
+                fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
+                return fail;
+            }
 
         bitmap_controller.bit_set( 63 + (base_u64_idx << 6), true);
         bitmap_controller.used_bit_count_lock.lock();
@@ -476,7 +562,10 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     default:
     {
     if (final_alignment_aquire <= 10)
-        return OS_INVALID_PARAMETER;
+        {
+            fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FATAL_REASONS::REASON_CODE_ALIGN_DEMAND_INVALID;
+            return fatal;
+        }
 
     // ------------------------------------
     // 对齐参数（u64 粒度）
@@ -508,7 +597,10 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     bitmap_controller.bitmap_rwlock.read_unlock();
 
     if (status != OS_SUCCESS)
-        return OS_INHEAP_NOT_ENOUGH_MEMORY;
+        {
+                fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
+                return fail;
+            }
 
     // ------------------------------------
     // 计算真正的对齐起点
@@ -557,12 +649,21 @@ int kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     meta->magic = MAGIC_ALLOCATED;
     meta->data_size = size;
     meta->alloc_flags= flags;
-    return OS_SUCCESS;
+    return success;
 }
 
-int kpoolmemmgr_t::HCB_v2::free(void *ptr)
+KURD_t kpoolmemmgr_t::HCB_v2::free(void *ptr)
 {
-    if(uint64_t(ptr)&15)return OS_INVALID_ADDRESS;  //本堆的内存至少16字节对齐
+    KURD_t success=default_success();
+    KURD_t  fail=default_fail();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_FREE;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_FREE;
+    fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_FREE;
+    if(uint64_t(ptr)&15||!is_addr_belong_to_this_hcb(ptr)){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;   
+    }
     uint32_t in_heap_offset;
     uint64_t MIN_KVADDR=0;
     uint64_t MAX_PHYADDR=0;;
@@ -578,17 +679,24 @@ int kpoolmemmgr_t::HCB_v2::free(void *ptr)
     {//物理地址
         if((uint64_t)ptr<phybase+sizeof(data_meta)||
     phybase+total_size_in_bytes<=(uint64_t)ptr
-    )return OS_INVALID_ADDRESS;
+    ){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;   
+    }
     in_heap_offset=(uint64_t)ptr-(uint64_t)phybase;
     }else{
         if((uint64_t)ptr<vbase+sizeof(data_meta)||
-    vbase+total_size_in_bytes<=(uint64_t)ptr)return OS_INVALID_ADDRESS;
+    vbase+total_size_in_bytes<=(uint64_t)ptr){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;   
+    }
     in_heap_offset=(uint64_t)ptr-(uint64_t)vbase;
     }
     data_meta *meta = (data_meta *)((uint8_t *)ptr - sizeof(data_meta));
     if(meta->magic != MAGIC_ALLOCATED)
     {
-        return OS_HEAP_OBJ_DESTROYED;
+        fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FATAL_REASONS::REASON_CODE_METADATA_DESTROYED;
+        return fatal;
     }
     uint32_t total_bits_count=(meta->data_size+15)/16;
     uint32_t base_bit_idx=in_heap_offset/16;
@@ -599,19 +707,29 @@ int kpoolmemmgr_t::HCB_v2::free(void *ptr)
     bitmap_controller.bitmap_used_bit--;
     bitmap_controller.bitmap_used_bit-=total_bits_count;
     bitmap_controller.used_bit_count_lock.unlock();
-    return bitmap_controller.bit_seg_set(
+    bitmap_controller.bit_seg_set(
         base_bit_idx,
         total_bits_count,
         false
     );
+    return success;
 }
 
-int kpoolmemmgr_t::HCB_v2::in_heap_realloc(
+KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
     void *&ptr, 
     uint32_t new_size,
     alloc_flags_t flags)
 {
-    if(uint64_t(ptr)&15)return OS_INVALID_ADDRESS;  //本堆的内存至少16字节对齐
+    KURD_t success=default_success();
+    KURD_t  fail=default_fail();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC;
+    fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC;
+    if(uint64_t(ptr)&15||!is_addr_belong_to_this_hcb(ptr)){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;   
+    }  //本堆的内存至少16字节对齐
     uint32_t in_heap_offset;
     uint64_t MIN_KVADDR=0;
     uint64_t MAX_PHYADDR=0;;
@@ -627,18 +745,25 @@ int kpoolmemmgr_t::HCB_v2::in_heap_realloc(
     {//物理地址
         if((uint64_t)ptr<phybase+sizeof(data_meta)||
     phybase+total_size_in_bytes<=(uint64_t)ptr
-    )return OS_INVALID_ADDRESS;
+    ){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;   
+    } 
     in_heap_offset=(uint64_t)ptr-(uint64_t)phybase;
     }else{
         if((uint64_t)ptr<vbase+sizeof(data_meta)||
-    vbase+total_size_in_bytes<=(uint64_t)ptr)return OS_INVALID_ADDRESS;
+    vbase+total_size_in_bytes<=(uint64_t)ptr){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
+        return fail;   
+    } 
     in_heap_offset=(uint64_t)ptr-(uint64_t)vbase;
     }
     data_meta *meta = (data_meta *)((uint8_t *)ptr - sizeof(data_meta));
     uint16_t old_size=meta->data_size;
     if(meta->magic != MAGIC_ALLOCATED)
     {
-        return OS_HEAP_OBJ_DESTROYED;
+        fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FATAL_REASONS::REASON_CODE_METADATA_DESTROYED;
+        return fatal;
     }uint32_t old_bits_count=(meta->data_size+15)/16;
     uint32_t base_bit_idx=in_heap_offset/16;
     uint32_t new_bits_count=(new_size+15)/16;
@@ -656,12 +781,15 @@ int kpoolmemmgr_t::HCB_v2::in_heap_realloc(
         bitmap_controller.bitmap_used_bit-=(old_bits_count-new_bits_count);
         bitmap_controller.used_bit_count_lock.unlock();
 
-        return OS_SUCCESS;
+        return success;
     }else{
+        HCB_bitmap_error_code_t err;
         bool try_append=bitmap_controller.target_bit_seg_is_avaliable(
             base_bit_idx+old_bits_count,
-            new_bits_count-old_bits_count
+            new_bits_count-old_bits_count,
+            err
         );
+        if(err!=SUCCESS)try_append=false;
         if(try_append)
         {
              bitmap_controller.bit_seg_set(
@@ -672,42 +800,43 @@ int kpoolmemmgr_t::HCB_v2::in_heap_realloc(
             bitmap_controller.used_bit_count_lock.lock();
             bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
             bitmap_controller.used_bit_count_lock.unlock();
-            return OS_SUCCESS;
+            return success;
         }else{
             void*new_ptr;
-            int status=in_heap_alloc(
+            KURD_t status=in_heap_alloc(
                 new_ptr,new_size,flags
             );
-            if(status==OS_SUCCESS){
+            if(status.result==result_code::SUCCESS){
                 ksystemramcpy(ptr,new_ptr,old_size);
                 status=free(ptr);
                 ptr=new_ptr;
                 bitmap_controller.used_bit_count_lock.lock();
                 bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
                 bitmap_controller.used_bit_count_lock.unlock();
-                return OS_SUCCESS;
+                return success;
             }else{
-                return OS_INHEAP_NOT_ENOUGH_MEMORY;
+                return status;
             }
         }
     }
     }else{
         void*new_ptr;
-            int status=in_heap_alloc(
+            KURD_t status=in_heap_alloc(
                 new_ptr,new_size,flags
             );
-            if(status==OS_SUCCESS){
+            if(status.result==result_code::SUCCESS){
                 ksystemramcpy(ptr,new_ptr,old_size);
                 status=free(ptr);
                 ptr=new_ptr;
                 bitmap_controller.used_bit_count_lock.lock();
                 bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
                 bitmap_controller.used_bit_count_lock.unlock();
-                return OS_SUCCESS;
+                return success;
             }else{
-                return OS_INHEAP_NOT_ENOUGH_MEMORY;
+                return status;
             }
-    }return  OS_UNREACHABLE_CODE;
+    }fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::INHEAP_REALLOC_RESULTS::FATAL_REASONS::REASON_CODE_UNREACHABLE_CODE;
+    return fatal;
 }
 
 uint64_t kpoolmemmgr_t::HCB_v2::get_used_bytes_count()

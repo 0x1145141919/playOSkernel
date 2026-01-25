@@ -3,10 +3,7 @@
 namespace AP_Init_error_observing_protocol{ 
     struct realmode_final_stack_frame {
     uint16_t magic;      // 最后入栈
-    uint32_t cr4;        // ...
-    uint32_t cr3;
-    uint32_t cr2;
-    uint32_t cr0;
+    uint16_t cr0;
     uint16_t gs;         // ...
     uint16_t fs;
     uint16_t ss;
@@ -136,6 +133,11 @@ struct longmode_final_stack_frame_with_errcode{
     uint64_t rip;
     uint64_t rflags;
 };
+constexpr uint16_t realmode_magic=0x15;
+constexpr uint32_t PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC=0x11;
+constexpr uint32_t PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC=0x12;
+constexpr uint64_t LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC=0x13;
+constexpr uint64_t LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC=0x14;
 }
 struct check_point{//不论长模式/保护模式/实模式都使用这个检查点结构
     uint32_t success_word;//ap和bsp约定成功的标志，不同的ap设计上此值必须不同，且必须不能为0，0xFFFFFFFF,推荐同一个ap不同检查点也不要只使用一个值
@@ -145,3 +147,4 @@ struct check_point{//不论长模式/保护模式/实模式都使用这个检查
     uint16_t check_point_id;
     uint16_t reserved[3];
 };
+

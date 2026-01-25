@@ -36,9 +36,75 @@ constexpr alloc_flags_t default_flags={
 namespace MEMMODULE_LOCAIONS
 {
     constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR=4;//[4~7]是kpoolmemmgr的子模块
+    namespace KPOOLMEMMGR_EVENTS{
+        constexpr uint8_t EVENT_CODE_INIT=0;
+        constexpr uint8_t EVENT_CODE_ALLOC=1;
+        namespace ALLOC_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_NO_AVALIABLE_MEM=4;
+            }
+            
+        }
+        constexpr uint8_t EVENT_CODE_REALLOC=2;
+        namespace REALLOC_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_DEMAND_SIZE_IS_ZERO=4;
+            }
+            
+        }
+        constexpr uint8_t EVENT_CODE_PER_PROCESSOR_HEAP_INIT=3;
+    }
     constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR_HCB=5;
+    namespace KPOOLMEMMGR_HCB_EVENTS{
+        constexpr uint8_t EVENT_CODE_INIT=0;
+        namespace INIT_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_first_linekd_heap_NOT_ALLOWED=1;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_CLEAR=1;
+        namespace CLEAR_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_BAD_ADDR=1;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_METADATA_DESTROYED=1;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_ALLOC=2;
+        namespace ALLOC_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_TOO_HIGH_ALIGN_DEMAND=1;
+                constexpr uint16_t REASON_CODE_SIZE_DEMAND_IS_ZERO=2;
+                constexpr uint16_t REASON_CODE_SIZE_DEMAND_TOO_LARGE=3;
+                constexpr uint16_t REASON_CODE_SEARCH_MEMSEG_FAIL=4;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_ALIGN_DEMAND_INVALID=1;//理应根据前面的步骤不会出现
+            }
+        }
+        constexpr uint8_t EVENT_CODE_FREE=3;
+        namespace FREE_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_BAD_ADDR=1;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_METADATA_DESTROYED=1;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_INHEAP_REALLOC=4;
+        namespace INHEAP_REALLOC_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_BAD_ADDR=1;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_METADATA_DESTROYED=1;
+                constexpr uint16_t REASON_CODE_UNREACHABLE_CODE=2;
+            }
+        }
+    }
     constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR_HCB_BITMAP=6;//INIT事件涉及到KURD,但是不是这个层面产生的，是页框系统的
-}
+};
 class kpoolmemmgr_t
 {
 private:
@@ -50,6 +116,10 @@ private:
             // 活跃分配魔数（推荐）
         uint32_t belonged_to_cpu_apicid=0;//只考虑x2apic的32位apic_id
         static constexpr uint64_t MAGIC_ALLOCATED    = 0xDEADBEEFCAFEBABEull;
+        KURD_t default_kurd();
+        KURD_t default_success();
+        KURD_t default_fail();
+        KURD_t default_fatal();
         enum HCB_bitmap_error_code_t:uint8_t
         {
             SUCCESS=0,
@@ -143,7 +213,10 @@ private:
         phyaddr_t tran_to_phy(void* addr);//这两个是通过HCB里面的虚拟基址，物理基址直接算出来的
         vaddr_t tran_to_virt(phyaddr_t addr);//地址翻译函数若没有命中就返回垃圾值
     };
-    
+    static KURD_t default_kurd();
+    static KURD_t default_success();
+    static KURD_t default_fail();
+    static KURD_t default_fatal();
     static bool is_able_to_alloc_new_hcb;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
     //这个位开启后会优先在cpu专属堆里面操作，再尝试first_linekd_heap
     static HCB_v2 first_linekd_heap;
@@ -159,8 +232,8 @@ public:
      * @param vaddraquire true返回虚拟地址，false返回物理地址
      * @param alignment 实际对齐值=2<<alignment,最高支持到13，8kb对齐
      */
-    static void *kalloc(uint64_t size,alloc_flags_t flags=default_flags);//这两个的KURD还是要返回，但是是在返回的指针中，不过要通过检查对齐来判断可不可能是KURD
-    static void *realloc(void *ptr, uint64_t size,alloc_flags_t flags=default_flags); // 根据表在优先在基地址不变的情况下尝试修改堆对象大小
+    static void *kalloc(uint64_t size,KURD_t&no_succes_report,alloc_flags_t flags=default_flags);//这两个的KURD还是要返回，但是是在返回的指针中，不过要通过检查对齐来判断可不可能是KURD
+    static void *realloc(void *ptr,KURD_t&no_succes_report, uint64_t size,alloc_flags_t flags=default_flags); // 根据表在优先在基地址不变的情况下尝试修改堆对象大小
     // 实在不行就创建一个新对象
     static void clear(void *ptr); // 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
     // 别用这个清理new之后的对象
@@ -175,6 +248,7 @@ public:
 
 constexpr int INDEX_NOT_EXIST = -100;
 // 全局 new/delete 操作符重载声明
+//new重载里面new失败就要第一时间panic，不然后续的垃圾地址会产生页错误
 void* operator new(size_t size);
 void* operator new(size_t size,alloc_flags_t flags);
 void* operator new[](size_t size);

@@ -1,5 +1,6 @@
 #include "Interrupt_system/loacl_processor.h"
-#include "Interrupt_system/early_bsp_resouces.h"
+#include "Interrupt_system/AP_Init_error_observing_protocol.h"
+#include "msr_offsets_definitions.h"
 #include "firmware/gSTResloveAPIs.h"
 #include "firmware/ACPI_APIC.h"
 #include "util/kout.h"
@@ -423,8 +424,18 @@ int x86_smp_processors_container::regist_core(uint32_t processor_id)
     return OS_RESOURCE_CONFILICT;
 
 }
+constexpr uint32_t error_code_bitmap = 0
+    | (1 << 8)   // #DF
+    | (1 << 10)  // #TS
+    | (1 << 11)  // #NP
+    | (1 << 12)  // #SS
+    | (1 << 13)  // #GP
+    | (1 << 14)  // #PF
+    | (1 << 17)  // #AC
+    | (1 << 21); // #CP
 KURD_t x86_smp_processors_container::AP_Init_one_by_one()
-{//此函数会需要保证低0～64k内存的恒等映射
+{
+    //此函数会需要保证低0～64k内存的恒等映射
     // 使用gAnalyzer的processor_x64_list链表进行遍历
     KURD_t fail=default_fail();
     fail.event_code=INTERRUPT_SUB_MODULES_LOCATIONS::PROCESSORS_EVENT_CODE::EVENT_CODE_APS_INIT;
@@ -506,45 +517,233 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         fail.reason=INTERRUPT_SUB_MODULES_LOCATIONS::PROCESSORS_EVENT_CODE::APS_INIT_RESULTS_CODE::RETRY_REASON_CODE::RETRY_REASON_CODE_DEPENDIES_NOT_INITIALIZED;
         return fail;
     }
-    int (*observe_realmode)()=[&]()->int {
-
+    enum ap_observe_once_result_t:uint8_t{
+        WAIT_TAHT_TIME,
+        SUCCESS_TAHT_TIME,
+        FAIL_TAHT_TIME,
     };
-    int (*observe_pemode_enter)()=[&]()->int {
-        
+    enum ap_observe_result_t:uint8_t{
+        CHECKPOINT_SUCCESS,
+        CHECKPOINT_FAIL,
+        CHECKPOINT_TIMEOUT,
+    };
+    ap_observe_once_result_t (*observe_realmode)(uint32_t)=[](uint32_t succeed_word)->ap_observe_once_result_t {
+        if(realmode_enter_checkpoint.success_word==succeed_word)
+            return SUCCESS_TAHT_TIME;
+        return WAIT_TAHT_TIME;
+    };
+    ap_observe_once_result_t (*observe_pemode_enter)(uint32_t)=[](uint32_t succeed_word)->ap_observe_once_result_t {
+        if(pemode_enter_checkpoint.success_word==succeed_word)
+            return SUCCESS_TAHT_TIME;
+        if(realmode_enter_checkpoint.failure_flags&1)
+            return FAIL_TAHT_TIME;
+        return WAIT_TAHT_TIME;
     };
     void (*pe_fail_dealing)()=[](){
-        
+        kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one observe_realmode_enter failed with flags"<<realmode_enter_checkpoint.failure_flags<<kio::kendl;
+        if(realmode_enter_checkpoint.failure_flags&2){
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one observe realmode exception:"<<realmode_enter_checkpoint.failure_caused_excption_num<<kio::kendl;
+            uint8_t interrupt_vec=realmode_enter_checkpoint.failure_caused_excption_num;
+            AP_Init_error_observing_protocol::realmode_final_stack_frame*ap_frame=(AP_Init_error_observing_protocol::realmode_final_stack_frame*)realmode_enter_checkpoint.failure_final_stack_top;
+            if(ap_frame->magic==AP_Init_error_observing_protocol::realmode_magic){
+                kio::bsp_kout<<kio::now<<"[Realmode Exception Frame]"<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"Magic: 0x"<<ap_frame->magic<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"CR0: 0x"<<ap_frame->cr0<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"GS: 0x"<<ap_frame->gs<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"FS: 0x"<<ap_frame->fs<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"SS: 0x"<<ap_frame->ss<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"DS: 0x"<<ap_frame->ds<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"ES: 0x"<<ap_frame->es<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"DI: 0x"<<ap_frame->di<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"SI: 0x"<<ap_frame->si<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"BP: 0x"<<ap_frame->bp<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"SP: 0x"<<ap_frame->sp<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"DX: 0x"<<ap_frame->dx<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"CX: 0x"<<ap_frame->cx<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"BX: 0x"<<ap_frame->bx<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"AX: 0x"<<ap_frame->ax<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"CS: 0x"<<ap_frame->cs<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"IP: 0x"<<ap_frame->ip<<kio::kendl;
+                kio::bsp_kout<<kio::now<<"EFLAGS: 0x"<<ap_frame->eflags<<kio::kendl;
+            }
+        }
     };
-    int (*observe_longmode_enter)()=[&]()->int {
-        
+    ap_observe_once_result_t (*observe_longmode_enter)(uint32_t)=[](uint32_t succeed_word)->ap_observe_once_result_t {
+        if(longmode_enter_checkpoint.success_word==succeed_word)
+            return SUCCESS_TAHT_TIME;
+        if(pemode_enter_checkpoint.failure_flags&1)
+            return FAIL_TAHT_TIME;
+        return WAIT_TAHT_TIME;
     };
     void (*longmode_enter_fail_dealing)()=[](){
-        
+        kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one observe_pemode_enter failed with flags"<<pemode_enter_checkpoint.failure_flags<<kio::kendl;
+        if(pemode_enter_checkpoint.failure_flags&2){
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one observe pemode exception:"<<pemode_enter_checkpoint.failure_caused_excption_num<<kio::kendl;
+            uint8_t interrupt_vec=pemode_enter_checkpoint.failure_caused_excption_num;
+            if((1ULL<<interrupt_vec)&error_code_bitmap){
+                AP_Init_error_observing_protocol::pemode_final_stack_frame_with_errcode* AP_frame=
+                (AP_Init_error_observing_protocol::pemode_final_stack_frame_with_errcode*)
+                pemode_enter_checkpoint.failure_final_stack_top;
+                if(AP_frame->magic==AP_Init_error_observing_protocol::PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC){
+                    kio::bsp_kout<<kio::now<<"[Pemode Exception Frame with Error Code]"<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"Magic: 0x"<<AP_frame->magic<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"IA32_EFER: 0x"<<AP_frame->IA32_EFER<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR4: 0x"<<AP_frame->cr4<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR3: 0x"<<AP_frame->cr3<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR2: 0x"<<AP_frame->cr2<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR0: 0x"<<AP_frame->cr0<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"GS: 0x"<<AP_frame->gs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"FS: 0x"<<AP_frame->fs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"SS: 0x"<<AP_frame->ss<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"DS: 0x"<<AP_frame->ds<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ES: 0x"<<AP_frame->es<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EDI: 0x"<<AP_frame->edi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ESI: 0x"<<AP_frame->esi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EBP: 0x"<<AP_frame->ebp<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ESP: 0x"<<AP_frame->esp<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EDX: 0x"<<AP_frame->edx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ECX: 0x"<<AP_frame->ecx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EBX: 0x"<<AP_frame->ebx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EAX: 0x"<<AP_frame->eax<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"Error Code: 0x"<<AP_frame->errcode<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CS: 0x"<<AP_frame->cs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EIP: 0x"<<AP_frame->eip<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EFLAGS: 0x"<<AP_frame->eflags<<kio::kendl;
+                }
+            }else{
+                AP_Init_error_observing_protocol::pemode_final_stack_frame* AP_frame=
+                (AP_Init_error_observing_protocol::pemode_final_stack_frame*)
+                pemode_enter_checkpoint.failure_final_stack_top;
+                if(AP_frame->magic==AP_Init_error_observing_protocol::PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC){
+                    kio::bsp_kout<<kio::now<<"[Pemode Exception Frame without Error Code]"<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"Magic: 0x"<<AP_frame->magic<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"IA32_EFER: 0x"<<AP_frame->IA32_EFER<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR4: 0x"<<AP_frame->cr4<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR3: 0x"<<AP_frame->cr3<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR2: 0x"<<AP_frame->cr2<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR0: 0x"<<AP_frame->cr0<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"GS: 0x"<<AP_frame->gs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"FS: 0x"<<AP_frame->fs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"SS: 0x"<<AP_frame->ss<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"DS: 0x"<<AP_frame->ds<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ES: 0x"<<AP_frame->es<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EDI: 0x"<<AP_frame->edi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ESI: 0x"<<AP_frame->esi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EBP: 0x"<<AP_frame->ebp<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ESP: 0x"<<AP_frame->esp<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EDX: 0x"<<AP_frame->edx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ECX: 0x"<<AP_frame->ecx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EBX: 0x"<<AP_frame->ebx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EAX: 0x"<<AP_frame->eax<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CS: 0x"<<AP_frame->cs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EIP: 0x"<<AP_frame->eip<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"EFLAGS: 0x"<<AP_frame->eflags<<kio::kendl;
+                }
+            }
+        }
     };
-    int (*observe_finish)()=[&]()->int {
-        
+    ap_observe_once_result_t (*observe_finish)(uint32_t)=[](uint32_t succeed_word)->ap_observe_once_result_t {
+        if(init_finish_checkpoint.success_word==succeed_word)
+            return SUCCESS_TAHT_TIME;
+        if(longmode_enter_checkpoint.failure_flags&1)
+            return FAIL_TAHT_TIME;
+        return WAIT_TAHT_TIME;
     };
     void (*finish_fail_dealing)()=[](){
-        
+        kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one observe_pemode_enter failed with flags"<<longmode_enter_checkpoint.failure_flags<<kio::kendl;
+        if(longmode_enter_checkpoint.failure_flags&2){
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one observe pemode exception:"<<longmode_enter_checkpoint.failure_caused_excption_num<<kio::kendl;
+            uint8_t interrupt_vec=longmode_enter_checkpoint.failure_caused_excption_num;
+            if((1ULL<<interrupt_vec)&error_code_bitmap){
+                AP_Init_error_observing_protocol::longmode_final_stack_frame_with_errcode* AP_frame=
+                (AP_Init_error_observing_protocol::longmode_final_stack_frame_with_errcode*)
+                longmode_enter_checkpoint.failure_final_stack_top;
+                if(AP_frame->magic==AP_Init_error_observing_protocol::LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC){
+                    kio::bsp_kout<<kio::now<<"[Longmode Exception Frame with Error Code]"<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"Magic: 0x"<<AP_frame->magic<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"IA32_EFER: 0x"<<AP_frame->IA32_EFER<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"GS: 0x"<<AP_frame->gs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"FS: 0x"<<AP_frame->fs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"SS: 0x"<<AP_frame->ss<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"DS: 0x"<<AP_frame->ds<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ES: 0x"<<AP_frame->es<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR4: 0x"<<AP_frame->cr4<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR3: 0x"<<AP_frame->cr3<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR2: 0x"<<AP_frame->cr2<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR0: 0x"<<AP_frame->cr0<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R15: 0x"<<AP_frame->r15<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R14: 0x"<<AP_frame->r14<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R13: 0x"<<AP_frame->r13<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R12: 0x"<<AP_frame->r12<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R11: 0x"<<AP_frame->r11<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R10: 0x"<<AP_frame->r10<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R9: 0x"<<AP_frame->r9<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R8: 0x"<<AP_frame->r8<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RDI: 0x"<<AP_frame->rdi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RSI: 0x"<<AP_frame->rsi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RBP: 0x"<<AP_frame->rbp<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RDX: 0x"<<AP_frame->rdx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RCX: 0x"<<AP_frame->rcx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RBX: 0x"<<AP_frame->rbx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RAX: 0x"<<AP_frame->rax<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"Error Code: 0x"<<AP_frame->errcode<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CS: 0x"<<AP_frame->cs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RIP: 0x"<<AP_frame->rip<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RFLAGS: 0x"<<AP_frame->rflags<<kio::kendl;
+                }
+            }else{
+                AP_Init_error_observing_protocol::longmode_final_stack_frame* AP_frame=
+                (AP_Init_error_observing_protocol::longmode_final_stack_frame*)
+                longmode_enter_checkpoint.failure_final_stack_top;
+                if(AP_frame->magic==AP_Init_error_observing_protocol::LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC){
+                    kio::bsp_kout<<kio::now<<"[Longmode Exception Frame without Error Code]"<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"Magic: 0x"<<AP_frame->magic<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"IA32_EFER: 0x"<<AP_frame->IA32_EFER<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"GS: 0x"<<AP_frame->gs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"FS: 0x"<<AP_frame->fs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"SS: 0x"<<AP_frame->ss<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"DS: 0x"<<AP_frame->ds<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"ES: 0x"<<AP_frame->es<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR4: 0x"<<AP_frame->cr4<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR3: 0x"<<AP_frame->cr3<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR2: 0x"<<AP_frame->cr2<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CR0: 0x"<<AP_frame->cr0<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R15: 0x"<<AP_frame->r15<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R14: 0x"<<AP_frame->r14<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R13: 0x"<<AP_frame->r13<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R12: 0x"<<AP_frame->r12<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R11: 0x"<<AP_frame->r11<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R10: 0x"<<AP_frame->r10<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R9: 0x"<<AP_frame->r9<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"R8: 0x"<<AP_frame->r8<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RDI: 0x"<<AP_frame->rdi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RSI: 0x"<<AP_frame->rsi<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RBP: 0x"<<AP_frame->rbp<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RDX: 0x"<<AP_frame->rdx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RCX: 0x"<<AP_frame->rcx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RBX: 0x"<<AP_frame->rbx<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RAX: 0x"<<AP_frame->rax<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"CS: 0x"<<AP_frame->cs<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RIP: 0x"<<AP_frame->rip<<kio::kendl;
+                    kio::bsp_kout<<kio::now<<"RFLAGS: 0x"<<AP_frame->rflags<<kio::kendl;
+                }
+            }
+        }
     };
     auto ap_init_stage_func=[](
         uint64_t delay_microseconds,
-        int(*observe_ap)(),//返回值0代表等待，返回值1代表成功，-1代表失败
-        void(*failer_dealing)())->int{//启用全局错误码的情况下，0成功，1失败，2超时
+        ap_observe_once_result_t(*observe_ap)(uint32_t),//返回值0代表等待，返回值1代表成功，-1代表失败
+        void(*failer_dealing)(),uint32_t success_word)->ap_observe_result_t{//启用全局错误码的情况下，0成功，1失败，2超时
         uint64_t now_microseconds = time::hardware_time::get_stamp(time::hardware_time_base_token::bsp_token);//GS槽位里面会专门放每个核心的时间token的
         uint64_t ddline_stamp = now_microseconds + delay_microseconds;
         while(now_microseconds < ddline_stamp){
-            int observe_ap_result= observe_ap();
-            if(observe_ap_result){
-                if(observe_ap_result==1)return 0;
-                else {
-                    failer_dealing();
-                    return 1;
-                }
-            }
+            int observe_ap_result= observe_ap(success_word);
+            if(observe_ap_result==SUCCESS_TAHT_TIME)return CHECKPOINT_SUCCESS;
+            if(observe_ap_result==FAIL_TAHT_TIME)return CHECKPOINT_FAIL;    
+            
             now_microseconds = time::hardware_time::get_stamp(time::hardware_time_base_token::bsp_token);
         }
-        return 2;
+        return CHECKPOINT_TIMEOUT;
     };
     // 遍历gAnalyzer的processor_x64_list链表
     for(auto it = gAnalyzer->processor_x64_list->begin(); it != gAnalyzer->processor_x64_list->end(); ++it) {
@@ -560,29 +759,29 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         asm volatile("sfence");
         kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor"<<kio::kendl;
         x2apic::x2apic_driver::raw_send_ipi(icr_sipi);
-        int status= ap_init_stage_func(1000,observe_realmode,nullptr);//只有成功/超时两种状态
-        if(status==2){
+        ap_observe_result_t status= ap_init_stage_func(1000,observe_realmode,nullptr,processor_id);//只有成功/超时两种状态
+        if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
         }
-        int status= ap_init_stage_func(1000,observe_pemode_enter,pe_fail_dealing);
-        if(status==1){
+        int status= ap_init_stage_func(1000,observe_pemode_enter,pe_fail_dealing,proc.apicid);
+        if(status==CHECKPOINT_FAIL){
 
         }
-        if(status==2){
+        if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
         }
-        int status= ap_init_stage_func(1000,observe_longmode_enter,longmode_enter_fail_dealing);
-        if(status==1){
+        int status= ap_init_stage_func(1000,observe_longmode_enter,longmode_enter_fail_dealing,~processor_id);
+        if(status==CHECKPOINT_FAIL){
 
         }
-        if(status==2){
+        if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
         }
-        int status= ap_init_stage_func(1000,observe_finish,finish_fail_dealing);    
-        if(status==1){
+        int status= ap_init_stage_func(1000,observe_finish,finish_fail_dealing,~proc.apicid);    
+        if(status==CHECKPOINT_FAIL){
 
         }
-        if(status==2){
+        if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
         }
     }

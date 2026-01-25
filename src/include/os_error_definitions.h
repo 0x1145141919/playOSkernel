@@ -71,8 +71,11 @@ struct KURD_t {//设计意图详见文档
     constexpr KURD_t() : result(0), reason(0), in_module_location(0), module_code(0),
                          free_to_use(0), event_code(0), level(0), domain(0) {}
 };
+constexpr KURD_t empty_kurd = KURD_t();
 KURD_t set_result_fail_and_error_level(KURD_t pre);
 KURD_t set_fatal_result_level(KURD_t pre);
+uint64_t kurd_get_raw(KURD_t kurd);
+KURD_t raw_analyze(uint64_t raw);
 union result_t{
     KURD_t kernel_result;
     uint64_t raw;
