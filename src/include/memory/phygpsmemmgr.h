@@ -3,18 +3,45 @@
 #include "memory/Memory.h"
 #include <util/lock.h>
 #include <util/Ktemplats.h>
+#include "memory/memmodule_err_definitions.h"
 typedef  uint64_t phyaddr_t;
+namespace MEMMODULE_LOCAIONS{
+        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR=8;//[8~15]是phymemspace_mgr的子模块
+        namespace PHYMEMSPACE_MGR_EVENTS_CODE{
+            constexpr uint8_t EVENT_CODE_INIT=0;
+            constexpr uint8_t EVENT_CODE_PAGES_SET=1;
+            namespace PAGES_SET_RESULTS_CODE{
+                namespace FATAL_REASONS{
+                    constexpr uint16_t REASON_CODE_INVALID_PAGE_SIZE=0x1;
+                    constexpr uint16_t REASON_CODE_PAGES_SET_ON_NON_DRAM_SEG=0x2;
+                    constexpr uint16_t REASON_CODE_PAGES_SET_CROSS_SEGMENT_BOUNDARY=0x3;
+                    constexpr uint16_t REASON_CODE_PAGES_SET_ON_UNDECLARED_MEMORY=0x4;
+                    constexpr uint16_t REASON_CODE_PAGES_SET_CONFLICT_WITH_EXISTING_MMIO_REGION=0x5;
+                }
+            }
+            constexpr uint8_t EVENT_CODE_PAGES_SET_DRAM_BUDDY=1;
+        }
 
+        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR_LOW1MB_MGR=9;
+        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR_ATOM_PAGES_COMPLEX_STRUCT=10;
+        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST=11;
+};
 /**
  * 要把这个类等价于一个原子页视图，各种大小对齐的原子页
- * 2mb中页,1gb大页在is_sub_valid=1且state为PARTIAL或者MMIO_PARTIAL的时候为非原子页，
+ * 2mb中页,1gb大页在state为NOT_ATOM的时候为非原子页，且is_sub_valid必然为1
  * 必然存在下级页
- * 2mbPARTIAL中页在4kb子表有效且存在时全部非free时应标记为full，
+ * 2mbNOT_ATOM中页在4kb子表有效且存在时全部非free/mmiofree时应标记为full，
  * 1gb大页在2mb中页原子页中全部非free且非原子页全部为full时则应该标记为full，
- * 新增专门的空闲页管理系统，为此引入BUDDY_USED类型，所以BUDDY本质上是FREE/PARTIAL的变种，但是不参与基础页框分配，所以不需要改变类型
- * BUDDY_USED类型 设计意图是在原来的通用扫描逻辑中，提供大页跳过，由此BUDDY_USED可以为2mb中页（无论是否原子）,1gb大页（无论是否原子），4kb小页
- * 在非原子BUDDY_USED1GB大页/2mb中页下，原子页视图可以为dram上合法的占用类型
  * */
+/**
+ * 由于有伙伴系统的引入，此模块存储着物理页框信息也要进行调整
+ * 首先此模块维护了一个物理段链表，而伙伴系统的内存段必须是某个dram物理段的子集
+ * 由是所有is_belonged_to_buddy的页必须在某个dram物理段内，
+ * 由于是dram段所以不能复用
+ * static int pages_state_set(phyaddr_t base,uint64_t num_of_4kbpgs,page_state_t state,pages_state_set_flags_t flags);//这个函数对大中页原子free表项的“染色”策略是染色成PARTIAL
+ * 这个接口，必须另起炉灶
+ * 显然，在本模块的三个基本扫描算反必须跳过这些is_belonged_to_buddy的页
+ */
 /**
  *整个模块有两个核心数据结构：
     static PHYSEG_LIST_ITEM*physeg_list;与
@@ -29,11 +56,14 @@ typedef  uint64_t phyaddr_t;
         MMIO_SEG
     };
     只有在DRAM_SEG类型，才会允许使用pages_alloc与pages_recycle分配回收内存
-    DRAM_SEG下的原子页视图中FREE算空闲，USER_FILE，USER_ANONYMOUS，DMA，KERNEL，KERNEL_PERSIST算占用
+    DRAM_SEG下的原子页视图中FREE算空闲，USER_FILE，USERuint8_t buddy_dram_seg:1;//仅在op为normal时有效，_ANONYMOUS，DMA，KERNEL，KERNEL_PERSIST算占用
     MMIO_SEG下原子页视图中也有空闲占用两种状态，但是MMIO_FREE为空闲，MMIO为占用
     MMIO_SEG段下提供mmio_regist注册/注销的接口，不允许重复注册，需要调用者自己保存注册了什么地址
     一次mmio_regist的地址范围必须是某个MMIO_SEG的子集
 */
+/**
+ * 此函数全局单例掌握物理内存一手唯一信源，如果出现不一致等情况应该直接panic,并且还要尽可能打印尽可能多的表项信息
+ */
 class phymemspace_mgr{
     public:
     //主要是原子页迭代器太复杂，暂时全模块加锁，后续可能的话进行优化
@@ -41,8 +71,7 @@ class phymemspace_mgr{
     enum page_state_t:uint8_t {
         RESERVED = 0, // 保留页,不能动,特意设计成这个数码来保证在clear之后默认就是如此
         FREE,   // 空闲页 
-        BUDDY_USED,   // 伙伴页使用中,  
-        PARTIAL,// 仅大页可用，代表子表是否存在state,refcount存在不完全相同
+        NOT_ATOM,// 仅大页可用，代表子表是否存在state,refcount存在不完全相同
         FULL,
         MMIO_FREE,
         KERNEL,        // 内核使用，内核堆之类的分配
@@ -102,6 +131,10 @@ class phymemspace_mgr{
     };
     static constexpr PHYSEG NULL_SEG={0,0,0,RESERVED_SEG};
     private:
+    static KURD_t default_kurd();
+    static KURD_t default_success();
+    static KURD_t default_failure();
+    static KURD_t default_fatal();
     static phymemmgr_statistics_t statisitcs;
     class PHYSEG_LIST_ITEM:Ktemplats::list_doubly<PHYSEG>{//保证这个类的PHYSEG不重叠，从前至后基址递增
         public:
@@ -127,6 +160,7 @@ class phymemspace_mgr{
     {
         page_state_t state;
         uint8_t is_sub_valid:1;//在2mb中页,1GB大页中标记地址域是否有效，是否为非1原子页
+        uint8_t is_belonged_to_buddy:1;//标记该页是否是某个BCB的子区间
     };
     struct page_size4kb_t
     {
@@ -159,12 +193,12 @@ class phymemspace_mgr{
     /**
      * pages_state_set接口的标志结构体，下面讲解有效参数选择组合以及对应的行为
      * 主参数：op有acclaim_backhole，declaim_blackhole，normal类型
-     *  normal类型下if_init_ref_count与if_Split_atomic_in_mmio_partial参数有效
+     *  normal类型下if_init_ref_count有效,if_mmio有效
      *  if_init_ref_count控制是否在对应原子页视图把refcount初始化为1，否则为0
      *  if_mmio控制在折叠这个操作的时候用什么鉴别占用空闲，在if_mmio语境下MMIO占用，MMIO_FREE表示空闲
-     *  acclaim_backhole类型下if_Split_atomic_in_mmio_partial参数有效，if_init_ref_count无效，也就是refcount设置为0
+     *  acclaim_backhole类型下if_init_ref_count无效，也就是refcount设置为0
      *  if_mmio的含义同上
-     *  参数：declaim_blackhole类型下if_init_ref_count无效，if_Split_atomic_in_mmio_partial无效
+     *  参数：declaim_blackhole类型下if_init_ref_count无效
      *  会把对应原子页视图的类型强制设置为RESERVED，如果try_fold_1gb_lambda折叠成功会在top_1gb_table中无效化项并且清零1gb表项数据 
      */
     struct pages_state_set_flags_t{
@@ -174,13 +208,35 @@ class phymemspace_mgr{
             normal
         }op;
         struct paras_t
-        {uint8_t if_init_ref_count:1;
+        {
+        uint8_t if_init_ref_count:1;
         uint8_t if_mmio:1;//0为dram,1为mmio
         }params;
     };
     static int pages_state_set(phyaddr_t base,uint64_t num_of_4kbpgs,page_state_t state,pages_state_set_flags_t flags);//这个函数对大中页原子free表项的“染色”策略是染色成PARTIAL
     static int phymemseg_to_pacage(phyaddr_t base,uint64_t num_of_4kbpgs,seg_to_pages_info_package_t& pakage);
-       
+    struct dram_pages_state_set_flags_t
+    {
+        page_state_t state;
+        enum optype_t:uint8_t{
+            buddypages_regist,
+            buddypages_unregist,
+            normal,
+        }op;
+        struct paras_t
+        {
+        uint8_t expect_meet_atom_pages_free:1;
+        uint8_t expect_meet_buddy_pages:1;
+        uint8_t if_init_ref_count:1;
+        }params;
+    };
+    
+    static KURD_t dram_pages_state_set(
+        const PHYSEG& current_seg,
+        phyaddr_t base,
+        uint64_t numof_4kbpgs,
+        dram_pages_state_set_flags_t flags
+    );
     static int del_no_atomig_1GB_pg(uint64_t _1idx); // 添加新的私有成员函数声明
     //比外部接口多允许UEFI_RUNTIME,ACPI_TABLES,这两个类型，最高支持到30 align_log2对齐
     static int align4kb_pages_search(

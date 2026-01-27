@@ -99,8 +99,11 @@ add_executable(symbols_dumper
 add_executable(kernel.elf
     src/firmware/UefiRunTimeServices.cpp
     src/kinit.cpp
-        src/utils/kcirclebufflogMgr.cpp
-        src/kernel_entry.asm
+    src/utils/kcirclebufflogMgr.cpp
+    src/kernel_entry.asm
+    src/ap_init_longmode_exceptions.asm
+    src/ap_init_pemode_exceptions.asm
+    src/ap_init_realmode_exceptions.asm
         src/utils/int128_div.cpp
         src/Interrupts/lapic.cpp
         src/Interrupts/exceptions_handler.cpp

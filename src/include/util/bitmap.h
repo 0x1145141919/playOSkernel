@@ -34,10 +34,10 @@ public:
     int continual_avaliable_bytes_search(uint64_t byte_count,uint64_t&result_base_idx);
     int continual_avaliable_u64s_search(uint64_t u64_count,uint64_t&result_base_idx);
     //上面三个函数的结果引索是以各自单位为基本的引索，若返回值不为OS_SUCCESS则result_base_idx无效
-
+    
     int get_bitmap_used_bit();
     void count_bitmap_used_bit();
-    
+    int avaliable_bit_search(uint64_t& result_base_idx);
     int used_bit_count_add(uint64_t add_count);//这操作是加锁的
     int used_bit_count_sub(uint64_t sub_count);//这操作是加锁的
 };

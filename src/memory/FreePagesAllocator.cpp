@@ -1,4 +1,54 @@
 #include "memory/FreePagesAllocator.h"
+
+using namespace MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_NODES_ARRAY_EVENTS_CODES::ALL_EVENTS_SHARED::FAIL_REASONS_CODE;
+
+// 实现 free_page_node_t_in_array_SLL 的方法
+uint32_t FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::get_order(){
+    return this->order;
+}
+
+uint16_t FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::get_head_idx(){
+    return this->head_idx;
+}
+
+uint16_t FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::get_nodes_count(){
+    return this->nodes_count;
+}
+
+// 实现 iterator 的构造函数和运算符重载函数
+FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator::iterator(
+    uint32_t idx,
+    free_page_node_t_in_array_SLL&list
+) : in_nodes_array_index(idx), list(list) {
+}
+
+int FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator::operator*(){
+    return this->in_nodes_array_index;
+}
+
+FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator&
+FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator::operator++(){
+    if (!is_end()) {
+        free_page_node_t node;
+        if (list.nodes_array->get_node(this->in_nodes_array_index, node).result==result_code::SUCCESS) {
+            if (node.next_node_array_idx != 0xFFFFFFFF) {
+                this->in_nodes_array_index = node.next_node_array_idx;
+            } else {
+                // 到达链表末尾，设置为特殊值表示结束
+                this->in_nodes_array_index = 0xFFFFFFFF;
+            }
+        } else {
+            // 获取节点失败，设为结束状态
+            this->in_nodes_array_index = 0xFFFFFFFF;
+        }
+    }
+    return *this;
+}
+
+bool FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator::is_end(){
+    return this->in_nodes_array_index == 0xFFFFFFFF;
+}
+
 FreePagesAllocator::free_pages_in_seg_control_block *FreePagesAllocator::first_BCB;
 constexpr uint64_t max_predefined_bcb_gb=4;
 constexpr uint64_t predefined_bcb_gb_MAX_ORDER=9;
@@ -79,7 +129,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
         KURD_t sub_result;
 
         for (uint64_t i = 0; i < blocks_count; ++i) {
-            node.inhcb_offset_specify_idx = base_block_idx + i;
+            node.in_bcb_offset_specify_idx = base_block_idx + i;
             node.next_node_array_idx = (i < blocks_count - 1) ? (nodes_array_base + i + 1) : 0xFFFFFFFF;
 
             sub_result = nodes_array->regist_node(nodes_array_base + i);
@@ -91,7 +141,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
 
         // 创建单链表头
         orders_lists[order] = new free_page_node_t_in_array_SLL(
-            order, nodes_array_base, blocks_count);
+            order, nodes_array_base, blocks_count,this->nodes_array);
 
         // 标记位图：注意加上 order 的偏移
         uint64_t bit_start = order_bitmap_bases[order] + base_block_idx;
@@ -120,33 +170,6 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
 
     return default_success();
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_kurd()
-{
-    KURD_t kurd(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::in_module_location_code::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK,0,0,err_domain::CORE_MODULE);
-    return kurd;
-}
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_success()
-{
-    KURD_t kurd=default_kurd();
-    kurd.result=result_code::SUCCESS;
-    kurd.level=level_code::INFO;
-    return kurd;
-}
-
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_error()
-{
-    KURD_t kurd=default_kurd();
-    kurd=set_fatal_result_level(kurd);
-    return kurd;
-}
-
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_fatal()
-{
-    KURD_t kurd=default_kurd();
-    kurd.result=result_code::FATAL;
-    kurd.level=level_code::FATAL;
-    return kurd;
-}
 
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::second_stage_init()
 {
@@ -171,38 +194,19 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::secon
     }
     return default_success();
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::default_kurd()
-{
-    KURD_t kurd(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::in_module_location_code::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_NODES_ARRAY,0,0,err_domain::CORE_MODULE);
-    return kurd;
-}
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::default_success()
+KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_error()
 {
     KURD_t kurd=default_kurd();
-    kurd.result=result_code::SUCCESS;
-    kurd.level=level_code::INFO;
+    kurd=set_fatal_result_level(kurd);
     return kurd;
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::default_error()
-{
-    KURD_t kurd=default_kurd();
-    kurd=set_result_fail_and_error_level(kurd);
-    return kurd;
-}
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::default_fatal()
+
+KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_fatal()
 {
     KURD_t kurd=default_kurd();
     kurd.result=result_code::FATAL;
     kurd.level=level_code::FATAL;
     return kurd;
-}
-FreePagesAllocator::free_pages_in_seg_control_block::nodes_array_t::nodes_array_t(uint32_t nodes_maxcount)
-{
-    this->nodes_maxcount=nodes_maxcount;
-}
-FreePagesAllocator::free_pages_in_seg_control_block::BCB_mixed_pages_bitmap::BCB_mixed_pages_bitmap(uint64_t entryies_count)
-{
-    this->entryies_count=entryies_count;
 }
 
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::BCB_mixed_pages_bitmap::second_stage_init()
@@ -213,4 +217,17 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::BCB_mixed_pages_bitm
 
     }
     return KURD_t();
+}
+
+
+
+
+
+FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator &FreePagesAllocator::free_pages_in_seg_control_block::free_page_node_t_in_array_SLL::iterator::operator=(const iterator &other)
+{
+    if (this != &other) {  // 自赋值检查
+        in_nodes_array_index = other.in_nodes_array_index;
+        // 注意：不能赋值 list，因为它是引用类型，且应该始终引用同一个对象
+    }
+    return *this;
 }
