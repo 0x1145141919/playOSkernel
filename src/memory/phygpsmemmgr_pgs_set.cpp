@@ -7,7 +7,6 @@
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
 static constexpr uint64_t PAGES_4KB_PER_1GB = PAGES_4KB_PER_2MB * PAGES_2MB_PER_1GB; // 262144
-static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 int phymemspace_mgr::pages_state_set(phyaddr_t base,
                                     uint64_t num_of_4kbpgs,
                                     page_state_t state,
@@ -25,20 +24,17 @@ int phymemspace_mgr::pages_state_set(phyaddr_t base,
     /**
      * 外部保证这个要拆分1GB表项的有效性
      */
-auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
+    auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb){
     page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
     if (!p1->flags.is_sub_valid)
     {
-        page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];
-        if(!sub2){
-            return OS_OUT_OF_MEMORY;
-        }
+        page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];//new失败里面自动panic,不用考虑空指针
 
         setmem(sub2, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t), 0);
 
         p1->sub2mbpages = sub2;
         p1->flags.is_sub_valid = 1;
-        p1->flags.state = PARTIAL;
+        p1->flags.state = NOT_ATOM;
         
         // 只有在非acclaim_backhole操作时才初始化子页状态
         if (flags.op != pages_state_set_flags_t::acclaim_backhole) {
@@ -48,21 +44,15 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             }
         }
     }
-
-    return OS_SUCCESS;
-};
-   auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2) -> int {
+    };
+    auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2){
         if (!p2.flags.is_sub_valid)
         {
             page_size4kb_t* sub4 = new page_size4kb_t[PAGES_4KB_PER_2MB];
-            if (!sub4){return OS_OUT_OF_MEMORY;}
-
             setmem(sub4, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t), 0);
-
             p2.sub_pages = sub4;
             p2.flags.is_sub_valid = 1;
-            p2.flags.state = PARTIAL;
-            
+            p2.flags.state = NOT_ATOM;
             // 只有在非acclaim_backhole操作时才初始化子页状态
             if (flags.op != pages_state_set_flags_t::acclaim_backhole) {
                 page_state_t state = flags.params.if_mmio ? MMIO_FREE : FREE;
@@ -71,13 +61,16 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                 }
             }
         }
-        return OS_SUCCESS;
     };
-
-    auto try_fold_2mb_lambda = [flags](page_size2mb_t &p2) -> int {
+    enum folds_functions_result_t:uint8_t{
+        NO_FOLDED=0,
+        FOLDED_FREE=1,
+        FOLDED_FULL=2
+    };
+    auto try_fold_2mb_lambda = [flags](page_size2mb_t &p2) -> folds_functions_result_t {
         // 没有子表就是原子 2MB 页，无法向上折叠
         if (!p2.flags.is_sub_valid)
-            return 0;
+            return NO_FOLDED;
 
         bool all_free = true;
         bool all_full = true;
@@ -96,7 +89,7 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             }
 
             if (!all_free && !all_full)
-                break; // 已经确定是 PARTIAL
+                break; // 已经确定是 NOT_ATOM
         }
 
         if (all_free)
@@ -106,7 +99,7 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             p2.sub_pages = nullptr;
             p2.flags.is_sub_valid = 0;
             p2.flags.state = flags.params.if_mmio?MMIO_FREE:FREE;
-            return 1;
+            return FOLDED_FREE;
         }
 
         if (all_full)
@@ -115,18 +108,18 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             // **注意：不删除子表**（后续可能会有引用计数变动）
             p2.flags.state = FULL;
             // 保持 p2.flags.is_sub_valid == 1
-            return 1;
+            return FOLDED_FULL;
         }
 
         // 混合：部分占用，标记为 PARTIAL，不删除子表
-        p2.flags.state = PARTIAL;
-        return 0;
+        p2.flags.state = NOT_ATOM;
+        return NO_FOLDED;
     };
 
-    auto try_fold_1gb_lambda = [&try_fold_2mb_lambda,flags](page_size1gb_t &p1) -> int {
+    auto try_fold_1gb_lambda = [&try_fold_2mb_lambda,flags](page_size1gb_t &p1) -> folds_functions_result_t {
         // 没有子表就是原子 1GB 页，无法向上折叠
         if (!p1.flags.is_sub_valid)
-            return 0;
+            return NO_FOLDED;
 
         bool all_free = true;
         bool all_full = true;
@@ -152,7 +145,7 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             }if (p2.flags.state != FULL) all_full = false;
 
             if (!all_free && !all_full)
-                break; // 已经确定是 PARTIAL
+                break; // 已经确定是 NOT_ATOM
         }
 
         if (all_free)
@@ -162,7 +155,7 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             p1.sub2mbpages = nullptr;
             p1.flags.is_sub_valid = 0;
             p1.flags.state = flags.params.if_mmio?MMIO_FREE:FREE;
-            return 1;
+            return FOLDED_FREE;
         }
 
         if (all_full)
@@ -171,15 +164,15 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             // **注意：不删除子表**（保留子表以便未来 refcount 增加或子页操作）
             p1.flags.state =FULL;
             // 保持 p1.flags.is_sub_valid == 1
-            return 1;
+            return FOLDED_FULL;
         }
 
         // 混合：标记为 PARTIAL，保留子表
-        p1.flags.state = PARTIAL;
-        return 0;
+        p1.flags.state = NOT_ATOM;
+        return NO_FOLDED;
     };
 
-    auto _1gb_pages_state_set_lambda = [state,flags](uint64_t entry_base_idx, uint64_t num_of_1gbpgs) -> int {
+    auto _1gb_pages_state_set_lambda = [state,flags](uint64_t entry_base_idx, uint64_t num_of_1gbpgs){
         int status = OS_SUCCESS;
         for (uint64_t i = 0; i < num_of_1gbpgs; i++) {
             page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + i);
@@ -189,39 +182,37 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     if(status!=OS_SUCCESS){
                         //可能是内存不足或者参数非法越界
                         kio::bsp_kout<<"_1gb_pages_state_set:enable_idx failed for index:"<<entry_base_idx+i<<kio::kendl;
-                        return OS_FAIL_PAGE_ALLOC;
+                        //直接panic，这个核心数据结构因为误操作已经损毁不可信
                     }
                     _1=top_1gb_table->get(entry_base_idx+i);
                 }else{//非黑洞模式不得创建
                     kio::bsp_kout<<"_1gb_pages_state_set:get failed for index:"<<entry_base_idx+i<<kio::kendl;
-                    return OS_INVALID_FILE_MODE;
+                    //直接panic，这个核心数据结构因为误操作已经损毁不可信
                 }
             }
             _1->flags.state = state;
             if(flags.op==pages_state_set_flags_t::normal)if(flags.params.if_init_ref_count)_1->ref_count=1;
         }
-        return status;
     };
 
-    auto _4kb_pages_state_set_lambda = [state,flags](uint64_t entry4kb_base_idx, uint64_t num_of_4kbpgs, page_size4kb_t *base_entry) -> int {
+    auto _4kb_pages_state_set_lambda = [state,flags](uint64_t entry4kb_base_idx, uint64_t num_of_4kbpgs, page_size4kb_t *base_entry){
         for (uint64_t i = 0; i < num_of_4kbpgs; i++) {
             auto& page_entry = base_entry[entry4kb_base_idx + i];
             page_entry.flags.state = state;
             if(flags.op==pages_state_set_flags_t::normal)if(flags.params.if_init_ref_count)page_entry.ref_count=1;
         }
-        return OS_SUCCESS;
     };
 
-    auto _2mb_pages_state_set_lambda = [state,flags](uint64_t entry2mb_base_idx, uint64_t num_of_2mbpgs, page_size2mb_t *base_entry) -> int {
+    auto _2mb_pages_state_set_lambda = [state,flags](uint64_t entry2mb_base_idx, uint64_t num_of_2mbpgs, page_size2mb_t *base_entry){
         for (uint64_t i = 0; i < num_of_2mbpgs; i++) {
             auto& page_entry = base_entry[entry2mb_base_idx + i];
             page_entry.flags.state = state;
              if(flags.op==pages_state_set_flags_t::normal)if(flags.params.if_init_ref_count)page_entry.ref_count=1;
         }
-        return OS_SUCCESS;
     };
     if(flags.op!=pages_state_set_flags_t::declaim_blackhole)
     {// ---- Step 2: 遍历每个段条目 ----
+    folds_functions_result_t fold_result;
     for (int i = 0; i < 5; i++)
     {
         auto &ent = pak.entries[i];
@@ -234,8 +225,8 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             // ===== 1GB 级 =====
             uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
 
-            r = _1gb_pages_state_set_lambda(idx_1gb, ent.num_of_pages);
-            if (r != 0) return r;
+            _1gb_pages_state_set_lambda(idx_1gb, ent.num_of_pages);
+
         }
         else if (ent.page_size_in_byte == _2MB_PG_SIZE)
         {
@@ -257,14 +248,12 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     return OS_RESOURCE_CONFILICT;
                 }
             }
-            if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)
-            return r;
+            ensure_1gb_subtable_lambda(idx_1gb);
             // ---- 调用真正的 2MB setter ----
             page_size2mb_t *p2 = p1->sub2mbpages;
-            r = _2mb_pages_state_set_lambda(idx_2mb % PAGES_2MB_PER_1GB,
+            _2mb_pages_state_set_lambda(idx_2mb % PAGES_2MB_PER_1GB,
                                      ent.num_of_pages,
                                      p2);
-            if (r != OS_SUCCESS) return r;
             try_fold_1gb_lambda(*top_1gb_table->get(idx_1gb));
         }
         
@@ -285,19 +274,18 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     p1->flags.is_sub_valid=false;
                 }else{
                     kio::bsp_kout<<"_4kb_pages_state_set:attempt to create a new entry in no black hole mode"<<kio::kendl;
-                    return OS_RESOURCE_CONFILICT;
+                    //直接panic，这个核心数据结构因为误操作已经损毁不可信
                 }
             }
-            if((r=ensure_1gb_subtable_lambda(idx_1gb))!=OS_SUCCESS)return r;
+            ensure_1gb_subtable_lambda(idx_1gb);
             page_size2mb_t &p2ent = p1->sub2mbpages[idx_2mb%PAGES_2MB_PER_1GB];
-            if((r=ensure_2mb_subtable_lambda(p2ent))!=OS_SUCCESS)return r;
+            ensure_2mb_subtable_lambda(p2ent);
           
             // ---- 调用 4KB setter ----
             page_size4kb_t *p4 = p2ent.sub_pages;
-            r = _4kb_pages_state_set_lambda(pg4k_start % PAGES_4KB_PER_2MB,
+            _4kb_pages_state_set_lambda(pg4k_start % PAGES_4KB_PER_2MB,
                                      ent.num_of_pages,
                                      p4);
-            if (r != 0) return r;
                 try_fold_2mb_lambda(p2ent);
                 try_fold_1gb_lambda(*p1);
             
@@ -316,22 +304,20 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
         {
             // ===== 1GB 级 =====
             uint64_t idx_1gb = pg4k_start / PAGES_4KB_PER_1GB;
-
-            r = [idx_1gb, ent,flags]()->int {
-                    for(uint64_t i=0;i<ent.num_of_pages;i++)
-                        {
+            for(uint64_t i=0;i<ent.num_of_pages;i++)
+                {
                         page_size1gb_t*pg=top_1gb_table->get(idx_1gb+i);
                         if(pg->flags.state!=((flags.params.if_mmio)?MMIO_FREE:FREE)){
-                            return OS_RESOURCE_CONFILICT;
+                            //直接panic
                         }
                         pg->flags.state=RESERVED;
                         pg->sub2mbpages=nullptr;
                         pg->map_count=0;
                         pg->ref_count=0;
                         top_1gb_table->release(idx_1gb+i);                        
-                    }
-                    return OS_SUCCESS;
-                }();
+                }
+                return OS_SUCCESS;
+
             if (r != 0) return r;
         }
         else if (ent.page_size_in_byte == _2MB_PG_SIZE)
@@ -342,13 +328,13 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             // ---- 调用真正的 2MB setter ----
             page_size2mb_t *p2 = top_1gb_table->get(idx_1gb)->sub2mbpages;
             uint16_t real_base2mb_idx=idx_2mb % PAGES_2MB_PER_1GB;
-            r = [real_base2mb_idx,ent,p2,flags]()->int {
+
                 for(uint64_t i=0;i<ent.num_of_pages;i++)
                 {
                     page_size2mb_t*pg=&p2[real_base2mb_idx+i];
                     if(pg->flags.state!=((flags.params.if_mmio)?MMIO_FREE:FREE)&&
                 pg->flags.is_sub_valid){
-                            return OS_RESOURCE_CONFILICT;
+                            //直接panic
                     }
                     pg->flags.state=RESERVED;
                     pg->sub_pages=nullptr;//按照协议这里就算有指针也是无效的
@@ -356,7 +342,7 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
                     pg->ref_count=0;
                 }
                 return OS_SUCCESS;
-            }();
+
             if (r != OS_SUCCESS) return r;
         }
         
@@ -370,20 +356,19 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
             // ---- 调用 4KB setter ----
             page_size4kb_t *p4 = p2ent.sub_pages;
             uint16_t real_base4kb_idx=pg4k_start % PAGES_4KB_PER_2MB;
-            r = [real_base4kb_idx,ent,p4,flags]()->int{
-                for(uint64_t i=0;i<ent.num_of_pages;i++)
+            for(uint64_t i=0;i<ent.num_of_pages;i++)
                 {
                     page_size4kb_t*pg=&p4[real_base4kb_idx+i];
                     if(pg->flags.state!=((flags.params.if_mmio)?MMIO_FREE:FREE)&&
                 pg->flags.is_sub_valid){
-                            return OS_RESOURCE_CONFILICT;
+                            //直接panic
                     }
                     pg->flags.state=RESERVED;
                     pg->map_count=0;
                     pg->ref_count=0;
                 }
                 return OS_SUCCESS;
-            }();
+
             if (r != 0) return r;            
         }
         }
@@ -391,4 +376,378 @@ auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb) -> int {
     }
 
     return OS_SUCCESS;
+}
+namespace MEMMODULE_LOCAIONS{
+    namespace PHYMEMSPACE_MGR_EVENTS_CODE{
+        namespace PAGES_SET_DRAM{
+            namespace FAIL_REASONS{
+                constexpr uint16_t CONFLICT_WITH_EXISTING_BUDDY_ALLOCATION=0x1;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t INVALID_PARAMETERS=0x1;
+            }
+        }
+    }
+}
+/**
+ * TODO:panic机制完善
+ * TODO:KURD完善
+ */
+KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_t base, uint64_t numof_4kbpgs, dram_pages_state_set_flags_t flags)
+{
+    auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb){
+            page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
+            if(p1==nullptr){
+                //panic,一致性违背
+            }
+            if (!p1->flags.is_sub_valid)
+            {
+            page_size2mb_t* sub2 = new page_size2mb_t[PAGES_2MB_PER_1GB];//new失败里面自动panic,不用考虑空指针
+
+            setmem(sub2, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t), 0);
+
+            p1->sub2mbpages = sub2;
+            p1->flags.is_sub_valid = 1;
+            p1->flags.state = NOT_ATOM;
+            }
+        };
+    auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2){
+        if (!p2.flags.is_sub_valid)
+        {
+            page_size4kb_t* sub4 = new page_size4kb_t[PAGES_4KB_PER_2MB];
+            setmem(sub4, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t), 0);
+            p2.sub_pages = sub4;
+            p2.flags.is_sub_valid = 1;
+            p2.flags.state = NOT_ATOM;
+            
+        }
+        };
+    enum folds_functions_result_t:uint8_t{
+        NO_FOLDED=0,
+        FOLDED_FREE=1,
+        FOLDED_FULL=2
+    };
+    auto try_fold_2mb_lambda = [flags](page_size2mb_t &p2) -> folds_functions_result_t {
+        // 没有子表就是原子 2MB 页，无法向上折叠
+        if (!p2.flags.is_sub_valid)
+            return NO_FOLDED;
+
+        bool all_free = true;
+        bool all_full = true;
+
+        for (uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++)
+        {
+            uint8_t st = p2.sub_pages[i].flags.state;
+            if (st != FREE) all_free = false;
+            if (st == FREE) all_full = false;
+            if (!all_free && !all_full)
+                break; // 已经确定是 NOT_ATOM
+        }
+
+        if (all_free)
+        {
+            // 全部 free：可以删除子表，恢复为原子 FREE 2MB
+            delete[] p2.sub_pages;
+            p2.sub_pages = nullptr;
+            p2.flags.is_sub_valid = 0;
+            p2.flags.state = FREE;
+            return FOLDED_FREE;
+        }
+
+        if (all_full)
+        {
+            // 全部被占用或被标为 FULL：将该 2MB 标记为 FULL
+            // **注意：不删除子表**（后续可能会有引用计数变动）
+            p2.flags.state = FULL;
+            // 保持 p2.flags.is_sub_valid == 1
+            return FOLDED_FULL;
+        }
+
+        // 混合：部分占用，标记为 PARTIAL，不删除子表
+        p2.flags.state = NOT_ATOM;
+        return NO_FOLDED;
+    };
+
+    auto try_fold_1gb_lambda = [&try_fold_2mb_lambda,flags](page_size1gb_t &p1) -> folds_functions_result_t {
+        // 没有子表就是原子 1GB 页，无法向上折叠
+        if (!p1.flags.is_sub_valid)
+            return NO_FOLDED;
+
+        bool all_free = true;
+        bool all_full = true;
+
+        for (uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++)
+        {
+            page_size2mb_t &p2 = p1.sub2mbpages[i];
+
+            // 如果 p2 是非原子（有子表），尝试折叠它（这样可以把能 collapse 的 2MB 变为 FREE/FULL）
+            if (p2.flags.is_sub_valid)
+            {
+                try_fold_2mb_lambda(p2);
+                // try_fold_2mb 会在 all-free 或 all-used 情况下修改 p2.flags.state，
+                // 且在 all_free 情况下会释放 p2.sub_pages 并把 is_sub_valid 置 0。
+            }
+            if (p2.flags.state != FREE) all_free = false;
+            if (p2.flags.state != FULL) all_full = false;
+
+            if (!all_free && !all_full)
+                break; // 已经确定是 NOT_ATOM
+        }
+
+        if (all_free)
+        {
+            // 所有 2MB 都是 FREE：删除 1GB 的子表并恢复为原子 FREE
+            delete[] p1.sub2mbpages;
+            p1.sub2mbpages = nullptr;
+            p1.flags.is_sub_valid = 0;
+            p1.flags.state = FREE;
+            return FOLDED_FREE;
+        }
+
+        if (all_full)
+        {
+            // 所有 2MB 都是 FULL：标记该 1GB 为 FULL
+            // **注意：不删除子表**（保留子表以便未来 refcount 增加或子页操作）
+            p1.flags.state =FULL;
+            // 保持 p1.flags.is_sub_valid == 1
+            return FOLDED_FULL;
+        }
+
+        // 混合：标记为 PARTIAL，保留子表
+        p1.flags.state = NOT_ATOM;
+        return NO_FOLDED;
+    };
+    KURD_t success=default_success();
+    KURD_t fail=default_failure();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM_BUDDY;
+    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM_BUDDY;
+    fatal.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM_BUDDY;
+    if(numof_4kbpgs==0){
+        return fail; // 返回失败而不是什么都不做
+    }
+    if(current_seg.base>base||(current_seg.base+current_seg.seg_size)<(base+numof_4kbpgs*_4KB_PG_SIZE)){
+        return fail; // 返回失败而不是什么都不做
+    }
+    seg_to_pages_info_package_t pak;
+    int r = phymemseg_to_pacage(base, numof_4kbpgs, pak);
+    if (r != 0) return r;
+    switch(flags.op){
+        case dram_pages_state_set_flags_t::buddypages_regist:{
+            
+        for(int i=0;i<5;i++){
+            auto &ent = pak.entries[i];
+            switch(ent.page_size_in_byte){
+                case _1GB_PG_SIZE:{
+                    uint64_t entry_base_idx=ent.base>>30;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+                         page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
+                        if(_1==nullptr){
+                            //panic,一致性违背
+                        }
+                        if(_1->flags.state!=FREE||_1->flags.is_belonged_to_buddy==true){
+                            //panic,冲突
+                        }
+                        _1->flags.is_belonged_to_buddy=true;
+                    }
+                }
+                break; // 添加break语句
+                case _2MB_PG_SIZE:{
+
+                    uint64_t entry_base_idx=ent.base>>30;
+                    ensure_1gb_subtable_lambda(entry_base_idx);
+                    page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
+                    uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
+                    page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+
+                        if((p2+j)->flags.state!=FREE||(p2+j)->flags.is_belonged_to_buddy==true){
+                            //panic,冲突
+                        }
+                        (p2+j)->flags.is_belonged_to_buddy=true;
+                    }
+                    
+                }
+                break; // 添加break语句
+                case _4KB_PG_SIZE:{
+                    uint64_t entry_base_idx=ent.base>>30;
+                    ensure_1gb_subtable_lambda(entry_base_idx);
+                    page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
+                    uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
+                    page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    uint16_t _4kb_off_idx=(ent.base>>12)&(PAGES_4KB_PER_2MB-1);
+                    ensure_2mb_subtable_lambda(*p2);
+                    page_size4kb_t* p4 = p2->sub_pages+_4kb_off_idx;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+
+                        if((p4+j)->flags.state!=FREE||(p4+j)->flags.is_belonged_to_buddy==true){
+                            //panic,冲突
+                        }
+                        (p4+j)->flags.is_belonged_to_buddy=true;
+                    }
+                }
+                break; // 添加break语句
+                default:{
+                    //panic,前面的函数不可能出现，出现了只能说明内存损坏
+                    return fatal; // 添加默认情况的返回
+                }
+            }
+        }
+        }
+        break; // 添加break语句
+        case dram_pages_state_set_flags_t::buddypages_unregist:{
+            for(int i=0;i<5;i++){
+            auto &ent = pak.entries[i];
+            switch(ent.page_size_in_byte){
+                case _1GB_PG_SIZE:{
+                    uint64_t entry_base_idx=ent.base>>30;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+                         page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
+                        if(_1==nullptr){
+                            //panic,一致性违背
+                        }
+                        if(_1->flags.state!=FREE||_1->flags.is_belonged_to_buddy==false){
+                            //panic,冲突
+                        }
+                        _1->flags.is_belonged_to_buddy=false;
+                    }
+                }
+                break; // 添加break语句
+                case _2MB_PG_SIZE:{
+
+                    uint64_t entry_base_idx=ent.base>>30;
+                    page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
+                    if(p1==nullptr){
+                            //panic,一致性违背
+                    }
+                    uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
+                    if(p1->sub2mbpages==nullptr){
+                            //panic,一致性违背
+                    }
+                    page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+
+                        if((p2+j)->flags.state!=FREE||(p2+j)->flags.is_belonged_to_buddy==false){
+                            //panic,冲突
+                        }
+                        (p2+j)->flags.is_belonged_to_buddy=false;
+                    }
+                    
+                }
+                break; // 添加break语句
+                case _4KB_PG_SIZE:{
+                    uint64_t entry_base_idx=ent.base>>30;
+                    page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
+                    if(p1==nullptr){
+                            //panic,一致性违背
+                    }
+                    uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
+                    if(p1->sub2mbpages==nullptr){
+                            //panic,一致性违背
+                    }
+                    page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    uint16_t _4kb_off_idx=(ent.base>>12)&(PAGES_4KB_PER_2MB-1);
+                    if(p2->sub_pages==nullptr){
+                            //panic,一致性违背
+                    }
+                    page_size4kb_t* p4 = p2->sub_pages+_4kb_off_idx;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+
+                        if((p4+j)->flags.state!=FREE||(p4+j)->flags.is_belonged_to_buddy==false){
+                            //panic,冲突
+                        }
+                        (p4+j)->flags.is_belonged_to_buddy=false;
+                    }
+                }
+                break; // 添加break语句
+                default:{
+                    //panic,前面的函数不可能出现，出现了只能说明内存损坏
+                    return fatal; // 添加默认情况的返回
+                }
+            }
+        }
+        }
+        break; // 添加break语句
+        case dram_pages_state_set_flags_t::normal:{
+            for(int i=0;i<5;i++){
+            auto &ent = pak.entries[i];
+            switch(ent.page_size_in_byte){
+                case _1GB_PG_SIZE:{
+                    uint64_t entry_base_idx=ent.base>>30;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+                         page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
+                        if(_1==nullptr){
+                            //panic,一致性违背
+                        }
+                        if(_1->flags.is_sub_valid){
+                            //panic,违背了分析出来是原子页的假设
+                        }
+                        if(flags.params.expect_meet_atom_pages_free)if(_1->flags.state!=FREE){
+                            //panic,冲突
+                        }
+                        if(flags.params.expect_meet_buddy_pages)if(_1->flags.is_belonged_to_buddy==false){
+                            //panic,冲突
+                        }
+                        _1->flags.state=flags.state;
+                    }
+                }
+                break; // 添加break语句
+                case _2MB_PG_SIZE: {
+                    uint64_t entry_base_idx=ent.base>>30;
+                    ensure_1gb_subtable_lambda(entry_base_idx);
+                    page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
+                    uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
+                    page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+                        if((p2+j)->flags.is_sub_valid){
+                            //panic,违背了分析出来是原子页的假设
+                        }
+                        if(flags.params.expect_meet_atom_pages_free)if((p2+j)->flags.state!=FREE){
+                            //panic,冲突
+                        }
+                        if(flags.params.expect_meet_buddy_pages)if((p2+j)->flags.is_belonged_to_buddy==false){
+                            //panic,冲突
+                        }
+                        (p2+j)->flags.state=flags.state;
+                    }
+                    if(!flags.params.expect_meet_atom_pages_free)try_fold_1gb_lambda(*p1);
+                }
+                break; // 添加break语句
+                case _4KB_PG_SIZE:{
+                    uint64_t entry_base_idx=ent.base>>30;
+                    ensure_1gb_subtable_lambda(entry_base_idx);
+                    page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
+                    uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
+                    page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    uint16_t _4kb_off_idx=(ent.base>>12)&(PAGES_4KB_PER_2MB-1);
+                    ensure_2mb_subtable_lambda(*p2);
+                    page_size4kb_t* p4 = p2->sub_pages+_4kb_off_idx;
+                    for(uint64_t j=0;j<ent.num_of_pages;j++){
+
+                        if((p4+j)->flags.is_sub_valid){
+                            //panic,违背了分析出来是原子页的假设
+                        }
+                        if(flags.params.expect_meet_atom_pages_free)if((p4+j)->flags.state!=FREE){
+                            //panic,冲突
+                        }
+                        if(flags.params.expect_meet_buddy_pages)if((p4+j)->flags.is_belonged_to_buddy==false){
+                            //panic,冲突
+                        }
+                    (p4+j)->flags.state=flags.state;
+                    }
+                    if(!flags.params.expect_meet_atom_pages_free)try_fold_2mb_lambda(*p2);
+                    if(!flags.params.expect_meet_atom_pages_free)try_fold_1gb_lambda(*p1);
+                }
+                break; // 添加break语句
+                default:{
+                    //panic,前面的函数不可能出现，出现了只能说明内存损坏
+                    return fatal; // 添加默认情况的返回
+                }
+            }
+        }
+        }
+        break; // 添加break语句
+    }
+    
+    return success; // 添加缺失的返回语句
 }

@@ -40,8 +40,6 @@ int phymemspace_mgr::align4kb_pages_search(
     uint64_t num_of_4kbpgs)
 {
     const uint64_t P4K = 1ULL << 12;
-    const uint64_t P2M = 512ULL * P4K;
-    const uint64_t P1G = 512ULL * P2M;
 
     phyaddr_in_idx_t begin = phyaddr_to_idx(current_seg.base);
     phyaddr_in_idx_t irritator = begin;
@@ -71,7 +69,7 @@ int phymemspace_mgr::align4kb_pages_search(
             return OS_MEMRY_ALLOCATE_FALT;
         }
 
-        if (!(p1->flags.is_sub_valid)) { // 原子 1GB
+        if (!(p1->flags.is_sub_valid)&&!(p1->flags.is_belonged_to_buddy)) { // 原子 1GB
             phyaddr_t p1_base = idx_to_phyaddr(cur1);
             if (p1->flags.state == FREE) {
                 // 连续性检查
@@ -104,7 +102,7 @@ int phymemspace_mgr::align4kb_pages_search(
                 return OS_MEMRY_ALLOCATE_FALT;
             }
             continue;
-        }else if (p1->flags.state == FULL) {
+        }else if ((p1->flags.state == FULL)||(p1->flags.is_belonged_to_buddy)) {
             phyaddr_in_idx_t next_idx;
             next_idx._1gb_idx = i1 + 1;
             next_idx._2mb_idx = 0;
@@ -112,11 +110,11 @@ int phymemspace_mgr::align4kb_pages_search(
             accummulated_count = 0;
             expected_next_phys = idx_to_phyaddr(next_idx);
             continue;
-        }else  if(p1->flags.state == PARTIAL)
-        {// PARTIAL at 1GB: need to iterate 2MB entries inside this 1GB
+        }else  if(p1->flags.state == NOT_ATOM)
+        {// NOT_ATOM at 1GB: need to iterate 2MB entries inside this 1GB
         page_size2mb_t* p2base = p1->sub2mbpages;
         if (p2base == nullptr) {
-            kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent PARTIAL 1GB without sub2mbpages, at index: "
+            kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent NOT_ATOM 1GB without sub2mbpages, at index: "
                          <<cur1._1gb_idx<<", base address: 0x"<<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             return OS_MEMRY_ALLOCATE_FALT;
         }
@@ -131,7 +129,7 @@ int phymemspace_mgr::align4kb_pages_search(
             if (idx_to_phyaddr(cur2) >= end_phyaddr_excl) break;
 
             page_size2mb_t* p2 = p2base + i2;
-            if (!p2->flags.is_sub_valid) { // 原子 2MB
+            if ((!p2->flags.is_sub_valid)&&!(p2->flags.is_belonged_to_buddy)) { // 原子 2MB
                 phyaddr_t p2_base = idx_to_phyaddr(cur2);
                 if (p2->flags.state == FREE) {
                     if (accummulated_count == 0 || p2_base != expected_next_phys) {
@@ -146,7 +144,8 @@ int phymemspace_mgr::align4kb_pages_search(
                         return OS_SUCCESS;
                     }
                 } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
-                           p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST) {
+                           p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||
+                        p2->flags.is_belonged_to_buddy) {
                     accummulated_count = 0;
                     phyaddr_in_idx_t next_idx;
                     next_idx._1gb_idx = i1;
@@ -162,18 +161,18 @@ int phymemspace_mgr::align4kb_pages_search(
                     return OS_MEMRY_ALLOCATE_FALT;
                 }
                 continue;
-            }else if (p2->flags.state == FULL) {
+            }else if ((p2->flags.state == FULL)||(p2->flags.is_belonged_to_buddy)) {
                 accummulated_count = 0;
                 phyaddr_in_idx_t next_idx;
                 next_idx._1gb_idx = i1;
                 next_idx._2mb_idx = i2 + 1;
                 next_idx._4kb_idx = 0;
                 expected_next_phys = idx_to_phyaddr(next_idx);
-            }else if(p2->flags.state == PARTIAL)
-            {// PARTIAL at 2MB: iterate 4KB entries
+            }else if(p2->flags.state == NOT_ATOM)
+            {// NOT_ATOM at 2MB: iterate 4KB entries
             page_size4kb_t* p4base = p2->sub_pages;
             if (p4base == nullptr) {
-                kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent PARTIAL 2MB without sub_pages, at index: "
+                kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent NOT_ATOM 2MB without sub_pages, at index: "
                              <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
                              <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                 return OS_MEMRY_ALLOCATE_FALT;
@@ -211,7 +210,8 @@ int phymemspace_mgr::align4kb_pages_search(
                         return OS_SUCCESS;
                     }
                 } else if (p4->flags.state == KERNEL || p4->flags.state == USER_ANONYMOUS ||
-                           p4->flags.state == USER_FILE || p4->flags.state == KERNEL_PERSIST) {
+                           p4->flags.state == USER_FILE || p4->flags.state == KERNEL_PERSIST||
+                        p4->flags.is_belonged_to_buddy) {
                     accummulated_count = 0;
                     expected_next_phys = p4_base + P4K;
                 } else { //剩下的类型不应该出现在DRAM段里面
@@ -268,7 +268,7 @@ int phymemspace_mgr::align2mb_pages_search(
         page_size1gb_t *p1 = top_1gb_table->get(i1);
         if (p1 == nullptr) continue;
 
-        if (!p1->flags.is_sub_valid) { // 原子 1GB
+        if (!(p1->flags.is_sub_valid) && !(p1->flags.is_belonged_to_buddy)) { // 原子 1GB
             phyaddr_t p1_base = idx_to_phyaddr(cur1);
             if (p1->flags.state == FREE) {
                 if (accummulated_count == 0 || p1_base != expected_next_phys) {
@@ -298,7 +298,7 @@ int phymemspace_mgr::align2mb_pages_search(
                 return OS_MEMRY_ALLOCATE_FALT;
             }
             continue;
-        } else if (p1->flags.state == FULL) {
+        } else if (p1->flags.state == FULL||(p1->flags.is_belonged_to_buddy)) {
             phyaddr_in_idx_t next_idx;
             next_idx._1gb_idx = i1 + 1;
             next_idx._2mb_idx = 0;
@@ -306,10 +306,10 @@ int phymemspace_mgr::align2mb_pages_search(
             accummulated_count = 0;
             expected_next_phys = idx_to_phyaddr(next_idx);
             continue;
-        }else  if (p1->flags.state == PARTIAL) {
+        }else  if (p1->flags.state == NOT_ATOM) {
             page_size2mb_t *p2base = p1->sub2mbpages;
             if (p2base == nullptr) {
-                kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Inconsistent PARTIAL 1GB without sub2mbpages, at index: "
+                kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Inconsistent NOT_ATOM 1GB without sub2mbpages, at index: "
                              <<cur1._1gb_idx<<", base address: "
                              <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
                 return OS_MEMRY_ALLOCATE_FALT;
@@ -325,7 +325,7 @@ int phymemspace_mgr::align2mb_pages_search(
                 if (idx_to_phyaddr(cur2) >= end_phyaddr_excl) break;
 
                 page_size2mb_t* p2 = p2base + i2;
-                if (!p2->flags.is_sub_valid) { // 原子 2MB
+                if (!p2->flags.is_sub_valid && !(p2->flags.is_belonged_to_buddy)) { // 原子 2MB
                     phyaddr_t p2_base = idx_to_phyaddr(cur2);
                     if (p2->flags.state == FREE) {
                         if (accummulated_count == 0 || p2_base != expected_next_phys) {
@@ -340,7 +340,8 @@ int phymemspace_mgr::align2mb_pages_search(
                             return OS_SUCCESS;
                         }
                     } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
-                               p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||p1->flags.state == PARTIAL) {
+                               p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||
+                               p2->flags.state == NOT_ATOM || p2->flags.is_belonged_to_buddy) {
                         phyaddr_in_idx_t next_idx;
                         next_idx._1gb_idx = i1;
                         next_idx._2mb_idx = i2 + 1;
@@ -355,7 +356,7 @@ int phymemspace_mgr::align2mb_pages_search(
                         return OS_MEMRY_ALLOCATE_FALT;
                     }
                     continue;
-                } else if (p2->flags.state == FULL||p2->flags.state == PARTIAL) {
+                } else if (p2->flags.state == FULL||p2->flags.state == NOT_ATOM||p2->flags.is_belonged_to_buddy) {
                     phyaddr_in_idx_t next_idx;
                     next_idx._1gb_idx = i1;
                     next_idx._2mb_idx = i2 + 1;
@@ -405,7 +406,7 @@ int phymemspace_mgr::align1gb_pages_search(
         page_size1gb_t *p1 = top_1gb_table->get(i1);
         if (p1 == nullptr) continue;
 
-        if (!p1->flags.is_sub_valid) { // 原子 1GB
+        if (!p1->flags.is_sub_valid && !(p1->flags.is_belonged_to_buddy)) { // 原子 1GB
             phyaddr_t p1_base = idx_to_phyaddr(cur1);
             if (p1->flags.state == FREE) {
                 if (accummulated_count == 0 || p1_base != expected_next_phys) {
@@ -420,7 +421,7 @@ int phymemspace_mgr::align1gb_pages_search(
                     return OS_SUCCESS;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
+                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST||p1->flags.is_belonged_to_buddy) {
                 phyaddr_in_idx_t next_idx;
                 next_idx._1gb_idx = i1 + 1;
                 next_idx._2mb_idx = 0;
@@ -435,7 +436,7 @@ int phymemspace_mgr::align1gb_pages_search(
                 return OS_MEMRY_ALLOCATE_FALT;
             }
             continue;
-        } else if (p1->flags.state == FULL|| p1->flags.state == PARTIAL) {
+        } else if (p1->flags.state == FULL|| p1->flags.state == NOT_ATOM||p1->flags.is_belonged_to_buddy) {
             phyaddr_in_idx_t next_idx;
             next_idx._1gb_idx = i1 + 1;
             next_idx._2mb_idx = 0;

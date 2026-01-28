@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "phygpsmemmgr.h"
 #endif
 // 定义phymemspace_mgr的静态成员变量
 phymemspace_mgr::phymemmgr_statistics_t phymemspace_mgr::statisitcs = {0};
@@ -25,11 +26,34 @@ phymemspace_mgr::low1mb_mgr_t::interval_LinkList phymemspace_mgr::low1mb_mgr_t::
 void phymemspace_mgr::phy_to_indices(phyaddr_t p, uint64_t &idx_1gb, uint64_t &idx_2mb, uint64_t &idx_4kb)
 {//建议修改为匿名函数
     int64_t off = p; // base 是 segment base
-    idx_1gb = (off>>30)&511;
+    idx_1gb = (off>>30)&((1<<18)-1);
     idx_2mb = (off>>21)&511;
     idx_4kb = (off>>12)&511;
 }
+KURD_t phymemspace_mgr::default_kurd()
+{
+    return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_PHYMEMSPACE_MGR,0,0,err_domain::CORE_MODULE);
+}
 
+KURD_t phymemspace_mgr::default_success()
+{
+    KURD_t kurd=default_kurd();
+    kurd.result=result_code::SUCCESS;
+    kurd.level=level_code::INFO;
+    return kurd;
+}
+KURD_t phymemspace_mgr::default_failure()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_result_fail_and_error_level(kurd);
+    return kurd;
+}
+KURD_t phymemspace_mgr::default_fatal()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_fatal_result_level(kurd);
+    return kurd;
+}
 phymemspace_mgr::atom_page_ptr::atom_page_ptr(
     uint32_t idx1g, uint16_t idx2m, uint16_t idx4k)
 {
@@ -421,7 +445,7 @@ const char* page_state_to_string(phymemspace_mgr::page_state_t state) {
     switch (state) {
         case phymemspace_mgr::RESERVED: return "RESERVED";
         case phymemspace_mgr::FREE: return "FREE";
-        case phymemspace_mgr::PARTIAL: return "PARTIAL";
+        case phymemspace_mgr::NOT_ATOM: return "NOT_ATOM";
         case phymemspace_mgr::FULL: return "FULL";
         case phymemspace_mgr::MMIO_FREE: return "MMIO_FREE";
         case phymemspace_mgr::KERNEL: return "KERNEL";

@@ -334,3 +334,29 @@ Ktemplats::kernel_bitmap::kernel_bitmap(uint64_t bit_count)
 
         byte_bitmap_base = reinterpret_cast<uint8_t*>(bitmap);
 }
+// 实现文件中的新增函数
+int bitmap_t::avaliable_bit_search(uint64_t& result_base_idx) {
+    // 获取读锁保护位图访问
+
+    
+    // 遍历所有64位单元
+    for (uint64_t i = 0; i < bitmap_size_in_64bit_units; ++i) {
+        uint64_t unit = bitmap[i];
+        
+        // 如果这个单元不是全1（即有空闲位）
+        if (unit != U64_FULL_UNIT) {
+            // 使用CTZ找到第一个0的位置（空闲位）
+            // 注意：CTZ是计数尾随零，我们需要找到第一个0位
+            // 对unit取反，这样0变成1，然后找第一个1的位置
+            uint64_t inverted = ~unit;
+            int bit_pos = __builtin_ctzll(inverted);
+            
+            // 计算全局位索引
+            result_base_idx = i * 64 + bit_pos;
+
+            return OS_SUCCESS;
+        }
+    }
+
+    return OS_OUT_OF_RESOURCE; // 没有找到空闲位
+}
