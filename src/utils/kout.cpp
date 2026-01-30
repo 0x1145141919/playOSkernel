@@ -13,7 +13,13 @@ kio::kout kio::bsp_kout;
 kio::endl kio::kendl;
 kio::now_time kio::now;
 void (*kio::kout::top_module_KURD_interpreter[256]) (KURD_t info);
-
+void kio::defalut_KURD_module_interpator(KURD_t kurd)
+{
+    result_t result={
+        .kernel_result=kurd
+    };
+    kio::bsp_kout<<"default_KURD_module_interpator the raw:"<<result.raw<<kendl;
+}
 void kio::kout::print_numer(
     uint64_t *num_ptr, 
     numer_system_select numer_system, 
@@ -270,8 +276,10 @@ kio::kout &kio::kout::operator<<(const char *str)
     }
     #endif
     #ifdef USER_MODE
-    if (is_print_to_stdout) write(1, str, strlen_in_kernel(str));
-    if (is_print_to_stderr) write(2, str, strlen_in_kernel(str));
+    int strlen = strlen_in_kernel(str);
+    if (is_print_to_stdout) write(1, str, strlen);
+
+    if (is_print_to_stderr) write(2, str, strlen);
     #endif
     statistics.calls_str++;
     //别看这个写法很弱智，但是KERNEL_MODE和USER_MODE是用的两套strlen虽然长得一样但是无宏包裹下就不存在
@@ -279,7 +287,7 @@ kio::kout &kio::kout::operator<<(const char *str)
     statistics.total_printed_chars += strlen_in_kernel(str);
     #endif
     #ifdef USER_MODE
-    statistics.total_printed_chars += strlen(str);
+    statistics.total_printed_chars += strlen;
     #endif
     return *this;
 }

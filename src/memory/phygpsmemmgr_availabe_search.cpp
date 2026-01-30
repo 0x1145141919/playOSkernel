@@ -34,11 +34,18 @@ static bool is_idx_equal(phyaddr_in_idx_t a,phyaddr_in_idx_t b){
 }
 
 // 实现类的静态成员函数
-int phymemspace_mgr::align4kb_pages_search(
+KURD_t phymemspace_mgr::align4kb_pages_search(
     const PHYSEG& current_seg,
     phyaddr_t&result_base,
     uint64_t num_of_4kbpgs)
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+    fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+    fatal.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+
     const uint64_t P4K = 1ULL << 12;
 
     phyaddr_in_idx_t begin = phyaddr_to_idx(current_seg.base);
@@ -66,7 +73,8 @@ int phymemspace_mgr::align4kb_pages_search(
         page_size1gb_t* p1 = top_1gb_table->get(cur1._1gb_idx);
         if (p1 == nullptr) {
             kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]top_1gb_table is null in align4kb_pages_search idx = "<<cur1._1gb_idx<<kio::kendl;
-            return OS_MEMRY_ALLOCATE_FALT;
+            fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_TOP1GB_ENTRY_INVALID;
+            return fatal;
         }
 
         if (!(p1->flags.is_sub_valid)&&!(p1->flags.is_belonged_to_buddy)) { // 原子 1GB
@@ -86,7 +94,7 @@ int phymemspace_mgr::align4kb_pages_search(
                 expected_next_phys = idx_to_phyaddr(next_idx);
                 if (accummulated_count >= num_of_4kbpgs) {
                     result_base = idx_to_phyaddr(candidate_result);
-                    return OS_SUCCESS;
+                    return success;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
                        p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
@@ -99,7 +107,8 @@ int phymemspace_mgr::align4kb_pages_search(
             } else  { // 其他注册/保留/非法
                 kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]illegal pagestate when scanning 1gb atomic entry which 1gbidx:"<<cur1._1gb_idx<<kio::kendl;
                 result_base = 0;
-                return OS_MEMRY_ALLOCATE_FALT;
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                return fatal;
             }
             continue;
         }else if ((p1->flags.state == FULL)||(p1->flags.is_belonged_to_buddy)) {
@@ -116,7 +125,8 @@ int phymemspace_mgr::align4kb_pages_search(
         if (p2base == nullptr) {
             kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent NOT_ATOM 1GB without sub2mbpages, at index: "
                          <<cur1._1gb_idx<<", base address: 0x"<<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
-            return OS_MEMRY_ALLOCATE_FALT;
+            fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_SUBTABLE_NULLPTR;
+            return fatal;
         }
 
         uint16_t start2 = 0;
@@ -141,7 +151,7 @@ int phymemspace_mgr::align4kb_pages_search(
                     expected_next_phys = p2_base + 512ULL * P4K;
                     if (accummulated_count >= num_of_4kbpgs) {
                         result_base = idx_to_phyaddr(candidate_result);
-                        return OS_SUCCESS;
+                        return success;
                     }
                 } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
                            p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||
@@ -158,7 +168,8 @@ int phymemspace_mgr::align4kb_pages_search(
                                  <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
                                  <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                     result_base = 0;
-                    return OS_MEMRY_ALLOCATE_FALT;
+                    fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                    return fatal;
                 }
                 continue;
             }else if ((p2->flags.state == FULL)||(p2->flags.is_belonged_to_buddy)) {
@@ -175,7 +186,8 @@ int phymemspace_mgr::align4kb_pages_search(
                 kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Inconsistent NOT_ATOM 2MB without sub_pages, at index: "
                              <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
                              <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
-                return OS_MEMRY_ALLOCATE_FALT;
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_SUBTABLE_NULLPTR;
+                return fatal;
             }
 
             uint16_t start4 = 0;
@@ -193,7 +205,8 @@ int phymemspace_mgr::align4kb_pages_search(
                     kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]4KB entry marked is_sub_valid unexpectedly, at index: "
                                  <<"1GB:"<<cur4._1gb_idx<<", 2MB:"<<cur4._2mb_idx<<", 4KB:"<<cur4._4kb_idx
                                  <<", base address: "<<(void*)idx_to_phyaddr(cur4)<<kio::kendl;
-                    return OS_MEMRY_ALLOCATE_FALT;
+                    fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_4KBPAGE_SUB_BIT_VALID;
+                    return fatal;
                 }
 
                 phyaddr_t p4_base = idx_to_phyaddr(cur4);
@@ -207,7 +220,7 @@ int phymemspace_mgr::align4kb_pages_search(
                     expected_next_phys = p4_base + P4K;
                     if (accummulated_count >= num_of_4kbpgs) {
                         result_base = idx_to_phyaddr(candidate_result);
-                        return OS_SUCCESS;
+                        return success;
                     }
                 } else if (p4->flags.state == KERNEL || p4->flags.state == USER_ANONYMOUS ||
                            p4->flags.state == USER_FILE || p4->flags.state == KERNEL_PERSIST||
@@ -219,7 +232,8 @@ int phymemspace_mgr::align4kb_pages_search(
                                  <<"1GB:"<<cur4._1gb_idx<<", 2MB:"<<cur4._2mb_idx<<", 4KB:"<<cur4._4kb_idx
                                  <<", base address: "<<(void*)idx_to_phyaddr(cur4)<<kio::kendl;
                     result_base = 0;
-                    return OS_MEMRY_ALLOCATE_FALT;
+                    fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                    return fatal;
                 }
             } // end for i4
 
@@ -230,26 +244,36 @@ int phymemspace_mgr::align4kb_pages_search(
                              <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                 self_trace();
                 result_base = 0;
-                return OS_MEMRY_ALLOCATE_FALT;
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                return fatal;
             }
         } // end for i2
         }else{
             kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Illegal page state ("<<p1->flags.state<<") when scanning 1GB entry in dram seg, at index: "
                          <<cur1._1gb_idx<<", base address: "<<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             result_base = 0;
-            return OS_MEMRY_ALLOCATE_FALT;
+            fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+            return fatal;
         }
     } // end for i1
 
     // 未找到连续区
-    return OS_MEMRY_ALLOCATE_FALT;
+    fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NO_ENOUGH_MEMORY;
+    return fail;
 }
 
-int phymemspace_mgr::align2mb_pages_search(
+KURD_t phymemspace_mgr::align2mb_pages_search(
     const PHYSEG& current_seg,
     phyaddr_t&result_base,
     uint64_t num_of_2mbpgs)
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+    fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+    fatal.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+
     phyaddr_t begin_phyaddr_incl = current_seg.base;
     phyaddr_t end_phyaddr_excl = current_seg.base + current_seg.seg_size;
     phyaddr_in_idx_t begin = phyaddr_to_idx(begin_phyaddr_incl);
@@ -280,7 +304,7 @@ int phymemspace_mgr::align2mb_pages_search(
                 expected_next_phys = p1_base + _1GB_PG_SIZE;
                 if (accummulated_count >= num_of_2mbpgs) {
                     result_base = idx_to_phyaddr(candidate_result);
-                    return OS_SUCCESS;
+                    return success;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
                        p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
@@ -295,7 +319,8 @@ int phymemspace_mgr::align2mb_pages_search(
                              <<cur1._1gb_idx<<", base address: "
                              <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
                 result_base = 0;
-                return OS_MEMRY_ALLOCATE_FALT;
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                return fatal;
             }
             continue;
         } else if (p1->flags.state == FULL||(p1->flags.is_belonged_to_buddy)) {
@@ -312,7 +337,8 @@ int phymemspace_mgr::align2mb_pages_search(
                 kio::bsp_kout<<"[phymemspace_mgr::align2mb_pages_search]Inconsistent NOT_ATOM 1GB without sub2mbpages, at index: "
                              <<cur1._1gb_idx<<", base address: "
                              <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
-                return OS_MEMRY_ALLOCATE_FALT;
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_SUBTABLE_NULLPTR;
+                return fatal;
             }
 
             uint16_t start2 = 0;
@@ -337,7 +363,7 @@ int phymemspace_mgr::align2mb_pages_search(
                         expected_next_phys = p2_base + _2MB_PG_SIZE;
                         if (accummulated_count >= num_of_2mbpgs) {
                             result_base = idx_to_phyaddr(candidate_result);
-                            return OS_SUCCESS;
+                            return success;
                         }
                     } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
                                p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||
@@ -353,7 +379,8 @@ int phymemspace_mgr::align2mb_pages_search(
                                      <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
                                      <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
                         result_base = 0;
-                        return OS_MEMRY_ALLOCATE_FALT;
+                        fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                        return fatal;
                     }
                     continue;
                 } else if (p2->flags.state == FULL||p2->flags.state == NOT_ATOM||p2->flags.is_belonged_to_buddy) {
@@ -368,7 +395,8 @@ int phymemspace_mgr::align2mb_pages_search(
                                  <<"1GB:"<<cur1._1gb_idx<<", 2MB:"<<cur2._2mb_idx
                                  <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl; 
                     result_base = 0;
-                    return OS_MEMRY_ALLOCATE_FALT;
+                    fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                    return fatal;
                 }
             } // end for i2
         } else {
@@ -376,18 +404,27 @@ int phymemspace_mgr::align2mb_pages_search(
                          <<cur1._1gb_idx<<", base address: "
                          <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             result_base = 0;
-            return OS_MEMRY_ALLOCATE_FALT;
+            fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+            return fatal;
         }
     } // end for i1
 
-    return OS_MEMRY_ALLOCATE_FALT;
+    fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NO_ENOUGH_MEMORY;
+    return fail;
 }
 
-int phymemspace_mgr::align1gb_pages_search(
+KURD_t phymemspace_mgr::align1gb_pages_search(
     const PHYSEG& current_seg,
     phyaddr_t&result_base,
     uint64_t num_of_1gbpgs)
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+    fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+    fatal.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_ALIGN_SEARCHES;
+
     phyaddr_t begin_phyaddr_incl = current_seg.base;
     phyaddr_t end_phyaddr_excl = current_seg.base + current_seg.seg_size;
     phyaddr_in_idx_t begin = phyaddr_to_idx(begin_phyaddr_incl);
@@ -418,7 +455,7 @@ int phymemspace_mgr::align1gb_pages_search(
                 expected_next_phys = p1_base + _1GB_PG_SIZE;
                 if (accummulated_count >= num_of_1gbpgs) {
                     result_base = idx_to_phyaddr(candidate_result);
-                    return OS_SUCCESS;
+                    return success;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
                        p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST||p1->flags.is_belonged_to_buddy) {
@@ -433,7 +470,8 @@ int phymemspace_mgr::align1gb_pages_search(
                              <<cur1._1gb_idx<<", base address: "
                              <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
                 result_base = 0;
-                return OS_MEMRY_ALLOCATE_FALT;
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+                return fatal;
             }
             continue;
         } else if (p1->flags.state == FULL|| p1->flags.state == NOT_ATOM||p1->flags.is_belonged_to_buddy) {
@@ -449,9 +487,11 @@ int phymemspace_mgr::align1gb_pages_search(
                          <<cur1._1gb_idx<<", base address: "
                          <<(void*)idx_to_phyaddr(cur1)<<kio::kendl;
             result_base = 0;
-            return OS_MEMRY_ALLOCATE_FALT;
+            fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
+            return fatal;
         }
     } // end for i1
 
-    return OS_MEMRY_ALLOCATE_FALT;
+    fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NO_ENOUGH_MEMORY;
+    return fail;
 }

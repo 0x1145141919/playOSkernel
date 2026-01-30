@@ -35,7 +35,7 @@ int test_memory_allocation_and_recycling() {
     printf("Testing memory allocation and recycling...\n");
     
     // 尝试分配一些内存
-    phyaddr_t alloc_addr = phymemspace_mgr::pages_alloc(2, phymemspace_mgr::KERNEL, 21);
+    phyaddr_t alloc_addr = phymemspace_mgr::pages_linear_scan_and_alloc(2, phymemspace_mgr::KERNEL, 21);
     if (alloc_addr == 0) {
         printf("pages_alloc failed - no memory available\n");
         return -1;
@@ -58,7 +58,7 @@ int test_different_page_sizes() {
     printf("Testing different page sizes...\n");
     
     // 测试分配4KB页
-    phyaddr_t addr_4kb = phymemspace_mgr::pages_alloc(1, phymemspace_mgr::KERNEL, 12);
+    phyaddr_t addr_4kb = phymemspace_mgr::pages_linear_scan_and_alloc(1, phymemspace_mgr::KERNEL, 12);
     if (addr_4kb == 0) {
         printf("Failed to allocate 4KB page\n");
     } else {
@@ -67,7 +67,7 @@ int test_different_page_sizes() {
     }
     
     // 测试分配2MB页 (512 * 4KB = 2MB)
-    phyaddr_t addr_2mb = phymemspace_mgr::pages_alloc(512, phymemspace_mgr::KERNEL, 21);
+    phyaddr_t addr_2mb = phymemspace_mgr::pages_linear_scan_and_alloc(512, phymemspace_mgr::KERNEL, 21);
     if (addr_2mb == 0) {
         printf("Failed to allocate 2MB page\n");
     } else {
@@ -76,7 +76,7 @@ int test_different_page_sizes() {
     }
     
     // 测试分配1GB页 (262144 * 4KB = 1GB)
-    phyaddr_t addr_1gb = phymemspace_mgr::pages_alloc(262144, phymemspace_mgr::KERNEL, 30);
+    phyaddr_t addr_1gb = phymemspace_mgr::pages_linear_scan_and_alloc(262144, phymemspace_mgr::KERNEL, 30);
     if (addr_1gb == 0) {
         printf("Failed to allocate 1GB page\n");
     } else {

@@ -5,9 +5,11 @@
 #include "util/lock.h"
 #include "util/Ktemplats.h"
 #include "util/bitmap.h"
+#include "memory/phygpsmemmgr.h"
 namespace MEMMODULE_LOCAIONS{
-        constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR=28;
-        constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK=32;
+    constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR=28;
+    
+    constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK=32;
     namespace FREEPAGES_ALLOCATOR{
         
     }
@@ -20,12 +22,6 @@ namespace MEMMODULE_LOCAIONS{
                 constexpr uint16_t FAIL_REASON_CODE_ACQUIRE_SIZE_TO_BIG= 1;
                 constexpr uint16_t FAIL_REASON_CODE_NO_AVALIABLE_BUDDY= 2;
             }
-            namespace FATAL_REASONS_CODE{
-                constexpr uint16_t UNREACHEABLE_CODE= 1;
-                constexpr uint16_t INCONSISTENT_BITMAP_STATE= 2;
-                constexpr uint16_t SUB_MODULES_NOT_ALL_INIT= 3;
-            
-            }
         }
         constexpr uint8_t EVENT_CODE_CONANICO_FREE = 2;
         namespace CONANICO_FREE_RESULTS_CODE{
@@ -33,28 +29,41 @@ namespace MEMMODULE_LOCAIONS{
                 constexpr uint16_t FAIL_REASON_CODE_INVALID_PAGE_INDEX= 1;
                 constexpr uint16_t FAIL_REASON_CODE_INVALID_ORDER= 2;
                 constexpr uint16_t FAIL_REASON_CODE_COALESCING_FAILED= 3;
-                constexpr uint16_t FAIL_REASON_CODE_FAIL_REASON_CODE_DOUBLE_FREE= 4;
                 constexpr uint16_t FAIL_REASON_CODE_DOUBLE_FREE= 5;
             }
             namespace FATAL_REASONS_CODE{
-                constexpr uint16_t UNREACHEABLE_CODE= 1;
-                constexpr uint16_t BUDDY_NOT_IN_LIST= 2;
-                constexpr uint16_t LIST_REMOVE_FAILED= 3;
+                constexpr uint16_t BIN_TREE_CONSISTENCY_VIOLATION=1;
             }
         }
+        constexpr uint8_t EVENT_CODE_SPLIT_PAGE = 3;
+        namespace SPLIT_PAGE_RESULTS_CODE{ 
+            namespace FAIL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_CODE_INVALID_ORDER= 1;
+                constexpr uint16_t FAIL_REASON_CODE_PAGE_NOT_FREE= 2;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_FLUSH_FREE_COUNT = 4;
+        namespace FLUSH_FREE_COUNT_RESULTS_CODE{
+            namespace FATAL_REASONS_CODE{
+                constexpr uint16_t COSISTENCY_VIOLATION=1; 
+            }
+        }
+    }
+    constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP=33;
+    namespace FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP{
+        constexpr uint8_t EVENT_CODE_INIT=0;
     }
 };
 
 class FreePagesAllocator{ 
-private:
- static constexpr uint16_t _4KB_PAGESIZE=4096;
-    
-    
-    class free_pages_in_seg_control_block{
+    public:
+        static constexpr uint16_t _4KB_PAGESIZE=4096;    
+        class free_pages_in_seg_control_block{
         private:
         static constexpr uint64_t INVALID_INBCB_INDEX=~0;
         static constexpr uint8_t DESINGED_MAX_SUPPORT_ORDER=64;
         trylock_cpp_t lock;
+        bool is_splited_bitmap_valid;
         uint8_t MAX_SUPPORT_ORDER;
         phyaddr_t base;//base至少是4KB对齐的，可以不是1<<(MAX_SUPPORT_ORDER+12)对齐的,只会影响外部获得的地址
         KURD_t default_kurd();
@@ -73,6 +82,10 @@ private:
         class mixed_bitmap_t:bitmap_t{
             private:
             uint64_t entry_count;
+            KURD_t default_kurd();
+            KURD_t default_success();
+            KURD_t default_error();
+            KURD_t default_fatal();
             public:
             using bitmap_t::bit_set;
             using bitmap_t::bit_get;
@@ -85,17 +98,34 @@ private:
             ~mixed_bitmap_t();
         };
         friend mixed_bitmap_t::mixed_bitmap_t(uint64_t entry_count);
-        mixed_bitmap_t*order_bitmaps;
+        mixed_bitmap_t*order_freepage_existency_bitmaps;//这个位图编码为1表示这个order的对应引索的页面是存在的，反之不存在
         uint64_t order_bases[DESINGED_MAX_SUPPORT_ORDER];//在mixed_bitmap_t里面各order的引索基址    
+        struct BCB_statistics
+        {
+        uint64_t free_count[DESINGED_MAX_SUPPORT_ORDER];
+        uint64_t suggest_hit[DESINGED_MAX_SUPPORT_ORDER];
+        uint64_t suggest_miss[DESINGED_MAX_SUPPORT_ORDER];
+        uint64_t scan_count;
+        uint64_t fold_count_success;
+        uint64_t fold_count_fail;
+        uint64_t split_count;
+        }
+        statistics;
         KURD_t split_page(
             uint64_t splited_idx,
             uint8_t splited_order,
             uint8_t target_order
         );
+        static uint8_t size_to_order(uint64_t size);
         bool is_reclusive_fold_success(uint64_t idx, uint8_t order);//true成功,false失败,是对这个order之下的所有二叉树进行折叠
         public:
         uint8_t get_max_order();
-        static uint8_t size_to_order(uint64_t size);
+        friend phymemspace_mgr;
+        void print_basic_info();
+        void print_bitmap_info();
+        void print_bitmap_order_info_compress(uint8_t order);
+        void print_bitmap_order_interval_compress(uint8_t order,uint64_t base,uint64_t length);
+        KURD_t free_pages_flush();//强制扫描位图校准free_count[DESINGED_MAX_SUPPORT_ORDER]数据结构
         free_pages_in_seg_control_block(
             phyaddr_t base,
             uint8_t max_support_order
@@ -110,8 +140,8 @@ private:
             phyaddr_t base,
             uint64_t size
         );
-        ~free_pages_in_seg_control_block();
+        ~free_pages_in_seg_control_block()=default;
     };
     static free_pages_in_seg_control_block*first_BCB;//通过pages_alloc在align_log2=30时分配一个1GB页，哪个页用来初始化这个
-
+    public:
 };

@@ -7,7 +7,6 @@
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
 static constexpr uint64_t PAGES_4KB_PER_1GB = PAGES_4KB_PER_2MB * PAGES_2MB_PER_1GB; // 262144
-static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 
 // 添加辅助结构体和函数
 struct phyaddr_in_idx_t
@@ -24,28 +23,50 @@ struct phyaddr_in_idx_t
 
 
 
-int phymemspace_mgr::del_no_atomig_1GB_pg(uint64_t _1idx)
+KURD_t phymemspace_mgr::del_no_atomig_1GB_pg(uint64_t _1idx)
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_DEL_NO_ATOM_1GB_PG;
+    fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_DEL_NO_ATOM_1GB_PG;
+    fatal.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_DEL_NO_ATOM_1GB_PG;
+
     page_size1gb_t*pg=top_1gb_table->get(_1idx);
-    if(pg==nullptr)return OS_NOT_EXIST;
-    if(pg->sub2mbpages==nullptr)return OS_MEMORY_FREE_FAULT;
+    if(pg==nullptr){
+        fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::DEL_NO_ATOM_1GB_PG_RESULTS_CODE::FAIL_REASONS::_1GB_PG_NOT_EXIST;
+        return fail;
+    }
+    if(pg->sub2mbpages==nullptr){
+        fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::DEL_NO_ATOM_1GB_PG_RESULTS_CODE::FATAL_REASONS::SUBTABLE_NOT_EXIST;
+        return fatal;
+    }
     page_size2mb_t* _2base=pg->sub2mbpages;
     for(uint16_t i=0;i<512;i++){
         page_size2mb_t*_2=_2base+i;
         if(_2->flags.is_sub_valid){
-            if(_2->sub_pages==nullptr)return OS_MEMORY_FREE_FAULT;
+            if(_2->sub_pages==nullptr){
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::DEL_NO_ATOM_1GB_PG_RESULTS_CODE::FATAL_REASONS::SUBTABLE_NOT_EXIST;
+                return fatal;
+            }
             page_size4kb_t*_4base=_2->sub_pages;
             for(uint16_t j=0;j<512;j++){
                 page_size4kb_t*_4=_4base+j;
-                if(_4->flags.state!=RESERVED)return OS_RESOURCE_CONFILICT;//按照文档设计这里必须是reserved才合法，不然应该回炉重造
+                if(_4->flags.state!=RESERVED){
+                    fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::DEL_NO_ATOM_1GB_PG_RESULTS_CODE::FATAL_REASONS::PAGES_ILLEAGLE_STATE;
+                    return fatal;//按照文档设计这里必须是reserved才合法，不然应该回炉重造
+                }
             }
             delete[] _4base;
         }
-        else  if(_2->flags.state!=RESERVED)return OS_RESOURCE_CONFILICT;
+        else  if(_2->flags.state!=RESERVED){
+            fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::DEL_NO_ATOM_1GB_PG_RESULTS_CODE::FATAL_REASONS::PAGES_ILLEAGLE_STATE;
+            return fatal;
+        }
     }
     delete[] _2base;
     top_1gb_table->release(_1idx);
-    return OS_SUCCESS;
+    return success;
 }
 static inline phyaddr_t min(phyaddr_t a, phyaddr_t b) {
     return (a < b) ? a : b;
@@ -127,7 +148,7 @@ int phymemspace_mgr::phymemseg_to_pacage(
     
     return OS_SUCCESS;
 }
-phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::page_state_t state, uint8_t align_log2)
+phyaddr_t phymemspace_mgr::pages_linear_scan_and_alloc(uint64_t numof_4kbpgs,KURD_t&kurd, phymemspace_mgr::page_state_t state, uint8_t align_log2)
 {
     if(state==KERNEL||state==USER_ANONYMOUS||state==USER_FILE||state==DMA)
     {
@@ -153,7 +174,7 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
         }();
         
         phyaddr_t result = 0;
-        int status = OS_MEMRY_ALLOCATE_FALT;
+        KURD_t status = KURD_t();
         auto it = physeg_list->begin();
         PHYSEG current_seg = *it;
         do{
@@ -161,14 +182,14 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
             if(current_seg.type == DRAM_SEG) {
                 if(a == 12) {
                     status = align4kb_pages_search(current_seg, result, numof_4kbpgs);
-                    if(status == OS_SUCCESS) goto search_success;
+                    if(status.result==result_code::SUCCESS) goto search_success;
                 } else if (a == 21) {
                     status = align2mb_pages_search(current_seg, result, align_up(numof_4kbpgs, PAGES_4KB_PER_2MB) / PAGES_4KB_PER_2MB);
-                    if(status == OS_SUCCESS) goto search_success;
+                    if(status.result==result_code::SUCCESS) goto search_success;
                 } else if(a == 30) {
                     uint64_t num_of_1gbpgs = align_up(numof_4kbpgs, PAGES_4KB_PER_1GB) / PAGES_4KB_PER_1GB;
                     status = align1gb_pages_search(current_seg, result, num_of_1gbpgs);
-                    if(status == OS_SUCCESS) goto search_success;
+                    if(status.result==result_code::SUCCESS) goto search_success;
                 } else {
                     module_global_lock.unlock();
                     return 0;
@@ -178,7 +199,7 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
             current_seg = *it;
             
         }while(it != physeg_list->end());
-        
+        kurd=status;
         // 未找到合适的内存区域
         module_global_lock.unlock();
         return 0;
@@ -206,24 +227,32 @@ phyaddr_t phymemspace_mgr::pages_alloc(uint64_t numof_4kbpgs, phymemspace_mgr::p
                 current_seg.statistics.dma+=numof_4kbpgs;
                 statisitcs.dma+=numof_4kbpgs;break;
             }
+            default:{
+                //panic
+            }
         }
+        kurd=status;
         module_global_lock.unlock();
-        if(status == OS_SUCCESS) return result;
+        if(status.result==result_code::SUCCESS) return result;
         return 0;
-    }
-
-    
-    return OS_INVALID_PARAMETER;
-    
+    }    
+    kurd=default_failure();
+    kurd.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_LINEAR_SCAN_AND_ALLOC;
+    kurd=set_result_fail_and_error_level(kurd);
+    kurd.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_LINEAR_SCAN_AND_ALLOC_RESULTS_CODE::FAIL_REASONS::REASON_CODE_INVALID_STATE;
+    return 0;
 }
 
-int phymemspace_mgr::pages_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
+KURD_t phymemspace_mgr::pages_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
 {
+    KURD_t fail_result=default_failure();
+    fail_result.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_MMIO_REGIST;
     module_global_lock.lock();
     PHYSEG seg=get_physeg_by_addr(phybase);
     if(seg.type!=MMIO_SEG){
+        fail_result.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::MMIO_REGIST_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MMIOSEG_NOT_EXIST;
         module_global_lock.unlock();
-        return OS_INVALID_ADDRESS;
+        return fail_result;
     }
     pages_state_set_flags_t flags={
         .op=pages_state_set_flags_t::normal,
@@ -233,7 +262,7 @@ int phymemspace_mgr::pages_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
         }
     };
     
-    int status=pages_state_set(phybase, numof_4kbpgs, MMIO, flags);  
+    KURD_t status=pages_state_set(phybase, numof_4kbpgs, MMIO, flags);  
     module_global_lock.unlock();
     return status;
 }
@@ -247,14 +276,24 @@ static inline uint8_t normalize_align_log2(uint8_t log2)
     // 30以上按1GB处理（你的要求）
     return 30;
 }
-
-int phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs, seg_type_t type, blackhole_acclaim_flags_t flags)
+phymemspace_mgr::PHYSEG phymemspace_mgr::get_physeg_by_addr(phyaddr_t addr)
 {
-    if(base%4096!=0)return OS_INVALID_PARAMETER;
+    PHYSEG result=NULL_SEG;
+    physeg_list->get_seg_by_addr(addr,result);
+    return result;
+}
+KURD_t phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs, seg_type_t type, blackhole_acclaim_flags_t flags)
+{
+    KURD_t fail=default_failure();
+    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_BLACK_HOLE_ACCLAIM;
+    if(base%4096!=0){
+        fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::BLACK_HOLE_ACCLAIM_RESULTS_CODE::FAIL_REASONS::BASE_NOT_ALIGNED;
+        return fail;
+    }
     PHYSEG newseg={.base=base, .seg_size=numof_4kbpgs*4096,.flags=0,.type=type, };
     module_global_lock.lock();
-    int status=physeg_list->add_seg(newseg);
-    if(status!=OS_SUCCESS)
+    KURD_t status=physeg_list->add_seg(newseg);
+    if(status.event_code!=result_code::SUCCESS)
     {
         module_global_lock.unlock();
         return status;
@@ -300,13 +339,18 @@ int phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs, se
     module_global_lock.unlock();
     return status;
 }
-int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
+KURD_t phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
 {
-    if(base%4096!=0)return OS_INVALID_PARAMETER;
+    KURD_t fail=default_failure();
+    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_BLACK_HOLE_DECCLAIM;
+    if(base%4096!=0){
+        fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::BLACK_HOLE_DECCLAIM_RESULTS_CODE::FAIL_REASONS::BASE_NOT_ALIGNED;
+        return fail;
+    }
     module_global_lock.lock();
     PHYSEG seg;
-    int status=physeg_list->get_seg_by_base(base,seg);
-    if(status!=OS_SUCCESS)
+    KURD_t status=physeg_list->get_seg_by_base(base,seg);
+    if(status.result!=result_code::SUCCESS)
     {
         module_global_lock.unlock();
         return status;
@@ -314,7 +358,8 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
     
     if(seg.type!=DRAM_SEG&&seg.type!=MMIO_SEG){
         module_global_lock.unlock();
-        return OS_NOT_SUPPORT;//OS_TRY_TO_DELETE_INVALID_PHYSEG
+        fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::BLACK_HOLE_DECCLAIM_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_FOUND;
+        return fail;
     }
     bool is_mmio=(seg.type==MMIO_SEG);
     if(is_mmio)statisitcs.total_mmio-=seg.statistics.total_pages;
@@ -327,12 +372,12 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
         }
     };
     status=pages_state_set(base,seg.seg_size,RESERVED,flag_set_page);//这个函数里面负责撤销1GB原子页和其它级别的原子页
-    if(status!=OS_SUCCESS){
+    if(status.result!=result_code::SUCCESS){
         module_global_lock.unlock();
         return status;
     }
     status = physeg_list->del_seg(base);
-    if (status != OS_SUCCESS) {
+    if(status.result!=result_code::SUCCESS) {
         module_global_lock.unlock();
         return status;
     }
@@ -344,7 +389,7 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
     if((align_up_end-align_down_base)==_1GB_PG_SIZE){
         if(!physeg_list->is_seg_have_cover(align_down_base,_1GB_PG_SIZE)){
             status=del_no_atomig_1GB_pg(align_down_base/_1GB_PG_SIZE);
-            if(status!=OS_SUCCESS)
+            if(status.result!=result_code::SUCCESS)
             {
                 kio::bsp_kout<<"[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail"<<kio::kendl;
                 module_global_lock.unlock();
@@ -354,7 +399,7 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
     }else{
         if(!physeg_list->is_seg_have_cover(align_down_base,_1GB_PG_SIZE)){
             status=del_no_atomig_1GB_pg(align_down_base/_1GB_PG_SIZE);
-            if(status!=OS_SUCCESS)
+            if(status.result!=result_code::SUCCESS)
             {
                 kio::bsp_kout<<"[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail"<<kio::kendl;
                 module_global_lock.unlock();
@@ -364,7 +409,7 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
         if(!physeg_list->is_seg_have_cover(align_up_end-_1GB_PG_SIZE,_1GB_PG_SIZE))
         {
             status=del_no_atomig_1GB_pg((align_up_end-_1GB_PG_SIZE)/_1GB_PG_SIZE);
-            if(status!=OS_SUCCESS)
+            if(status.result!=result_code::SUCCESS)
             {
                 kio::bsp_kout<<"[KPHYGPSMEMMGR] del_no_atomig_1GB_pg fail"<<kio::kendl;
                 module_global_lock.unlock();
@@ -374,17 +419,4 @@ int phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
     }
     module_global_lock.unlock();
     return status;
-}
-int phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_base(phyaddr_t base, PHYSEG &seg)
-{
-    if(m_head==nullptr&&m_tail==nullptr)return OS_NOT_EXIST;
-    for(node *it=m_head;it!=nullptr;it=it->next)
-    {
-        if(it->value.base==base)
-        {
-            seg=it->value;
-            return OS_SUCCESS;
-        }
-    }
-    return OS_NOT_EXIST;
 }

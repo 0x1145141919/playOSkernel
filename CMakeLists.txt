@@ -46,10 +46,8 @@ set(CMAKE_KEEP_BUILD_FILES ON)
 set(SRC_COMMON
  #USERMODE需要替换成对应的标准库
     src/utils/util.cpp
-    src/core_hardwares/VideoDriver.cpp
-    src/core_hardwares/PortDriver.cpp
     src/utils/kintrin.cpp
-    src/panic.cpp
+    src/os_error_definitions.cpp
     src/utils/bitmap.cpp
     src/utils/lock.cpp
     src/utils/RB_btree.cpp
@@ -97,6 +95,7 @@ add_executable(symbols_dumper
 )
 # 内核可执行文件
 add_executable(kernel.elf
+    src/panic.cpp
     src/firmware/UefiRunTimeServices.cpp
     src/kinit.cpp
     src/utils/kcirclebufflogMgr.cpp
@@ -104,10 +103,10 @@ add_executable(kernel.elf
     src/ap_init_longmode_exceptions.asm
     src/ap_init_pemode_exceptions.asm
     src/ap_init_realmode_exceptions.asm
-        src/utils/int128_div.cpp
-        src/Interrupts/lapic.cpp
-        src/Interrupts/exceptions_handler.cpp
-        src/Processor/local_processor_manage.cpp
+    src/utils/int128_div.cpp
+    src/Interrupts/lapic.cpp
+    src/Interrupts/exceptions_handler.cpp
+    src/Processor/local_processor_manage.cpp
         src/firmware/APIC_convert_functions.cpp
         src/firmware/APIC_table_analyzer.cpp
         src/Interrupts/Sysdef_exception_entries.asm
@@ -117,6 +116,22 @@ add_executable(kernel.elf
         src/firmware/acpimgr.cpp
         $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
+)
+add_executable(BCB_test
+    src/tests/BCB_test.cpp
+     ${SRC_COMMON}
+    src/memory/mixed_bitmap.cpp
+    src/memory/FreePagesAllocator_BCB.cpp
+    src/memory/FreePagesAllocator.cpp
+)
+target_include_directories(
+    BCB_test PRIVATE
+    "/usr/include/efi"
+     "${CMAKE_SOURCE_DIR}/src/include"
+)
+target_compile_options(
+    BCB_test PRIVATE
+    -DUSER_MODE
 )
 add_executable(mkinitramfs
     src/tests/fs_test_main.cpp

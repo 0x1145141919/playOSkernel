@@ -177,7 +177,7 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
     // 检查页目录指针表项是否存在且不是1GB页面
     if (!(pdpte.raw & PageTableEntry::P_MASK) ){
         nonleaf_pgtbentry_flagsset(pdpte);
-        phyaddr_t pd_phyaddr = phymemspace_mgr::pages_alloc(1,phymemspace_mgr::KERNEL,12);
+        phyaddr_t pd_phyaddr = phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
         if (pd_phyaddr == 0) return OS_OUT_OF_MEMORY;
         pdpte.pdpte.PD_addr = pd_phyaddr >> 12;
         // 初始化新分配的页目录中的所有页表项为0
@@ -198,7 +198,7 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
     if (!(pderaw & PageTableEntry::P_MASK))
         {
             nonleaf_pgtbentry_flagsset(pde);
-            phyaddr_t pt_phyaddr = phymemspace_mgr::pages_alloc(1,phymemspace_mgr::KERNEL,12);
+            phyaddr_t pt_phyaddr = phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
             if (pt_phyaddr == 0) return OS_OUT_OF_MEMORY;
             pde.pde.pt_addr = pt_phyaddr >> 12;
             PhyAddrAccessor::writeu64(pde_loacte_phyaddr, pde.raw);
@@ -367,7 +367,7 @@ int KspaceMapMgr::_4lv_pde_2MB_entries_set(
     // 如果页目录指针表项不存在，则创建新的页目录
     if (!(pdpte.raw & PageTableEntry::P_MASK)) {
         nonleaf_pgtbentry_flagsset(pdpte);
-        phyaddr_t pd_phyaddr = phymemspace_mgr::pages_alloc(1,phymemspace_mgr::KERNEL,12);
+        phyaddr_t pd_phyaddr = phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
         if (pd_phyaddr == 0) return OS_OUT_OF_MEMORY;
         pdpte.pdpte.PD_addr = pd_phyaddr >> 12;
         // 初始化新分配的页目录中的所有页表项为0

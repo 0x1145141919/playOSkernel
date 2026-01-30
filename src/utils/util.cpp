@@ -27,6 +27,7 @@ const uint8_t bit_reverse_table[256] = {
         0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
         0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF
     };
+uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 uint64_t reverse_perbytes(uint64_t value) {
     uint64_t result = 0;
     uint8_t* p = (uint8_t*)&value;
@@ -94,34 +95,19 @@ int strncmp(const char* str1, const char* str2, size_t n) {
     return *(unsigned char*)str1 - *(unsigned char*)str2;
 }
 
- void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
+void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
+    if (size_in_byte == 0) return;
+    
     uint8_t* p = static_cast<uint8_t*>(ptr);
     
-    // 使用64位写入来加速内存设置
-    uint64_t value64 = value;
-    value64 |= value64 << 8;
-    value64 |= value64 << 16;
-    value64 |= value64 << 32;
-    
-    // 处理前缀不对齐部分
-    while (size_in_byte > 0 && (reinterpret_cast<uint64_t>(p) & 7)) {
-        *p++ = value;
-        size_in_byte--;
-    }
-    
-    // 使用64位写入处理主体部分
-    uint64_t* p64 = reinterpret_cast<uint64_t*>(p);
-    while (size_in_byte >= 8) {
-        *p64++ = value64;
-        size_in_byte -= 8;
-    }
-    
-    // 处理剩余部分
-    p = reinterpret_cast<uint8_t*>(p64);
-    while (size_in_byte > 0) {
-        *p++ = value;
-        size_in_byte--;
-    }
+    // 使用 rep stos 指令（最快）
+    __asm__ volatile (
+        "cld\n\t"                   // 清除方向标志（向前）
+        "rep stosb\n\t"            // 重复存储字节
+        : "+D" (p), "+c" (size_in_byte), "+a" (value)  // 输入/输出
+        :                           // 无额外输入
+        : "memory", "cc"           // 可能修改内存和标志寄存器
+    );
 }
 void __kspace_stack_chk_fail(void)
 {

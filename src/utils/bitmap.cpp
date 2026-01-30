@@ -22,7 +22,9 @@ void bitmap_t::bit_set(uint64_t bit_idx, bool value)
 {
     if (value)
     {
-        bitmap[bit_idx>>6] |= (1ULL << (bit_idx & 63));
+        uint64_t u64_idx=bit_idx>>6;
+        uint64_t to_write=1ULL<<(bit_idx&63);
+        bitmap[u64_idx] |= to_write;
     }
     else
     {

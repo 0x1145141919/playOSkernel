@@ -154,7 +154,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
             return subtb_phybase;
         }else{
             phyaddr_t entry_to_alloc_phybase=0;
-            entry_to_alloc_phybase = phymemspace_mgr::pages_alloc(1, phymemspace_mgr::KERNEL, 12);
+            entry_to_alloc_phybase = phymemspace_mgr::pages_linear_scan_and_alloc(1, phymemspace_mgr::KERNEL, 12);
             if(!entry_to_alloc_phybase) return 0;
             
             // 初始化新分配的页表内存为0
@@ -941,7 +941,7 @@ int AddressSpace::second_stage_init()
     alloc_flags_t flags=default_flags;
     flags.force_first_linekd_heap=true;
     flags.align_log2=12;
-    pml4_phybase=phymemspace_mgr::pages_alloc(1,phymemspace_mgr::KERNEL,12);
+    pml4_phybase=phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
     if(pml4_phybase==0)return OS_OUT_OF_MEMORY;
     for(uint16_t i=0;i<256;i++){
         PhyAddrAccessor::writeu64(

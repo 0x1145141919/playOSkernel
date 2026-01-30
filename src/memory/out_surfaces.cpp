@@ -5,7 +5,7 @@
 // 重载全局 new/delete 操作符
 
 void* __wrapped_pgs_valloc(uint64_t _4kbpgscount, phymemspace_mgr::page_state_t TYPE, uint8_t alignment_log2) {
-    phyaddr_t phybase=phymemspace_mgr::pages_alloc(_4kbpgscount, TYPE, alignment_log2);
+    phyaddr_t phybase=phymemspace_mgr::pages_linear_scan_and_alloc(_4kbpgscount, TYPE, alignment_log2);
     if(phybase==0||phybase&0x1000)return nullptr;
     vaddr_t vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(phybase, _4kbpgscount*0x1000, KspaceMapMgr::PG_RWX);
     return (void*)vbase;

@@ -125,11 +125,5 @@ class kout
 extern kout bsp_kout;
 extern endl kendl;
 extern now_time now;
-void defalut_KURD_module_interpator(KURD_t kurd)
-{
-    result_t result={
-        .kernel_result=kurd
-    };
-    bsp_kout<<"default_KURD_module_interpator the raw:"<<result.raw<<kendl;
-}
+void defalut_KURD_module_interpator(KURD_t kurd);
 }

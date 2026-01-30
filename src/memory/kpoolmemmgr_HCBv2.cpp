@@ -58,7 +58,7 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
     if(this==&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
     bitmap_size_in_64bit_units=entries_count/64;
 #ifdef KERNEL_MODE
-    phyaddr_t bitmap_phybase=phymemspace_mgr::pages_alloc(
+    phyaddr_t bitmap_phybase=phymemspace_mgr::pages_linear_scan_and_alloc(
         (bitmap_size_in_64bit_units*8)/4096,
         phymemspace_mgr::KERNEL
     );
@@ -321,7 +321,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
         return fail;
     }
     #ifdef KERNEL_MODE
-    phybase=phymemspace_mgr::pages_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL,21);
+    phybase=phymemspace_mgr::pages_linear_scan_and_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL,21);
     if(phybase==0)return OS_OUT_OF_MEMORY;
     vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
     if(vbase==0){

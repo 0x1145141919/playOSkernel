@@ -57,45 +57,6 @@ namespace LAPIC_PARAMS_ENUM{
     };
     
 }
-namespace xapic
-{
-    constexpr uint32_t REG_OFF_ICR_COMMAND_OFFSET = 0x300;
-    union xapic_icr_command_t { 
-    uint32_t raw;
-    struct params
-    { 
-        uint8_t vector;
-        uint8_t delivery_mode:3;
-        uint8_t destination_mode:1;
-        uint8_t status:1;
-        uint8_t reserved1:1;
-        uint8_t level:1;
-        uint8_t trigger_mode:1;
-        uint8_t reserved2:2;
-        uint8_t destination_shorthand:2;
-        uint16_t reserved3:12;
-    }__attribute__((packed));
-    params param;
-};
-    constexpr uint32_t REG_OFF_ICR_DESTINATION_OFFSET = 0x310;
-union xapic_icr_dest_t { 
-    uint32_t raw;
-    struct params
-    { 
-        uint8_t reserved[3];
-        uint8_t destination;
-    }__attribute__((packed));
-    params param;
-};
-    class apic_driver{
-    private:
-    static phyaddr_t lapic_phyaddr;
-    static vaddr_t lapic_virtaddr;
-    public:
-    static int Init();
-    static void send_ipi(xapic_icr_dest_t dest, xapic_icr_command_t command);
-    };
-}
 namespace x2apic
 {
     union timer_lvt_entry

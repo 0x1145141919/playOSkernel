@@ -5,6 +5,9 @@
 #include "linker_symbols.h"
 #include "memory/phyaddr_accessor.h"
 #include "util/kout.h"
+#ifdef KERNEL_MODE
+#include "util/kptrace.h"
+#endif
 #ifdef USER_MODE
 #include <elf.h>
 #include <stdio.h>
@@ -12,7 +15,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "phygpsmemmgr.h"
 #endif
 // 定义phymemspace_mgr的静态成员变量
 phymemspace_mgr::phymemmgr_statistics_t phymemspace_mgr::statisitcs = {0};
@@ -202,7 +204,6 @@ int phymemspace_mgr::atom_page_ptr::the_next()
     }
     return OS_UNREACHABLE_CODE;
 }
-static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
@@ -223,17 +224,19 @@ inline uint16_t pg2mb_to_4kb_offset_in_2mb(uint64_t pg2mb_index) {
 
 
 
-int phymemspace_mgr::pages_recycle(phyaddr_t phybase, uint64_t numof_4kbpgs)
+KURD_t phymemspace_mgr::pages_recycle(phyaddr_t phybase, uint64_t numof_4kbpgs)
 {
+    KURD_t fail=default_failure();
+    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_RECYCLE;
     module_global_lock.lock();
     PHYSEG seg=get_physeg_by_addr(phybase);
     if(seg.type!=DRAM_SEG){
         module_global_lock.unlock();
-        return OS_NOT_SUPPORT;//表明的语义应该是不在dram段里面
+        fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_RESULTS_CODE::FAIL_REASONS::REASON_CODE_DRAMSEG_NOT_EXIST;
     }
     page_state_t to_del_page_state;
-    int status=pages_recycle_verify(phybase,numof_4kbpgs,to_del_page_state);
-    if(status!=OS_SUCCESS){module_global_lock.unlock();return OS_RESOURCE_CONFILICT;}
+    KURD_t status=pages_recycle_verify(phybase,numof_4kbpgs,to_del_page_state);
+    if(status.result!=result_code::SUCCESS){module_global_lock.unlock();return status;}
     pages_state_set_flags_t flags={
         .op=pages_state_set_flags_t::normal,
         .params={
@@ -264,13 +267,16 @@ int phymemspace_mgr::pages_recycle(phyaddr_t phybase, uint64_t numof_4kbpgs)
 
 }
 
-int phymemspace_mgr::pages_mmio_unregist(phyaddr_t phybase, uint64_t numof_4kbpgs)
+KURD_t phymemspace_mgr::pages_mmio_unregist(phyaddr_t phybase, uint64_t numof_4kbpgs)
 {
     module_global_lock.lock();
     PHYSEG seg=get_physeg_by_addr(phybase);
     if(seg.type!=MMIO_SEG){
         module_global_lock.unlock();
-        return OS_NOT_SUPPORT;//表明的语义应该是不在dram段里面
+        KURD_t fail=default_failure();
+        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_MMIO_UNREGIST;
+        fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::MMIO_UNREGIST_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MMIOSEG_NOT_EXIST;
+        return fail;
     }
     pages_state_set_flags_t flags={
         .op=pages_state_set_flags_t::normal,
@@ -279,9 +285,14 @@ int phymemspace_mgr::pages_mmio_unregist(phyaddr_t phybase, uint64_t numof_4kbpg
             .if_mmio=1
         }
     };
-    int status=pages_state_set(phybase,numof_4kbpgs,MMIO_FREE,flags);
+    KURD_t status=pages_state_set(phybase,numof_4kbpgs,MMIO_FREE,flags);
     module_global_lock.unlock();
     return status;
+}
+void phymemspace_mgr::in_module_panic(KURD_t kurd)
+{
+    kio::bsp_kout<<kurd;
+    
 }
 int phymemspace_mgr::Init()
 {
@@ -557,13 +568,26 @@ int phymemspace_mgr::print_allseg()
 // ------------------------
 // 仅用于 pages_recycle 的回收前校验
 // ------------------------
-int phymemspace_mgr::pages_recycle_verify(
+KURD_t phymemspace_mgr::pages_recycle_verify(
     phyaddr_t phybase,
     uint64_t num_of_4kbpgs,
     page_state_t& state
 ) {
-    if (num_of_4kbpgs == 0) return OS_INVALID_PARAMETER;
-    if (phybase & (_4KB_PG_SIZE - 1)) return OS_INVALID_PARAMETER;
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_RECYCLE_VERIFY;
+    fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_RECYCLE_VERIFY;
+    fatal.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_RECYCLE_VERIFY;
+
+    if (num_of_4kbpgs == 0) {
+        fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::BAD_PARAM;
+        return fail;
+    }
+    if (phybase & (_4KB_PG_SIZE - 1)) {
+        fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::BAD_PARAM;
+        return fail;
+    }
 
     uint64_t idx1, idx2, idx4;
     phy_to_indices(phybase, idx1, idx2, idx4);
@@ -582,7 +606,10 @@ int phymemspace_mgr::pages_recycle_verify(
         if (cur.page_size == _4KB_PG_SIZE) {
 
             auto *p4 = reinterpret_cast<page_size4kb_t*>(cur.page_strut_ptr);
-            if (!p4) return OS_INVALID_ADDRESS;
+            if (!p4) {
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FATAL_REASONS::REASON_CODE_PAGE_FRAME_FAIL_GET;
+                return fatal;//fatal,对应页框结构失败
+            }
 
             if (!state_initialized) {
                 orig_state = p4->flags.state;
@@ -596,19 +623,30 @@ int phymemspace_mgr::pages_recycle_verify(
                     case DMA:
                         break;
                     default:
-                        return OS_PAGE_STATE_ERROR;
+                        fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_UNRECYCABLE_PAGE_STATE;
+                        return fail;
                 }
             }
 
-            if (p4->flags.state != orig_state)
-                return OS_PAGE_STATE_ERROR;
+            if (p4->flags.state != orig_state) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_PAGE_STATE_SHIFT;
+                return fail;
+            }
 
-            if (p4->ref_count != 1)
-                return OS_PAGE_REFCOUNT_NONZERO;
+            if (p4->ref_count != 1) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_REF_COUNT_NET_ALLOW_RECYCLE;
+                return fail;
+            }
 
-            if (p4->map_count != 0)
-                return OS_PAGE_MAPCOUNT_NONZERO;
+            if (p4->map_count != 0) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MAP_COUNT_NOT_CLEAR;
+                return fail;
+            }
 
+            if(p4->flags.is_sub_valid) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_4KBPAGE_SUBTABLE_BIT_VALID;
+                return fail;//fatal,非法状态
+            }
             checked++;
             if (cur.the_next() != OS_SUCCESS) break;
             continue;
@@ -621,7 +659,10 @@ int phymemspace_mgr::pages_recycle_verify(
         if (cur.page_size == _2MB_PG_SIZE) {
 
             auto *p2 = reinterpret_cast<page_size2mb_t*>(cur.page_strut_ptr);
-            if (!p2) return OS_INVALID_ADDRESS;
+            if (!p2) {
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FATAL_REASONS::REASON_CODE_PAGE_FRAME_FAIL_GET;
+                return fatal;
+            }
 
             if (!state_initialized) {
                 orig_state = p2->flags.state;
@@ -634,22 +675,31 @@ int phymemspace_mgr::pages_recycle_verify(
                     case DMA:
                         break;
                     default:
-                        return OS_PAGE_STATE_ERROR;
+                        fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_UNRECYCABLE_PAGE_STATE;
+                        return fail;
                 }
             }
 
-            if (p2->flags.state != orig_state)
-                return OS_PAGE_STATE_ERROR;
+            if (p2->flags.state != orig_state) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_PAGE_STATE_SHIFT;
+                return fail;
+            }
 
-            if (p2->ref_count != 1)
-                return OS_PAGE_REFCOUNT_NONZERO;
+            if (p2->ref_count != 1) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_REF_COUNT_NET_ALLOW_RECYCLE;
+                return fail;
+            }
 
-            if (p2->map_count != 0)
-                return OS_PAGE_MAPCOUNT_NONZERO;
+            if (p2->map_count != 0) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MAP_COUNT_NOT_CLEAR;
+                return fail;
+            }
 
             // 原子 2MB 页必须整块被回收
-            if (num_of_4kbpgs - checked < 512)
-                return OS_INVALID_PARAMETER;
+            if (num_of_4kbpgs - checked < 512) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::BAD_PARAM;
+                return fail;
+            }
 
             checked += 512;
 
@@ -664,7 +714,10 @@ int phymemspace_mgr::pages_recycle_verify(
         if (cur.page_size == _1GB_PG_SIZE) {
 
             auto *p1 = reinterpret_cast<page_size1gb_t*>(cur.page_strut_ptr);
-            if (!p1) return OS_INVALID_ADDRESS;
+            if (!p1) {
+                fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FATAL_REASONS::REASON_CODE_PAGE_FRAME_FAIL_GET;
+                return fatal;
+            }
 
             if (!state_initialized) {
                 orig_state = p1->flags.state;
@@ -677,24 +730,32 @@ int phymemspace_mgr::pages_recycle_verify(
                     case DMA:
                         break;
                     default:
-                        return OS_PAGE_STATE_ERROR;
+                        fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_UNRECYCABLE_PAGE_STATE;
+                        return fail;
                 }
             }
 
-            if (p1->flags.state != orig_state)
-                return OS_PAGE_STATE_ERROR;
+            if (p1->flags.state != orig_state) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_PAGE_STATE_SHIFT;
+                return fail;
+            }
 
-            if (p1->ref_count != 1)
-                return OS_PAGE_REFCOUNT_NONZERO;
+            if (p1->ref_count != 1) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_REF_COUNT_NET_ALLOW_RECYCLE;
+                return fail;
+            }
 
-            if (p1->map_count != 0)
-                return OS_PAGE_MAPCOUNT_NONZERO;
-
+            if (p1->map_count != 0) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MAP_COUNT_NOT_CLEAR;
+                return fail;
+            }
             // 原子 1GB 必须整块被回收
             const uint64_t block = 512ULL * 512ULL;
 
-            if (num_of_4kbpgs - checked < block)
-                return OS_INVALID_PARAMETER;
+            if (num_of_4kbpgs - checked < block) {
+                fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::BAD_PARAM;
+                return fail;
+            }
 
             checked += block;
 
@@ -703,31 +764,16 @@ int phymemspace_mgr::pages_recycle_verify(
         }
 
         // 不可能到这
-        return OS_INVALID_ADDRESS;
+        fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FATAL_REASONS::REASON_CODE_UNREACHABLE_CODE;
+        return fatal;
     }
     
     // 全部通过
     state=orig_state;
-    return OS_SUCCESS;
+    return success;
 }
-int phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_addr(phyaddr_t addr, PHYSEG &seg)
-{
-    if(m_head==nullptr&&m_tail==nullptr)
-    return OS_NOT_EXIST;
-    for(node*cur=m_head;cur!=nullptr;cur=cur->next){
-        if(cur->value.base<=addr&&(addr<cur->value.base+cur->value.seg_size)){
-            seg=cur->value;
-            return OS_SUCCESS;
-        }
-    }
-    return OS_NOT_EXIST;
-}
-phymemspace_mgr::PHYSEG phymemspace_mgr::get_physeg_by_addr(phyaddr_t addr)
-{
-    PHYSEG result=NULL_SEG;
-    physeg_list->get_seg_by_addr(addr,result);
-    return result;
-}
+
+
 phymemspace_mgr::phymemmgr_statistics_t phymemspace_mgr::get_statisit_copy()
 {
     return statisitcs;
