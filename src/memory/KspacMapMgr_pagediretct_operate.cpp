@@ -2,6 +2,7 @@
 #include "memory/Memory.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/kpoolmemmgr.h"
+#include "memory/FreePagesAllocator.h"
 #include "memory/phyaddr_accessor.h"
 #include "os_error_definitions.h"
 #include "linker_symbols.h"
@@ -21,14 +22,38 @@
 PageTableEntryUnion KspaceMapMgr::kspaceUPpdpt[256*512] __attribute__((section(".kspace_uppdpt")));
 shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info={0};
 bool KspaceMapMgr::is_default_pat_config_enabled=false;
-
-int KspaceMapMgr::Init()
+KURD_t KspaceMapMgr::default_kurd()
 {
+    return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR,0,0,err_domain::CORE_MODULE);
+}
+KURD_t KspaceMapMgr::default_success()
+{
+    KURD_t kurd=default_kurd();
+    kurd.result=result_code::SUCCESS;
+    kurd.level=level_code::INFO;
+    return kurd;
+}
+KURD_t KspaceMapMgr::default_failure()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_result_fail_and_error_level(kurd);
+    return kurd;
+}
+KURD_t KspaceMapMgr::default_fatal()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_fatal_result_level(kurd);
+    return kurd;
+}
+KURD_t KspaceMapMgr::Init()
+{
+    KURD_t success=default_success();
+    success.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT;
     #ifdef KERNEL_MODE
     kspace_uppdpt_phyaddr=(phyaddr_t)&_kspace_uppdpt_lma;
     #endif
     kspace_vm_table=new kspace_vm_table_t();
-    int status=0;
+    KURD_t status=KURD_t();
     //先注册内核映像
     pgaccess PG_RX{
         .is_kernel=1,
@@ -41,17 +66,17 @@ int KspaceMapMgr::Init()
     vaddr_t result=0;
     uint64_t basic_seg_size=PhyAddrAccessor::BASIC_DESC.SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
 #ifdef KERNEL_MODE
-    result=(vaddr_t)pgs_remapp((uint64_t)&KImgphybase,(&text_end-&text_begin),PG_RX,(vaddr_t)&KImgvbase);
+    result=(vaddr_t)pgs_remapp(status,(uint64_t)&KImgphybase,(&text_end-&text_begin),PG_RX,(vaddr_t)&KImgvbase);
     if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp((uint64_t)&_data_lma,(&_data_end-&_data_start),PG_RW,(vaddr_t)&_data_start);
+    result=(vaddr_t)pgs_remapp(status,(uint64_t)&_data_lma,(&_data_end-&_data_start),PG_RW,(vaddr_t)&_data_start);
     if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp((uint64_t)&_rodata_lma,(&_rodata_end-&_rodata_start),PG_R,(vaddr_t)&_rodata_start);
+    result=(vaddr_t)pgs_remapp(status,(uint64_t)&_rodata_lma,(&_rodata_end-&_rodata_start),PG_R,(vaddr_t)&_rodata_start);
     if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp((uint64_t)&_stack_lma,(&__klog_end-&_stack_bottom),PG_RW,(vaddr_t)&_stack_bottom);
+    result=(vaddr_t)pgs_remapp(status,(uint64_t)&_stack_lma,(&__klog_end-&_stack_bottom),PG_RW,(vaddr_t)&_stack_bottom);
     if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(ksymmanager::get_phybase(),align_up(sizeof(symbol_entry)*ksymmanager::get_entry_count(),4096),PG_R,ksymmanager::get_virtbase());
+    result=(vaddr_t)pgs_remapp(status,ksymmanager::get_phybase(),align_up(sizeof(symbol_entry)*ksymmanager::get_entry_count(),4096),PG_R,ksymmanager::get_virtbase());
     if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(0,basic_seg_size,PG_RW,0,true);
+    result=(vaddr_t)pgs_remapp(status,0,basic_seg_size,PG_RW,0,true);
     if(result==0)goto regist_segment_fault;
 
     PhyAddrAccessor::BASIC_DESC.start=result;
@@ -133,9 +158,9 @@ int KspaceMapMgr::Init()
 #endif
 
     
-    return OS_SUCCESS;  
+    return success;  
     regist_segment_fault:
-    return OS_RESOURCE_CONFILICT;
+    return status;
 
 }
 void nonleaf_pgtbentry_flagsset(PageTableEntryUnion&entry){//内核态的是全局的，
@@ -147,16 +172,24 @@ void nonleaf_pgtbentry_flagsset(PageTableEntryUnion&entry){//内核态的是全�
 /**
  * 锁在外部接口中持有
  */
-int KspaceMapMgr::_4lv_pte_4KB_entries_set(
+KURD_t KspaceMapMgr::_4lv_pte_4KB_entries_set(
     phyaddr_t phybase,
     vaddr_t vaddr_base,
     uint16_t count,
     pgaccess access
     )
 {//暂时只有(is_phypgsmgr_enabled==false）的逻辑
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+
     // 检查count参数有效性
     if (count == 0) {
-        return 0; // 成功设置0个条目
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BAD_COUNT;
+        return fail;
     }
 
     uint64_t highoffset = vaddr_base - PAGELV4_KSPACE_BASE;
@@ -172,13 +205,19 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
 
     PageTableEntryUnion& pdpte = kspaceUPpdpt[pdpte_index];
     if(pdpte.raw & PDPTE::PS_MASK){
-        return OS_RESOURCE_CONFILICT;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_WHEN_GET_SUB;
+        return fail;
     }
     // 检查页目录指针表项是否存在且不是1GB页面
     if (!(pdpte.raw & PageTableEntry::P_MASK) ){
         nonleaf_pgtbentry_flagsset(pdpte);
-        phyaddr_t pd_phyaddr = phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
-        if (pd_phyaddr == 0) return OS_OUT_OF_MEMORY;
+        KURD_t kurd;
+        phyaddr_t pd_phyaddr = FreePagesAllocator::first_BCB->allocate_buddy_way(_4KB_SIZE,kurd);
+        if (pd_phyaddr == 0||kurd.result!=result_code::SUCCESS) return kurd;
+        kurd=phymemspace_mgr::pages_dram_buddy_pages_set(pd_phyaddr,1,KERNEL);
+        if(kurd.result!=result_code::SUCCESS){
+                return kurd;
+        }
         pdpte.pdpte.PD_addr = pd_phyaddr >> 12;
         // 初始化新分配的页目录中的所有页表项为0
         for(uint16_t i=0;i<512;i++)
@@ -192,14 +231,20 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
         .raw = pderaw
     };
     if(pderaw & PDE::PS_MASK){
-        return OS_RESOURCE_CONFILICT;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDE_WHEN_GET_SUB;
+        return fail;
     }
     // 检查页目录项是否存在且不是2MB页面
     if (!(pderaw & PageTableEntry::P_MASK))
         {
             nonleaf_pgtbentry_flagsset(pde);
-            phyaddr_t pt_phyaddr = phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
-            if (pt_phyaddr == 0) return OS_OUT_OF_MEMORY;
+            KURD_t kurd;
+            phyaddr_t pt_phyaddr = FreePagesAllocator::first_BCB->allocate_buddy_way(_4KB_SIZE,kurd);
+            if (pt_phyaddr == 0||kurd.result!=result_code::SUCCESS) return kurd;
+            kurd=phymemspace_mgr::pages_dram_buddy_pages_set(pt_phyaddr,1,KERNEL);
+            if(kurd.result!=result_code::SUCCESS){
+                return kurd;
+            }
             pde.pde.pt_addr = pt_phyaddr >> 12;
             PhyAddrAccessor::writeu64(pde_loacte_phyaddr, pde.raw);
             // 初始化新分配的页表中的所有页表项为0
@@ -231,8 +276,7 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_set(
         PhyAddrAccessor::writeu64(pte_phybase + pte_offset, pte_value);
     }
 
-    // 添加缺失的返回值
-    return 0; // 假设0表示成功
+    return success;
 }
 // ====================================================================
 void KspaceMapMgr::invalidate_seg()
@@ -246,10 +290,7 @@ void KspaceMapMgr::invalidate_seg()
     
     if (shared_inval_kspace_VMentry_info.is_package_valid == false) {
         kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid\n");
-        asm volatile(
-        "sti"
-        );
-        KernelPanicManager::panic("invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
+        Panic::panic("invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
         return;
     }
     
@@ -299,7 +340,7 @@ void KspaceMapMgr::invalidate_seg()
                 asm volatile(
         "sti"
         );
-                KernelPanicManager::panic("invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info");
+                Panic::panic("invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info");
                 return;  // 添加 return 避免继续执行
         }
     }
@@ -319,26 +360,35 @@ void KspaceMapMgr::invalidate_seg()
 // 2MB 大页映射（PDE 级别）
 // 要求：不能跨 PDPT 边界（即一次最多映射 512 个 2MB 页，覆盖 1GB）
 // ====================================================================
-int KspaceMapMgr::_4lv_pde_2MB_entries_set(
+KURD_t KspaceMapMgr::_4lv_pde_2MB_entries_set(
                                                 phyaddr_t phybase,
                                                   vaddr_t vaddr_base,
                                                   uint16_t count,
                                                   pgaccess access
                                                   )
 {//暂时只有(is_phypgsmgr_enabled==false）的逻辑
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+
     // 检查count参数有效性
     if (count == 0) {
-        return 0; // 成功设置0个条目
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BAD_COUNT;
+        return fail;
     }
     
     if (count > 512) [[unlikely]] {
-        kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_set: count invalid\n");
-        return OS_INVALID_PARAMETER;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE;
+        return fail;
     }
     
     // 检查物理地址和虚拟地址是否按照2MB对齐
     if ((phybase & (_2MB_SIZE - 1)) || (vaddr_base & (_2MB_SIZE - 1))) [[unlikely]] {
-        return OS_INVALID_PARAMETER; // 2MB 对齐
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BASE_NOT_ALIGNED;
+        return fail;
     }
 
     uint64_t highoffset = vaddr_base - PAGELV4_KSPACE_BASE;
@@ -352,23 +402,28 @@ int KspaceMapMgr::_4lv_pde_2MB_entries_set(
 
     // 检查是否跨越PDPT边界
     if (pde_index + count > 512) [[unlikely]] {
-        kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_set: cross PDPT boundary not allowed\n");
-        return OS_OUT_OF_RANGE;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE;
+        return fail;
     }
 
     PageTableEntryUnion& pdpte = kspaceUPpdpt[pdpte_index];
     
     // 检查页目录指针表项是否存在且不是1GB页面
     if (pdpte.raw & PDPTE::PS_MASK) {
-        kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_set: under a 1GB huge page\n");
-        return OS_RESOURCE_CONFILICT;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_WHEN_GET_SUB;
+        return fail;
     }
     
     // 如果页目录指针表项不存在，则创建新的页目录
     if (!(pdpte.raw & PageTableEntry::P_MASK)) {
         nonleaf_pgtbentry_flagsset(pdpte);
-        phyaddr_t pd_phyaddr = phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
-        if (pd_phyaddr == 0) return OS_OUT_OF_MEMORY;
+        KURD_t kurd;
+        phyaddr_t pd_phyaddr = FreePagesAllocator::first_BCB->allocate_buddy_way(_4KB_SIZE,kurd);
+        if (pd_phyaddr == 0||kurd.result!=result_code::SUCCESS) return kurd;
+        kurd=phymemspace_mgr::pages_dram_buddy_pages_set(pd_phyaddr,1,KERNEL);
+        if(kurd.result!=result_code::SUCCESS){
+                return kurd;
+        }
         pdpte.pdpte.PD_addr = pd_phyaddr >> 12;
         // 初始化新分配的页目录中的所有页表项为0
         for(uint16_t i=0;i<512;i++)
@@ -401,24 +456,31 @@ int KspaceMapMgr::_4lv_pde_2MB_entries_set(
         PhyAddrAccessor::writeu64(pd_phyaddr + pde_offset, template_entry.raw);
     }
 
-    // 添加缺失的返回值
-    return 0; // 假设0表示成功
+    return success;
 }
 // ====================================================================
 // 1GB 大页映射（PDPTE 级别）
 // 要求：不能跨 PML4E 边界（即一次最多映射 512 个 1GB 页，覆盖 512GB）
 // ====================================================================
-int KspaceMapMgr::_4lv_pdpte_1GB_entries_set(phyaddr_t phybase,
+KURD_t KspaceMapMgr::_4lv_pdpte_1GB_entries_set(phyaddr_t phybase,
                                                     vaddr_t vaddr_base,
                                                     uint16_t count,
                                                     pgaccess access)
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET;
+
     if (count == 0){
-        kputsSecure("KspaceMapMgr::_4lv_pdpte_1GB_entries_set: count invalid\n");
-        return OS_INVALID_PARAMETER;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BAD_COUNT;
+        return fail;
     }
     if ((phybase & (_1GB_SIZE - 1)) || (vaddr_base & (_1GB_SIZE - 1))) [[unlikely]] {
-        return OS_INVALID_PARAMETER; // 1GB 对齐
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BASE_NOT_ALIGNED;
+        return fail; // 1GB 对齐
     }
 
     uint64_t highoffset = vaddr_base - PAGELV4_KSPACE_BASE;
@@ -429,8 +491,8 @@ int KspaceMapMgr::_4lv_pdpte_1GB_entries_set(phyaddr_t phybase,
     for (uint16_t i = 0; i < count; i++) {
         PageTableEntryUnion& entry = kspaceUPpdpt[pdpt_index + i];
         if (entry.raw & PageTableEntry::P_MASK) [[unlikely]] {
-            kputsSecure("KspaceMapMgr::_4lv_pdpte_1GB_entries_set: 1GB entry already present\n");
-            return OS_TARGET_BUSY;
+            fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_INVALID_PAGETABLE_ENTRY;
+            return fail;
         }
         PDPTEEntry1GB& huge = entry.pdpte1GB;
         huge.present       = 1;
@@ -444,25 +506,25 @@ int KspaceMapMgr::_4lv_pdpte_1GB_entries_set(phyaddr_t phybase,
         huge.EXECUTE_DENY  = !access.is_executable;
         huge._1GB_Addr     = ((phybase >> 30) + i) & ((1ULL << 18) - 1); // 低 18 位是地址高部
     }
-    return OS_SUCCESS;
+    return success;
 }
 
-int KspaceMapMgr::pgs_remapped_free(vaddr_t addr)
+KURD_t KspaceMapMgr::pgs_remapped_free(vaddr_t addr)
 {
-    int status = OS_SUCCESS;
+    KURD_t status = KURD_t();
     VM_DESC nullentry = {0};
     VM_DESC&vmentry=nullentry;
     GMlock.lock();
     status=VM_search_by_vaddr(addr, vmentry);
     GMlock.unlock();
-    if (status != OS_SUCCESS)
+    if (status.result != result_code::SUCCESS)
     {
         return status;
     }
     GMlock.lock();
     status=disable_VMentry(vmentry);
     GMlock.unlock();
-    if (status != OS_SUCCESS)
+    if (status.result != result_code::SUCCESS)
     {
         return status;
     }
@@ -470,15 +532,25 @@ int KspaceMapMgr::pgs_remapped_free(vaddr_t addr)
     shared_inval_kspace_VMentry_info.completed_processors_count = 0;
     
     status=invalidate_tlb_entry();
-    status=VM_del(&vmentry);
-    if (status != OS_SUCCESS)return status;
+    int i=VM_del(&vmentry);
+    if (i){
+        //todo:删除失败,构造新的
+    }
     //todo:广播其他处理器失效tlb以及等待校验，若超时要用其它手段跳出直接panic
     
 }
-int KspaceMapMgr::invalidate_tlb_entry()
+KURD_t KspaceMapMgr::invalidate_tlb_entry()
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+    
     if (shared_inval_kspace_VMentry_info.is_package_valid == false) {
-        return OS_INVALID_PARAMETER;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INVALIDATE_TLB_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VM_ENTRY;
+        return fail;
     }
     
     for (uint8_t i = 0; i < 5; i++) {
@@ -523,7 +595,8 @@ int KspaceMapMgr::invalidate_tlb_entry()
                 break;
                 
             default:
-                return OS_INVALID_PARAMETER;
+                fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INVALIDATE_TLB_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
+                return fatal;
         }
     }
     
@@ -535,12 +608,22 @@ int KspaceMapMgr::invalidate_tlb_entry()
         :
         : "cc", "memory"
     );
-    return OS_SUCCESS;
+    return success;
 }
 
-int KspaceMapMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_t count)
+KURD_t KspaceMapMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_t count)
 {
-    if (count == 0) return OS_SUCCESS;  // 或 OS_INVALID_PARAMETER，根据需求
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+
+    if (count == 0) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BAD_COUNT;
+        return fail;
+    }
 
     uint64_t highoffset = vaddr_base - PAGELV4_KSPACE_BASE;
     uint32_t pdpte_index = (highoffset >> 30) & ((1 << 17) - 1);
@@ -548,18 +631,22 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_t count)
     uint16_t pte_index = (highoffset >> 12) & ((1 << 9) - 1);
 
     if (pte_index + count > 512) {
-        kputsSecure("KspaceMapMgr::_4lv_pte_4KB_entries_clear: cross page directory boundary not allowed\n");
-        return OS_OUT_OF_RANGE;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE;
+        return fail;
     }
-    if (vaddr_base % _4KB_SIZE) return OS_INVALID_PARAMETER;
+    if (vaddr_base % _4KB_SIZE) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BASE_NOT_ALIGNED;
+        return fail;
+    }
 
     PageTableEntryUnion& pdpte = kspaceUPpdpt[pdpte_index];
     if (!(pdpte.raw & PageTableEntry::P_MASK)) {
-        return OS_INVALID_ADDRESS;  // 上级 PDPTE 不存在
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_SUBTABLE_NOT_EXIST;
+        return fail;
     }
     if (pdpte.raw & PDPTE::PS_MASK) {
-        kputsSecure("KspaceMapMgr::_4lv_pte_4KB_entries_clear: PDPTE is existing 1GB page\n");
-        return OS_BAD_FUNCTION;
+        fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_UNTIMELY;
+        return fatal;
     }
 
     // 修复位运算优先级问题：使用括号确保正确的运算顺序
@@ -569,12 +656,13 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_t count)
     uint64_t pderaw = PhyAddrAccessor::readu64(pde_address);
     
     if (!(pderaw & PageTableEntry::P_MASK)) {
-        return OS_INVALID_ADDRESS; // PDE不存在
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDE_SUBTABLE_NOT_EXIST;
+        return fail;
     }
     
     if (pderaw & PDE::PS_MASK) {
-        kputsSecure("KspaceMapMgr::_4lv_pte_4KB_entries_clear: PDE is existing 2MB page\n");
-        return OS_BAD_FUNCTION;
+        fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDE_UNTIMELY;
+        return fatal;
     }
     
     PageTableEntryUnion pde = { .raw = pderaw };
@@ -603,26 +691,37 @@ int KspaceMapMgr::_4lv_pte_4KB_entries_clear(vaddr_t vaddr_base, uint16_t count)
         PhyAddrAccessor::writeu64(pde_address, 0);
     }
 
-    return OS_SUCCESS;
+    return success;
 }
 // ====================================================================
 // 1GB 大页清除（PDPTE 级别）
 // 功能：直接清除 kspaceUPpdpt 中的 PDPTE 条目（无需下级页表）
 // ====================================================================
-int KspaceMapMgr::_4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base, uint16_t count)
+KURD_t KspaceMapMgr::_4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base, uint16_t count)
 {
-    if (count == 0) return OS_SUCCESS;
-    if (vaddr_base & (_1GB_SIZE - 1)){
-        return OS_INVALID_PARAMETER;
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+
+    if (count == 0) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BAD_COUNT;
+        return fail;
+    }
+    if (vaddr_base & (_1GB_SIZE - 1)) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BASE_NOT_ALIGNED;
+        return fail;
     }
 
     uint64_t highoffset = vaddr_base - PAGELV4_KSPACE_BASE;
     uint32_t pdpt_index = (highoffset >> 30) & ((1ULL << 17) - 1);  // 合并索引
     uint16_t start_idx  = (highoffset >> 30) & 0x1FF;               // 在 512 项中的起始位置
 
-    if (start_idx + count > 512){
-        kputsSecure("KspaceMapMgr::_4lv_pdpte_1GB_entries_clear: cross PML4E boundary not allowed\n");
-        return OS_OUT_OF_RANGE;
+    if (start_idx + count > 512) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE;
+        return fail;
     }
 
     for (uint16_t i = 0; i < count; i++) {
@@ -631,8 +730,8 @@ int KspaceMapMgr::_4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base, uint16_t coun
             continue;  // 已空
         }
         if (!(entry.raw & PDPTE::PS_MASK)) {
-            kputsSecure("KspaceMapMgr::_4lv_pdpte_1GB_entries_clear: trying to clear non-1GB PDPTE\n");
-            return OS_BAD_FUNCTION;
+            fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_NOT_EXIST;
+            return fatal;
         }
         entry.raw = 0;
     }
@@ -640,7 +739,7 @@ int KspaceMapMgr::_4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base, uint16_t coun
     // 注意：1GB 页清除后不需要回收下级页表（因为 PS=1 时没有下级）
     // 也不回收整个 512GB 块（内核空间一般保留结构）
 
-    return OS_SUCCESS;
+    return success;
 }
 // ====================================================================
 void KspaceMapMgr::enable_DEFAULT_PAT_CONFIG()
@@ -658,15 +757,26 @@ void KspaceMapMgr::enable_DEFAULT_PAT_CONFIG()
 // 要求：不能跨 PDPT 边界（即一次最多清除 512 个 2MB 页，覆盖 1GB）
 // 功能：清除 PDE 条目 + 检测整个 PD 是否全空 → 回收 PD 页表 + 清上级 PDPTE
 // ====================================================================
-int KspaceMapMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_t count)
+KURD_t KspaceMapMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_t count)
 {
-    if (count == 0) return OS_SUCCESS;
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR;
+
+    if (count == 0) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BAD_COUNT;
+        return fail;
+    }
     if (count > 512) [[unlikely]] {
-        kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_clear: count exceeds 512\n");
-        return OS_INVALID_PARAMETER;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE;
+        return fail;
     }
     if (vaddr_base & (_2MB_SIZE - 1)) [[unlikely]] {
-        return OS_INVALID_PARAMETER;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_BASE_NOT_ALIGNED;
+        return fail;
     }
 
     uint64_t highoffset = vaddr_base - PAGELV4_KSPACE_BASE;
@@ -674,18 +784,19 @@ int KspaceMapMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_t count)
     uint16_t pde_index  = (highoffset >> 21) & 0x1FF;               // 在 PD 内的起始索引
 
     if (pde_index + count > 512) [[unlikely]] {
-        kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_clear: cross PDPT boundary not allowed\n");
-        return OS_OUT_OF_RANGE;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FAIL_REASONS::REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE;
+        return fail;
     }
 
     // 获取或验证 PD 页表
     PageTableEntryUnion& pdpte = kspaceUPpdpt[pdpt_index];
     if (!(pdpte.raw & PageTableEntry::P_MASK)) {
-        return OS_INVALID_ADDRESS;  // 上级 PDPTE 不存在
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_SUBTABLE_NOT_EXIST;
+        return fail;
     }
     if (pdpte.raw & PDPTE::PS_MASK) {
-        kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_clear: under a 1GB huge page\n");
-        return OS_BAD_FUNCTION;
+        fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_UNTIMELY;
+        return fatal;
     }
 
     phyaddr_t pd_phyaddr = (pdpte.pdpte.PD_addr << 12) & PHYS_ADDR_MASK;
@@ -700,8 +811,8 @@ int KspaceMapMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_t count)
             continue;
         }
         if (!(pde_value & PDE::PS_MASK)) {
-            kputsSecure("KspaceMapMgr::_4lv_pde_2MB_entries_clear: trying to clear non-huge PDE\n");
-            return OS_BAD_FUNCTION;  // 不应该出现在 2MB clear 中
+            fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_CLEAR_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDE_NOT_EXIST;
+            return fatal;
         }
         PhyAddrAccessor::writeu64(pd_phyaddr + pde_offset, 0);
     }
@@ -723,13 +834,20 @@ int KspaceMapMgr::_4lv_pde_2MB_entries_clear(vaddr_t vaddr_base, uint16_t count)
         // 注意：这里不需要递归检查 PDPTE 是否全空，因为内核空间一般不回收整个 512GB 块
     }
 
-    return OS_SUCCESS;
+    return success;
 }
-int KspaceMapMgr::v_to_phyaddrtraslation_entry
+KURD_t KspaceMapMgr::v_to_phyaddrtraslation_entry
 (vaddr_t vaddr, 
     PageTableEntryUnion &result, 
     uint32_t &page_size)
 {
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_TRAN_TO_PHY_ENTRY;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_TRAN_TO_PHY_ENTRY;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_TRAN_TO_PHY_ENTRY;
+
     if(pglv_4_or_5){
         uint64_t highoffset = vaddr - PAGELV4_KSPACE_BASE;
         uint32_t pdpte_index = (highoffset >> 30) & ((1 << 17) - 1);
@@ -739,14 +857,15 @@ int KspaceMapMgr::v_to_phyaddrtraslation_entry
         // 检查PDPTE
         PageTableEntryUnion& pdpte = kspaceUPpdpt[pdpte_index];
         if (!(pdpte.raw & PageTableEntry::P_MASK)) {
-            return OS_INVALID_ADDRESS;
+            fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::TRAN_TO_PHY_ENTRY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_PRESENT_ENTRY;
+            return fail;
         }
         
         // 1GB 页面
         if (pdpte.raw & PDPTE::PS_MASK) {
             result = pdpte;
             page_size = _1GB_SIZE;
-            return OS_SUCCESS;
+            return success;
         }
         
         // 获取PD物理地址
@@ -757,7 +876,8 @@ int KspaceMapMgr::v_to_phyaddrtraslation_entry
         
         // 检查PDE
         if (!(pde_raw & PageTableEntry::P_MASK)) {
-            return OS_INVALID_ADDRESS;
+            fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::TRAN_TO_PHY_ENTRY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_PRESENT_ENTRY;
+            return fail;
         }
         
         PageTableEntryUnion pde = { .raw = pde_raw };
@@ -766,7 +886,7 @@ int KspaceMapMgr::v_to_phyaddrtraslation_entry
         if (pde_raw & PDE::PS_MASK) {
             result = pde;
             page_size = _2MB_SIZE;
-            return OS_SUCCESS;
+            return success;
         }
         
         // 获取PT物理地址
@@ -778,9 +898,11 @@ int KspaceMapMgr::v_to_phyaddrtraslation_entry
         // 设置结果
         page_size = _4KB_SIZE;
         result.raw = pte_raw;
-        return OS_SUCCESS;
+        return success;
     }else{
-        return OS_NOT_SUPPORTED;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::TRAN_TO_PHY_ENTRY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_SUPPORT_LV5_PAGING;
+        return fail;
     }
-    return OS_UNREACHABLE_CODE;
+    fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::TRAN_TO_PHY_ENTRY_RESULTS_CODE::FATAL_REASONS::REASON_CODE_UNREACHABLE_CODE;
+    return fatal;
 }

@@ -195,8 +195,10 @@ set(KERNEL_LINK_OPTS
     -fno-exceptions
     -fno-builtin
     -fno-rtti
+    -fno-omit-frame-pointer
     -fno-asynchronous-unwind-tables
     -ftls-model=local-exec
+    -mno-red-zone
     -static
     -T${CMAKE_SOURCE_DIR}/kld.ld
     -lgcc

@@ -6,6 +6,7 @@
 #include "util/Ktemplats.h"
 #include "util/bitmap.h"
 #include "memory/phygpsmemmgr.h"
+class KspaceMapMgr;
 namespace MEMMODULE_LOCAIONS{
     constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR=28;
     
@@ -48,16 +49,34 @@ namespace MEMMODULE_LOCAIONS{
                 constexpr uint16_t COSISTENCY_VIOLATION=1; 
             }
         }
+        constexpr uint8_t EVENT_CODE_TOP_FOLD = 5;
+        constexpr uint8_t EVENT_CODE_FREE_PAGES_FLUSH = 6;
+        namespace FREE_PAGES_FLUSH_RESULTS_CODE{
+            namespace FATAL_REASONS_CODE{
+                constexpr uint16_t COSISTENCY_VIOLATION=1; 
+            }
+        }
     }
     constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP=33;
     namespace FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP{
         constexpr uint8_t EVENT_CODE_INIT=0;
     }
 };
-
+struct alloc_params{
+    uint64_t numa;//不支持，暂时
+    uint64_t flags_bits;
+    uint8_t align_log2;//对于BCB是不支持的
+};
+struct Alloc_result{
+    uint64_t base;
+    KURD_t result;
+};
 class FreePagesAllocator{ 
-    public:
+    private:
         static constexpr uint16_t _4KB_PAGESIZE=4096;    
+        static struct flags_t{
+            uint64_t allow_new_BCB:1;
+        }flags;
         class free_pages_in_seg_control_block{
         private:
         static constexpr uint64_t INVALID_INBCB_INDEX=~0;
@@ -140,8 +159,14 @@ class FreePagesAllocator{
             phyaddr_t base,
             uint64_t size
         );
+        bool is_addr_belong_to_this_BCB(phyaddr_t addr);
         ~free_pages_in_seg_control_block()=default;
     };
+    friend KspaceMapMgr;
     static free_pages_in_seg_control_block*first_BCB;//通过pages_alloc在align_log2=30时分配一个1GB页，哪个页用来初始化这个
     public:
+    static void enable_new_BCB_allow();
+    static KURD_t Init();
+    static Alloc_result alloc(uint64_t size,alloc_params params);
+    static KURD_t free(phyaddr_t base,uint64_t size);
 };

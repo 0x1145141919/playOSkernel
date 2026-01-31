@@ -209,11 +209,7 @@ namespace MEMMODULE_LOCAIONS{
 /**
  * 此函数全局单例掌握物理内存一手唯一信源，如果出现不一致等情况应该直接panic,并且还要尽可能打印尽可能多的表项信息
  */
-class phymemspace_mgr{
-    public:
-    //主要是原子页迭代器太复杂，暂时全模块加锁，后续可能的话进行优化
-    //技术债
-    enum page_state_t:uint8_t {
+enum page_state_t:uint8_t {
         RESERVED = 0, // 保留页,不能动,特意设计成这个数码来保证在clear之后默认就是如此
         FREE,   // 空闲页 
         NOT_ATOM,// 仅大页可用，代表子表是否存在state,refcount存在不完全相同
@@ -237,6 +233,11 @@ class phymemspace_mgr{
         MMIO_SEG,
         LOW1MB_SEG
     };
+class phymemspace_mgr{
+    public:
+    //主要是原子页迭代器太复杂，暂时全模块加锁，后续可能的话进行优化
+    //技术债
+    
     struct blackhole_acclaim_flags_t{
         uint64_t a;
     };
@@ -456,8 +457,8 @@ class phymemspace_mgr{
             using Ktemplats::list_doubly<low1mb_seg_t>::begin;
             using Ktemplats::list_doubly<low1mb_seg_t>::end;
             using Ktemplats::list_doubly<low1mb_seg_t>::size;
-            int regist_seg(low1mb_seg_t seg);
-            int del_seg(uint32_t  base);
+            KURD_t regist_seg(low1mb_seg_t seg);
+            KURD_t del_seg(uint32_t  base);
             low1mb_seg_t get_seg_by_addr(uint32_t addr);
             bool is_seg_have_cover(phyaddr_t base,uint64_t size);
         };
@@ -465,8 +466,8 @@ class phymemspace_mgr{
         low1mb_mgr_t();
         friend class phymemspace_mgr;
         public:
-        static int regist_seg(low1mb_seg_t seg);
-        static int del_seg(uint32_t  base);
+        static KURD_t regist_seg(low1mb_seg_t seg);
+        static KURD_t del_seg(uint32_t  base);
         static low1mb_seg_t get_seg_by_addr(uint32_t addr);//落在区间里面的地址返回对应seg副本
         static bool is_seg_have_cover(phyaddr_t base,uint64_t size);
     };
@@ -538,6 +539,7 @@ class phymemspace_mgr{
      * 这个函数的工作是
      * 1.    phyaddr_t base;
     uint64_t seg_size_in_byte;
+
     uint64_t seg_support_4kb_page_count;//上面计算得出
     uint64_t seg_support_2mb_page_count;
     uint64_t seg_support_1gb_page_count;
@@ -546,10 +548,14 @@ class phymemspace_mgr{
      * 3.对于尾巴剩余的内存，用标准接口注册为reserved
      */
     
-    static int Init();
+    static KURD_t Init();
     #ifdef USER_MODE
     phymemspace_mgr();
     static int print_all_atom_table();//打印top_1gb_table下所有有效表项以及递归打印非原子表项
     static int print_allseg();//打印 static PHYSEG_LIST_ITEM*physeg_list;所有内容
     #endif
 };//todo:统计量相关子系统以及公开接口，强制统计量刷新的接口
+extern "C"{
+    void* __wrapped_pgs_valloc(KURD_t*kurd,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2);
+    KURD_t __wrapped_pgs_free(void*vbase,uint64_t _4kbpgscount);
+}

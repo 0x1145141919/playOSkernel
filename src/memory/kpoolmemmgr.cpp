@@ -64,7 +64,7 @@ static void handle_heap_obj_destroyed(const char* operation, void* ptr) {
     kio::bsp_kout << kio::now << "kpoolmemmgr_t::" << operation 
                   << ": heap object destroyed at address 0x" << (void*)ptr << kio::kendl;
     self_trace();
-    KernelPanicManager::panic("Heap object has been destroyed");
+    Panic::panic("Heap object has been destroyed");
 }
 
 // 辅助函数：获取当前处理器的堆复合结构
@@ -244,7 +244,7 @@ KURD_t kpoolmemmgr_t::self_heap_init()
     if (heap_complex) {
         return success; // 已经初始化
     }
-    alloc_flags_t meta_flags = default_flags;
+    alloc_flags_t meta_flags = default_panic_behaviors_flags;
     meta_flags.force_first_linekd_heap = true;
     heap_complex = new(meta_flags) GS_per_cpu_heap_complex_t;
     heap_complex->hcb_array[0]=new(meta_flags) HCB_v2(query_x2apicid());

@@ -149,7 +149,7 @@ static constexpr uint32_t HPET_SIGNATURE_UINT32 = make_acpi_signature(ACPI_HPET_
 
 class acpimgr_t {
 private:
-    SSDT_Table*vSSDT[40];
+    uint32_t vSSDT_OFFSET[40];
     // 对应的uint32_t类型常量
 
     uint16_t xsdt_entry_count;    

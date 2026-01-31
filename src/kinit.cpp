@@ -158,11 +158,6 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     x86_smp_processors_container::regist_core(0);
     kpoolmemmgr_t::self_heap_init();
     kio::bsp_kout<<kio::now<<"BSP online"<<kio::kendl;
-    Status=xapic::apic_driver::Init();
-    if(Status!=OS_SUCCESS){
-        kio::bsp_kout<<"APIC Init Failed"<<kio::kendl;
-        asm volatile("hlt");
-    }
     gAnalyzer=new APIC_table_analyzer((MADT_Table*)gAcpiVaddrSapceMgr.get_acpi_table("APIC"));
     x86_smp_processors_container::AP_Init_one_by_one();
     kpoolmemmgr_t::enable_new_hcb_alloc();

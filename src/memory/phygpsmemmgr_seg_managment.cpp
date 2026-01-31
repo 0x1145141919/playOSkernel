@@ -379,12 +379,12 @@ bool phymemspace_mgr::low1mb_mgr_t::interval_LinkList::is_seg_have_cover(phyaddr
 }
 
 // 静态成员函数的实现
-int phymemspace_mgr::low1mb_mgr_t::regist_seg(low1mb_seg_t seg)
+KURD_t phymemspace_mgr::low1mb_mgr_t::regist_seg(low1mb_seg_t seg)
 {
     return low1mb_seg_list.regist_seg(seg);
 }
 
-int phymemspace_mgr::low1mb_mgr_t::del_seg(uint32_t base)
+KURD_t phymemspace_mgr::low1mb_mgr_t::del_seg(uint32_t base)
 {
     return low1mb_seg_list.del_seg(base);
 }

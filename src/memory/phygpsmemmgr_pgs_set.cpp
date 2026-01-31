@@ -11,7 +11,7 @@ static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
 static constexpr uint64_t PAGES_4KB_PER_1GB = PAGES_4KB_PER_2MB * PAGES_2MB_PER_1GB; // 262144
 phymemspace_mgr::page_size2mb_t *phymemspace_mgr::alloc_2mb_subtable()
-{
+{//刻意不用pages_set,不然可能无限递归
     if(subtb_alloc_is_pool_way_flag)return new page_size2mb_t[PAGES_2MB_PER_1GB];
     else{
         uint32_t size=PAGES_4KB_PER_1GB * sizeof(page_size1gb_t);

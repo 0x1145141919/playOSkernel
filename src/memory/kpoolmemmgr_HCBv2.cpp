@@ -88,11 +88,11 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
     status=KspaceMapMgr::pgs_remapped_free((vaddr_t)this->bitmap);
     
     if(status!=OS_SUCCESS){
-        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
+        Panic::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
     }
     status=phymemspace_mgr::pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
     if(status!=OS_SUCCESS){
-        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
+        Panic::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
     }
     #endif
     #ifdef USER_MODE
@@ -353,11 +353,11 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
     return;
     #endif
     if(status!=OS_SUCCESS){
-        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
+        Panic::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
     }
     status=phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
     if(status!=OS_SUCCESS){
-        KernelPanicManager::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
+        Panic::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
     }
 }
 KURD_t kpoolmemmgr_t::HCB_v2::clear(void *ptr)

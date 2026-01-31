@@ -102,8 +102,7 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t EVENT_CODE_UNREGIST=0xff;
         namespace ENABLE_VMENTRY_RESULTS{
             namespace FAIL_REASONS{
-                constexpr uint16_t REASON_CODE_INVALID_PAGETABLE_ENTRY=0x1;
-                constexpr uint16_t REASON_CODE_BAD_VMENTRY_TRY_TO_MAP_LOW_MEM_WHO_NOT_gKernelSpace=0x2;
+                constexpr uint16_t REASON_CODE_VMENTRY_congruence_vlidation=0x1;
                 constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
                 constexpr uint16_t REASON_CODE_BAD_VMENTRY_CANT_SPLIT=0x4;
                 constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;
@@ -164,13 +163,98 @@ namespace MEMMODULE_LOCAIONS{
         }
     }
     constexpr uint8_t LOCATION_CODE_KSPACE_MAP_MGR_VMENTRY_RBTREE=17;
-    namespace KSPACE_MAP_MGR_EVENTS_CODE{
+    namespace KSPACE_MAPPER_EVENTS{
+        constexpr uint8_t EVENT_CODE_INIT=0x0;
+        namespace INIT_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_NOT_gKERNELSPACE=0x1;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_ENABLE_VMENTRY=0x1;
+        constexpr uint8_t EVENT_CODE_DISABLE_VMENTRY=0x2;
+        constexpr uint8_t EVENT_CODE_TRAN_TO_PHY_ENTRY=0x3;
+        namespace TRAN_TO_PHY_ENTRY_RESULTS_CODE{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_NOT_PRESENT_ENTRY=0x2;  
+                constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;   
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_UNREACHABLE_CODE=0x4;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_INVALIDATE_TLB=0x4;
+        namespace INVALIDATE_TLB_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t SHARED_INFO_PACKAGE_NOT_INITILAIZED=0x1; 
+            }
+        }
+        constexpr uint8_t EVENT_CODE_UNREGIST=0xff;
+        namespace ENABLE_VMENTRY_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_VMENTRY_congruence_vlidation=0x1;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
+                constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;
+                }
+            namespace FATAL_REASONS{
+                    constexpr uint16_t REASON_CODE_INVALIDE_PAGES_SIZE=0x1;//AddressSpace的设计的能力有限，
+                    
+                }            
+        }
 
+        namespace DISABLE_VMENTRY_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
+                }
+            namespace FATAL_REASONS{
+                    constexpr uint16_t REASON_CODE_INVALIDE_PAGES_SIZE=0x1;//AddressSpace的设计的能力有限，
+                    
+                } 
+        }
+        namespace INVALIDATE_TLB_RESULTS{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_BAD_VM_ENTRY=0x1; 
+            }
+            namespace FATAL_REASONS{ 
+                constexpr uint16_t REASON_CODE_INVALID_PAGE_SIZE=0x4;
+            }
+        }
+        namespace BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE{
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_NOT_gKERNELSPACE=1;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_PAGES_SET=0x5;
+        namespace PAGES_SET_RESULTS_CODE{ 
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_BAD_COUNT=0x1;
+                constexpr uint16_t REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE=0x2;
+                constexpr uint16_t REASON_CODE_BASE_NOT_ALIGNED=0x3;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_HUGE_PDPTE_WHEN_GET_SUB=0x1;
+                constexpr uint16_t REASON_CODE_HUGE_PDE_WHEN_GET_SUB=0x2;  
+            }
+        }
+        constexpr uint8_t EVENT_CODE_PAGES_CLEAR=0x6;
+        namespace PAGES_CLEAR_RESULTS_CODE{ 
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_BAD_COUNT=0x1;
+                constexpr uint16_t REASON_CODE_COUNT_AND_BASEINDEX_OUT_OF_RANGE=0x2;
+                constexpr uint16_t REASON_CODE_BASE_NOT_ALIGNED=0x3;
+            }
+            namespace FATAL_REASONS{
+                constexpr uint16_t REASON_CODE_HUGE_PDPTE_SUBTABLE_NOT_EXIST=0x1;
+                constexpr uint16_t REASON_CODE_HUGE_PDE_SUBTABLE_NOT_EXIST=0x2; 
+                constexpr uint16_t REASON_CODE_HUGE_PDPTE_UNTIMELY=0x3; 
+                constexpr uint16_t REASON_CODE_HUGE_PDPTE_NOT_EXIST=0x5;
+                constexpr uint16_t REASON_CODE_HUGE_PDE_UNTIMELY=0x4;
+                constexpr uint16_t REASON_CODE_HUGE_PDE_NOT_EXIST=0x6;
+
+            }
+        }
+        constexpr uint8_t EVENT_CODE_SEG_TO_INFO_PACKAGE=0x7;
     }
     constexpr uint8_t LOCATION_CODE_KSPACE_MAP_MGR_PGS_PAGE_TABLE=18;
-    namespace KSPACE_MAP_MGR_PGS_PAGE_TABLE_EVENTS_CODE{
-
-    }
 };
 /**
  * 此类的职责就是创建虚拟地址空间，管理虚拟地址空间，
@@ -243,6 +327,10 @@ static constexpr PageTableEntryUnion high_half_template={
     }
 };
 private://后面五级页表的时候考虑选择编译
+static KURD_t default_kurd();
+static KURD_t default_success();
+static KURD_t default_failure();
+static KURD_t default_fatal();
 friend AddressSpace;
 static PageTableEntryUnion kspaceUPpdpt[256*512];
 static phyaddr_t kspace_uppdpt_phyaddr;
@@ -303,57 +391,57 @@ static int VM_del(VM_DESC*entry);
  * 搜索虚拟地址为vaddr的VM_DESC项，
  * 建议采取二分查找
  */
-static int VM_search_by_vaddr(vaddr_t vaddr,VM_DESC&result);
+static KURD_t VM_search_by_vaddr(vaddr_t vaddr,VM_DESC&result);
 
-static int _4lv_pdpte_1GB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨父页表项指针边界
+static KURD_t _4lv_pdpte_1GB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨父页表项指针边界
 
-static int _4lv_pde_2MB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨页目录指针边界
+static KURD_t _4lv_pde_2MB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨页目录指针边界
 
-static int _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨页目录边界
+static KURD_t _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint16_t count,pgaccess access);//这里要求的是不能跨页目录边界
 
 static void invalidate_seg();
 
 /**
  * 
  */
-static int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC vmentry);
+static KURD_t seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC vmentry);
 
-static int enable_VMentry(VM_DESC& vmentry);
+static KURD_t enable_VMentry(VM_DESC& vmentry);
 //这个函数的职责是根据vmentry的内容撤销对应的页表项映射，只对对应的页表结构进行操作
 //失效对应tlb项目在函数外部完成
 //以及顺便使用共享信息包填充shared_inval_kspace_VMentry_info
-static int disable_VMentry(VM_DESC& vmentry);
+static KURD_t disable_VMentry(VM_DESC& vmentry);
 
-static int invalidate_tlb_entry();//这个函数的职责是失效对应的tlb条目,由pgs_remapped_free调用，
+static KURD_t invalidate_tlb_entry();//这个函数的职责是失效对应的tlb条目,由pgs_remapped_free调用，
 //disable_VMentry会把共享信息处理好，直接使用共享信息包所以不需要任何参数
 
 /**
  * 删除对应1个pde下对应的pte项，如果检测到全部pte项被删除则回收对应的pde项
  */
-static int _4lv_pte_4KB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录边界
+static KURD_t _4lv_pte_4KB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录边界
 
-static int _4lv_pde_2MB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录指针边界
+static KURD_t _4lv_pde_2MB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨页目录指针边界
 
-static int _4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨父页表项指针边界
+static KURD_t _4lv_pdpte_1GB_entries_clear(vaddr_t vaddr_base,uint16_t count);//这里要求的是不能跨父页表项指针边界
 static void enable_DEFAULT_PAT_CONFIG();
-static int v_to_phyaddrtraslation_entry(vaddr_t vaddr,PageTableEntryUnion& result,uint32_t&page_size);
-    public:
+static KURD_t v_to_phyaddrtraslation_entry(vaddr_t vaddr,PageTableEntryUnion& result,uint32_t&page_size);
+public:
 static constexpr pgaccess PG_RW={1,1,1,0,1,WB};
 static constexpr pgaccess PG_RWX ={1,1,1,1,1,WB};
 static constexpr pgaccess PG_R ={1,0,1,0,1,WB};
-static int pgs_remapped_free(vaddr_t addr);
+static KURD_t pgs_remapped_free(vaddr_t addr);
 /**
  * 暴露在外面的接口，其中addr，size必须4k对齐
  */
-static void*pgs_remapp(
+static void*pgs_remapp(KURD_t&kurd,
     phyaddr_t addr,
     uint64_t size,
     pgaccess access,
     vaddr_t vbase=0,
     bool is_protective=false
 );//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
-static int Init();
-static int v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
+static KURD_t Init();
+static KURD_t v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
 
 };
 extern shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info;

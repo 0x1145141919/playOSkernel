@@ -6,7 +6,6 @@
 #include "linker_symbols.h"
 #include "util/OS_utils.h"
 #include "util/kptrace.h"
-static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 // 定义KspaceMapMgr的静态成员变量
 KspaceMapMgr::kspace_vm_table_t* KspaceMapMgr::kspace_vm_table = nullptr;
 spinlock_cpp_t KspaceMapMgr::GMlock = spinlock_cpp_t();
@@ -27,7 +26,7 @@ cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy)
     };
     return result;
 }
-int KspaceMapMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
+KURD_t KspaceMapMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
     // 假定调用者持有 GMlock，并且前 valid_vmentry_count 项是紧凑排列的已用条目
     VM_DESC tmp_desc={
         0
@@ -56,13 +55,25 @@ int KspaceMapMgr::VM_del(VM_DESC*entry){
     return status;
 }
 
-int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
+KURD_t KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
 {
-    // basic alignment checks (4KB)
-    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE)
-        return OS_INVALID_PARAMETER;
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
+    fail.event_code = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
+    fatal.event_code = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
 
-    if (vmentry.start >= vmentry.end) return OS_INVALID_PARAMETER;
+    // basic alignment checks (4KB)
+    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE) {
+        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
+
+    if (vmentry.start >= vmentry.end) {
+        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
 
     auto vmentry_congruence_vlidation = [vmentry]()->bool {
         enum PHY_SEG_MAX_PAGE:uint8_t{
@@ -93,22 +104,23 @@ int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
             case PHY_SEG_MAX_PAGE_1GB:return vmentry.start%_1GB_SIZE==vmentry.phys_start%_1GB_SIZE;
         }
     };
-    if (!vmentry_congruence_vlidation())
-        return OS_INVALID_PARAMETER;
+    if (!vmentry_congruence_vlidation()) {
+        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_VMENTRY_congruence_vlidation;
+        return fail;
+    }
 
     // Only implement 4-level paging path here
     if (!pglv_4_or_5) {
         // 5-level not implemented in this function
-        return OS_NOT_SUPPORTED;
+        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_NOT_SUPPORT_LV5_PAGING;
+        return fail;
     }
 
     // 1) Split segment into page-sized runs
     seg_to_pages_info_pakage_t pkg;
-    int rc = seg_to_pages_info_get(pkg, vmentry);
-    if (rc != OS_SUCCESS) return rc;
-
+     seg_to_pages_info_get(pkg, vmentry);
     // Helper lambda: given page size (p), call the appropriate setter in chunks
-
+    KURD_t rc=KURD_t();
     // 2) Iterate over pkg.entryies and dispatch
     for (int i = 0; i < 5; ++i) {
         auto &e = pkg.entryies[i];
@@ -116,7 +128,10 @@ int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
 
         uint64_t psize = e.page_size_in_byte;
         // sanity check: vbase and base should be aligned to page size
-        if ((e.vbase % psize) != 0 || (e.phybase % psize) != 0) return OS_INVALID_PARAMETER;
+        if ((e.vbase % psize) != 0 || (e.phybase % psize) != 0) {
+            fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+            return fail;
+        }
 
         switch(e.page_size_in_byte) {
             case _1GB_SIZE: {
@@ -135,9 +150,10 @@ int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
                 break;
             }
             default:
-                return OS_INVALID_PARAMETER; // unknown page size
+                fatal.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALIDE_PAGES_SIZE;
+                return fatal; // unknown page size
         }
-        if (rc != OS_SUCCESS) {
+        if (rc.result != result_code::SUCCESS) {
             return rc;
         }
     }
@@ -145,9 +161,9 @@ int KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
     // Optionally mark vmentry as enabled (if VM_DESC has such a field)
     // vmentry.enabled = true;  // uncomment if VM_DESC supports it
 
-    return OS_SUCCESS;
+    return success;
 }
-void *KspaceMapMgr::pgs_remapp(
+void *KspaceMapMgr::pgs_remapp(KURD_t&kurd,
     phyaddr_t addr, 
     uint64_t size, 
     pgaccess access, 
@@ -207,16 +223,14 @@ void *KspaceMapMgr::pgs_remapp(
         vmentry_copy.start+=_4KB_SIZE;
         vmentry_copy.end-=_4KB_SIZE;
     }
-    status=enable_VMentry(vmentry_copy);    
+    kurd=enable_VMentry(vmentry_copy);    
     GMlock.unlock();
     if(status==OS_SUCCESS)return(void*)vmentry_copy.start; 
     return nullptr;
 }
 
-int KspaceMapMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC vmentry)
+KURD_t KspaceMapMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC vmentry)
 {
-    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE)
-        return OS_INVALID_PARAMETER;
     constexpr uint64_t _4KB_PG_SIZE= _4KB_SIZE;
     constexpr uint64_t _2MB_PG_SIZE = _2MB_SIZE;
     constexpr uint64_t _1GB_PG_SIZE = _1GB_SIZE;
@@ -306,22 +320,37 @@ int KspaceMapMgr::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_D
         result.entryies[4].num_of_pages = count4kbpgs;
         result.entryies[4].phybase = vbase - offset;
     }
-    
-    return OS_SUCCESS;
+    KURD_t success=default_success();
+    success.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_SEG_TO_INFO_PACKAGE;
+    return success;
 }
-int KspaceMapMgr::disable_VMentry(VM_DESC &vmentry)
+KURD_t KspaceMapMgr::disable_VMentry(VM_DESC &vmentry)
 {
-        // basic alignment checks (4KB)
-    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE)
-        return OS_INVALID_PARAMETER;
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_DISABLE_VMENTRY;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_DISABLE_VMENTRY;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_DISABLE_VMENTRY;
 
-    if (vmentry.start >= vmentry.end) return OS_INVALID_PARAMETER;
+    // basic alignment checks (4KB)
+    if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
+
+    if (vmentry.start >= vmentry.end) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
 
     // require that vstart % 1GB == phys_start % 1GB (与 seg_to_pages_info_get 的前置条件一致)
-    if ((vmentry.start % _1GB_SIZE) != (vmentry.phys_start % _1GB_SIZE))
-        return OS_INVALID_PARAMETER;
-    int status=seg_to_pages_info_get(shared_inval_kspace_VMentry_info.info_package, vmentry);
-    if (status != OS_SUCCESS) return status;
+    if ((vmentry.start % _1GB_SIZE) != (vmentry.phys_start % _1GB_SIZE)) {
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
+    
+    KURD_t status = seg_to_pages_info_get(shared_inval_kspace_VMentry_info.info_package, vmentry);
     for(uint8_t i = 0; i < 5; i++)
     {
         seg_to_pages_info_pakage_t::pages_info_t& entry = 
@@ -334,53 +363,53 @@ int KspaceMapMgr::disable_VMentry(VM_DESC &vmentry)
             case _4KB_SIZE:
                 {
                     status = _4lv_pte_4KB_entries_clear(entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
-                    if(status != OS_SUCCESS) return status;
+                    if(status.result != result_code::SUCCESS) return status;
                     break;
                 }
             case _2MB_SIZE:
             {
                 status = _4lv_pde_2MB_entries_clear(entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
-                if(status != OS_SUCCESS) return status;
+                if(status.result != result_code::SUCCESS) return status;
                 break;
             }
             case _1GB_SIZE:
             {
                 status = _4lv_pdpte_1GB_entries_clear(entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
-                if(status != OS_SUCCESS) return status;
+                if(status.result != result_code::SUCCESS) return status;
                 break;
             }
             default:
-                return OS_INVALID_PARAMETER;
+                fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::DISABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALIDE_PAGES_SIZE;
+                return fatal;
         
         }
     }
-    return OS_SUCCESS;
+    return success;
 }
-int KspaceMapMgr::v_to_phyaddrtraslation(vaddr_t vaddr, phyaddr_t &result)
+KURD_t KspaceMapMgr::v_to_phyaddrtraslation(vaddr_t vaddr, phyaddr_t &result)
 {
     PageTableEntryUnion badentry={0};
     PageTableEntryUnion& result_entry=badentry;
     uint32_t page_size;
-    int status = v_to_phyaddrtraslation_entry(vaddr, result_entry, page_size);
+    KURD_t status = v_to_phyaddrtraslation_entry(vaddr, result_entry, page_size);
+    if(status.result != result_code::SUCCESS)return status;
     switch (page_size)
     {
         case _4KB_SIZE:
             {
                 result=result_entry.pte.page_addr<<12;
-                return OS_SUCCESS;
+                return default_success();
             }
         case _2MB_SIZE:
             {
                 result=result_entry.pde2MB._2mb_Addr<<21;
-                return OS_SUCCESS;
+                return default_success();
             }
         case _1GB_SIZE:
             {
                 result=result_entry.pdpte1GB._1GB_Addr<<30;
-                return OS_SUCCESS;
+                return default_success();
             }
-        default:
-            return OS_INVALID_PARAMETER;
     }
 }
 /**

@@ -294,9 +294,9 @@ void phymemspace_mgr::in_module_panic(KURD_t kurd)
     kio::bsp_kout<<kurd;
     
 }
-int phymemspace_mgr::Init()
+KURD_t phymemspace_mgr::Init()
 {
-    int status=0;    
+    KURD_t status=KURD_t();    
     //todo 注册函数
     physeg_list=new PHYSEG_LIST_ITEM();
     top_1gb_table=new Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,page_size1gb_t,__builtin_ctz(MAX_PHYADDR_1GB_PGS_COUNT)-9,9>;
@@ -330,12 +330,12 @@ int phymemspace_mgr::Init()
         };
         status=blackhole_acclaim(segbase,seg.NumberOfPages,seg_state,flags);//i==8时候出现了错误,问题在于有时候会跨越2mb段会跨越两个1gb表项但是没能正确处理
         
-        if(status!=OS_SUCCESS)return status;
+        if(status.result != result_code::SUCCESS)return status;
         if(will_soon_regist_soon){
             if(seg_state==DRAM_SEG){
                 pages_state_set_flags_t low1mb_pgs_set = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
                 status=pages_state_set(segbase,seg.NumberOfPages,KERNEL_PERSIST,low1mb_pgs_set);
-                if(status!=OS_SUCCESS)return status;
+                if(status.result != result_code::SUCCESS)return status;
                 kio::bsp_kout<<kio::now<<"kernel soon regist at"<<(void*)segbase<<kio::kendl;
             }
         }
@@ -350,34 +350,34 @@ int phymemspace_mgr::Init()
     pages_state_set_flags_t Kimage_regist_flags = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
     
     
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     low1mb_mgr_t::low1mb_seg_t trampoile={
         .base=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&init_text_begin)),
         .size=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&init_stack_end) - reinterpret_cast<uintptr_t>(&init_text_begin)),
         .type=low1mb_mgr_t::LOW1MB_TRAMPOILE_SEG
     };
     status=low1mb_mgr->regist_seg(trampoile);
-    if(status != OS_SUCCESS)return status;
+    if(status.result != result_code::SUCCESS) return status;
     status=pages_state_set((phyaddr_t)&KImgphybase,(phyaddr_t)(text_end-text_begin)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     
     status=pages_state_set((phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     
     status=pages_state_set((phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     
     status=pages_state_set((phyaddr_t)&_stack_lma,(&_stack_top-&_stack_bottom)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     
     status=pages_state_set((phyaddr_t)&_heap_bitmap_lma,(&__heap_bitmap_end-&__heap_bitmap_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     
     status=pages_state_set((phyaddr_t)&_heap_lma,(&__heap_end-&__heap_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
     
     status=pages_state_set((phyaddr_t)&_klog_lma,(&__klog_end-&__klog_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status != OS_SUCCESS) return status;
+    if(status.result != result_code::SUCCESS) return status;
 
     status=pages_state_set((phyaddr_t)&_kspace_uppdpt_lma,(&__kspace_uppdpt_end-&__kspace_uppdpt_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
     return status;
@@ -565,6 +565,10 @@ int phymemspace_mgr::print_allseg()
     return 0;
 }
 #endif
+phymemspace_mgr::free_segs_t *phymemspace_mgr::free_segs_get()
+{
+    return nullptr;
+}
 // ------------------------
 // 仅用于 pages_recycle 的回收前校验
 // ------------------------
@@ -735,7 +739,7 @@ KURD_t phymemspace_mgr::pages_recycle_verify(
                 }
             }
 
-            if (p1->flags.state != orig_state) {
+            if (p1-fan hui zhi>flags.state != orig_state) {
                 fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_PAGE_STATE_SHIFT;
                 return fail;
             }

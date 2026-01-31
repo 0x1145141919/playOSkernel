@@ -33,9 +33,14 @@ div_by_zero_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, div_by_zero_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, div_by_zero_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -83,9 +88,14 @@ breakpoint_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, breakpoint_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, breakpoint_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -134,9 +144,14 @@ nmi_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, nmi_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, nmi_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -184,9 +199,14 @@ overflow_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, overflow_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, overflow_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -236,9 +256,14 @@ invalid_opcode_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, invalid_opcode_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, invalid_opcode_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -299,7 +324,14 @@ general_protection_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call general_protection_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, general_protection_cpp_enter
+    call rax
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16
@@ -364,7 +396,14 @@ double_fault_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call double_fault_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, double_fault_cpp_enter
+    call rax
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16
@@ -430,7 +469,14 @@ page_fault_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call page_fault_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, page_fault_cpp_enter
+    call rax
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16
@@ -481,9 +527,14 @@ machine_check_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, machine_check_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, machine_check_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -545,7 +596,14 @@ invalid_tss_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call invalid_tss_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, invalid_tss_cpp_enter
+    call rax
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16
@@ -595,9 +653,14 @@ simd_floating_point_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, simd_floating_point_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, simd_floating_point_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -616,7 +679,6 @@ simd_floating_point_bare_enter:
     pop rbp
     add rsp, 8
     iretq                       ; 中断返回
-
 
 
 ; 虚拟化异常处理入口（带错误码）
@@ -660,7 +722,14 @@ virtualization_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call virtualization_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, virtualization_cpp_enter
+    call rax
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16
@@ -710,9 +779,14 @@ timer_bare_enter:
     add rax, GP_GPR_BYTES
     mov rbx, INTERRUPT_CONTEXT_SPECIFY_NO_MAGIC ; 给interrupt_context_specify_magic填写字段，表明无错误码
     mov qword [rax], rbx
-    mov rax, timer_cpp_enter
     mov rdi, rsp
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, timer_cpp_enter
     call rax
+    pop rsp ;栈自动回落
     add rsp, 8
     pop rax
     pop rbx
@@ -766,7 +840,15 @@ ipi_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call ipi_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, ipi_cpp_enter
+    call rax
+
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16
@@ -788,6 +870,7 @@ ipi_bare_enter:
     pop rbp
     add rsp, 8
     iretq
+
     ; IPI中断处理入口（带错误码）
 global asm_panic_bare_enter
 extern asm_panic_cpp_enter
@@ -812,7 +895,7 @@ asm_panic_bare_enter:
 
 
     ; magic
-    mov rax, 0x21          ;向量号|（是否有错误码<<32）
+    mov rax, 0x22          ;向量号|（是否有错误码<<32）
     push rax
 
     mov rax, rsp
@@ -821,7 +904,15 @@ asm_panic_bare_enter:
     mov qword [rax], rbx
     ; rdi = struct x64_context*
     mov rdi, rsp
-    call asm_panic_cpp_enter
+    mov rax, rsp            ; 保存原 rsp
+    and rsp, -16            ; 对齐到 16
+    sub rsp, 8              ; 为 call 的返回地址预留
+    push rax                ; 保存原 rsp（现在 rsp % 16 == 0）
+    mov rax, asm_panic_cpp_enter
+    call rax
+
+    pop rsp ;栈自动回落
+    add rsp, 8
 
     ; 回收 magic + interrupt_context_specify_magic
     add rsp, 16

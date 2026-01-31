@@ -1,25 +1,24 @@
 #include "panic.h"
 #include "core_hardwares/VideoDriver.h"
-#include <efi.h>
-#include <efilib.h>
 #include "firmware/UefiRunTimeServices.h"
 #include "util/kout.h"
 #include "util/kptrace.h"
 #include "util/OS_utils.h"
 #include "msr_offsets_definitions.h"
+#include "core_hardwares/lapic.h"
 #include "linker_symbols.h"
-using namespace kio;
-
+#include "Interrupt_system/loacl_processor.h"
+#include "util/cpuid_intel.h"
 #ifdef USER_MODE
 #include <unistd.h>
 #endif 
 
 panic_last_will will;
-bool KernelPanicManager::is_latest_panic_valid;
+bool Panic::is_latest_panic_valid;
 // 注意：global_gST已经在UefiRunTimeServices.cpp中定义，此处不再重复定义
 // EFI_SYSTEM_TABLE* global_gST = nullptr;
 
-void KernelPanicManager::write_will()
+void Panic::write_will()
 {
     uint64_t start_addr = (uint64_t)&__heap_bitmap_start;
     uint64_t end_addr = (uint64_t)&__heap_bitmap_end;
@@ -50,11 +49,11 @@ void KernelPanicManager::write_will()
 /**
  * 私有构造函数
  */
-KernelPanicManager::KernelPanicManager(){
+Panic::Panic(){
     // shutdownDelay已经作为静态成员初始化为5
 }
 
-KernelPanicManager::~KernelPanicManager()
+Panic::~Panic()
 {
 }
 
@@ -62,7 +61,7 @@ KernelPanicManager::~KernelPanicManager()
 
 
 
-panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Interrupt_saved_context_no_errcode *regs)
+panic_context::x64_context Panic::convert_to_panic_context(x64_Interrupt_saved_context_no_errcode *regs)
 {
     panic_context::x64_context context{};
     
@@ -98,8 +97,6 @@ panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Inte
     asm volatile("movw %%fs, %0" : "=r"(fs_val));
     asm volatile("movw %%gs, %0" : "=r"(gs_val));
     
-    asm volatile("pushf; pop %0" : "=rm"(rflags_full));
-    
     asm volatile("mov %%cr0, %0" : "=r"(cr0_val));
     asm volatile("mov %%cr2, %0" : "=r"(cr2_val));
     asm volatile("mov %%cr3, %0" : "=r"(cr3_val));
@@ -121,7 +118,6 @@ panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Inte
     context.es = es_val;
     context.fs = fs_val;
     context.gs = gs_val;
-    context.rflags = rflags_full;
     context.cr0 = cr0_val;
     context.cr2 = cr2_val;
     context.cr3 = cr3_val;
@@ -133,7 +129,7 @@ panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Inte
     return context;
 }
 
-panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Interrupt_saved_context *regs, uint8_t vec_num)
+panic_context::x64_context Panic::convert_to_panic_context(x64_Interrupt_saved_context *regs, uint8_t vec_num)
 {
     panic_context::x64_context context{};
     
@@ -161,16 +157,13 @@ panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Inte
     
     // 使用内联汇编获取其他寄存器值
     uint16_t ds_val, es_val, fs_val, gs_val;
-    uint64_t rflags_full, cr0_val, cr2_val, cr3_val, cr4_val, efer_val;
+    uint64_t cr0_val, cr2_val, cr3_val, cr4_val, efer_val;
     uint64_t fs_base_val, gs_base_val;
     
     asm volatile("movw %%ds, %0" : "=r"(ds_val));
     asm volatile("movw %%es, %0" : "=r"(es_val));
     asm volatile("movw %%fs, %0" : "=r"(fs_val));
-    asm volatile("movw %%gs, %0" : "=r"(gs_val));
-    
-    asm volatile("pushf; pop %0" : "=rm"(rflags_full));
-    
+    asm volatile("movw %%gs, %0" : "=r"(gs_val));    
     asm volatile("mov %%cr0, %0" : "=r"(cr0_val));
     asm volatile("mov %%cr2, %0" : "=r"(cr2_val));
     asm volatile("mov %%cr3, %0" : "=r"(cr3_val));
@@ -192,7 +185,6 @@ panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Inte
     context.es = es_val;
     context.fs = fs_val;
     context.gs = gs_val;
-    context.rflags = rflags_full;
     context.cr0 = cr0_val;
     context.cr2 = cr2_val;
     context.cr3 = cr3_val;
@@ -207,10 +199,63 @@ panic_context::x64_context KernelPanicManager::convert_to_panic_context(x64_Inte
     context.specific.is_hadware_interrupt = 1;
     return context;
 }
+//首先是其它CPU冻结
+//其次是无条件切换CPU资源，使用BSP的EARLY_BOOT那一套
+//第三步是will_write_will控制下写遗言
+//第四步是allow_broadcast控制下对于非空message，context进行打印，kurd甩给kout分析
+//最后停机
+extern "C" void resources_shift();
+#ifdef KERNEL_MODE
+void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context::x64_context *context,panic_info_inshort*panic_info, KURD_t kurd)
+{
+    if(GlobalKernelStatus>=kernel_state::SCHEDUL_READY){
+        x2apic::x2apic_driver::broadcast_exself_fixed_ipi(other_processors_froze_handler);
+    }
+    will.kernel_final_state=GlobalKernelStatus;
+    GlobalKernelStatus=kernel_state::PANIC;
+    resources_shift();
+    will.magic=panic_will_magic;
+    if(panic_info)will.latest_panic_info=*panic_info;
+    will.kurd=kurd;
+    will.magic=panic_will_magic;
+    will.version=panic_will_version;
+    will.size=sizeof(panic_last_will);
+    will.panic_seq++;
+    will.Whistleblower.Whistleblower_id=query_x2apicid();
+    will.Whistleblower.arch_specify=x86_64_arch_spcify;
+    will.Whistleblower.end_timestamp=rdtsc();
+    if(behaviors.will_write_will)write_will();
+    if(behaviors.allow_broadcast){
+        
+        kio::bsp_kout.enable_gop_output();
+        kio::bsp_kout.enable_polling_uart_output();
+        
+    }
+    kio::bsp_kout<<"PANIC: "<<kio::now<<kio::kendl;
+    kio::bsp_kout<<kurd<<kio::kendl;
+    if(message)kio::bsp_kout<<message<<kio::kendl;
+    if(context)dumpregisters(context);
+    asm volatile("cli");
+    asm volatile("hlt");
+}
+#endif
+#ifdef USER_MODE
+void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context::x64_context *context,panic_info_inshort*panic_info, KURD_t kurd)
+{
+    kio::bsp_kout<<kio::now<<"USERMODE EMULATION PANIC: "<<kio::kendl;
+    kio::bsp_kout<<kurd<<kio::kendl;
+    if(message)kio::bsp_kout<<message<<kio::kendl;
+}
+#endif
+void Panic::other_processors_froze_handler()
+{
+    asm volatile("cli");
+    asm volatile("hlt");
+}
 /**
  * 转储 panic_context 中的 CPU 寄存器信息
  */
-void KernelPanicManager::dumpregisters(panic_context::x64_context* regs) {
+void Panic::dumpregisters(panic_context::x64_context* regs) {
     kio::bsp_kout << "================= CPU REGISTERS DUMP =================" << kio::kendl;
     kio::bsp_kout << "General Purpose Registers:" << kio::kendl;
     kio::bsp_kout.shift_hex();

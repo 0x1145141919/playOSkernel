@@ -217,6 +217,10 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
     }
     return success;
 }
+bool FreePagesAllocator::free_pages_in_seg_control_block::is_addr_belong_to_this_BCB(phyaddr_t addr)
+{
+    return (this->base<=addr)&&(addr<this->base+(1<<MAX_SUPPORT_ORDER));
+}
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_buddy_way(phyaddr_t base, uint64_t size)
 {
     uint8_t order=size_to_order(size);
@@ -359,4 +363,21 @@ void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_order_int
             kio::bsp_kout << "NOT_EXIST" << kio::kendl;
         }
     }
+}
+KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush()
+{
+    KURD_t success=default_success();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT;
+    fatal.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT;
+    for(uint8_t i=0;i<=MAX_SUPPORT_ORDER;i++){
+        uint64_t actual_free_count=0;
+        for(uint64_t j=0;j<(1ULL<<(MAX_SUPPORT_ORDER-i));j++){
+            if(order_freepage_existency_bitmaps->bit_get(order_bases[i]+j))
+                actual_free_count++;
+        }
+        if(actual_free_count!=statistics.free_count[i])fatal.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FLUSH_FREE_COUNT_RESULTS_CODE::FATAL_REASONS_CODE::COSISTENCY_VIOLATION;
+    }
+    if(fatal.reason)return fatal;
+    return success;
 }

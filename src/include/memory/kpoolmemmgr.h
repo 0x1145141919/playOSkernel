@@ -245,7 +245,11 @@ public:
     kpoolmemmgr_t();
     ~kpoolmemmgr_t();
 };
-
+extern "C"{
+    void* __wrapped_heap_alloc(uint64_t size,alloc_flags_t flags=default_flags);
+    void __wrapped_heap_free(void*addr);
+    void* __wrapped_heap_realloc(void*addr,uint64_t size,alloc_flags_t flags);
+}
 constexpr int INDEX_NOT_EXIST = -100;
 // 全局 new/delete 操作符重载声明
 //new重载里面new失败就要第一时间panic，不然后续的垃圾地址会产生页错误
