@@ -1,6 +1,20 @@
 #pragma once
 #include <stdint.h>
 #include "memory/Memory.h"
+#include "os_error_definitions.h"
+namespace COREHARDWARES_LOCATIONS{
+    constexpr uint8_t LOCATION_CODE_HPET=0x01;
+    namespace HPET_READONLY_DRIVERS_EVENTS {
+        constexpr uint8_t INIT=0;
+        namespace INIT_RESULTS {
+            namespace FAIL_REASONS{
+                constexpr uint16_t INVALID_ACPI_ADDR = 0x01;
+                constexpr uint16_t ACPI_ADDR_NOT_ALIGN = 0x02;
+                constexpr uint16_t ALLREADE_INIT = 0x03;
+            }
+        }
+    }
+};
 namespace HPET { 
     namespace ACPItb {
       struct ACPI_Table_Header {
@@ -59,9 +73,11 @@ class HPET_driver_only_read_time_stamp {
     uint32_t hpet_timer_period_fs;
     uint8_t comparator_count;
     HPET::ACPItb::HPET_Table* table;
+    KURD_t default_kurd();
+    KURD_t default_success();
     public:
     HPET_driver_only_read_time_stamp(HPET::ACPItb::HPET_Table* hpet_table);
-    int second_stage_init();
+    KURD_t second_stage_init();
     ~HPET_driver_only_read_time_stamp();
     uint64_t get_time_stamp_in_ns();
     uint64_t get_time_stamp_in_mius();

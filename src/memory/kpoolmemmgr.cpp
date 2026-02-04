@@ -64,13 +64,20 @@ static void handle_heap_obj_destroyed(const char* operation, void* ptr) {
     kio::bsp_kout << kio::now << "kpoolmemmgr_t::" << operation 
                   << ": heap object destroyed at address 0x" << (void*)ptr << kio::kendl;
     self_trace();
-    Panic::panic("Heap object has been destroyed");
+    panic_info_inshort inshort={
+        .is_bug=false,
+        .is_policy=true,
+        .is_hw_fault=false,
+        .is_mem_corruption=true,
+        .is_escalated=false
+    };
+    Panic::panic(default_panic_behaviors_flags,"Heap object has been destroyed",nullptr,&inshort,KURD_t());
 }
 
 // 辅助函数：获取当前处理器的堆复合结构
 kpoolmemmgr_t::GS_per_cpu_heap_complex_t* kpoolmemmgr_t::get_current_heap_complex() {
     return reinterpret_cast<kpoolmemmgr_t::GS_per_cpu_heap_complex_t*>(
-        read_gs_u64(PER_CPU_HEAP_COMPLEX_GS_INDEX));
+        read_gs_u64(HEAP_COMPLEX_GS_INDEX));
 }
 
 void* kpoolmemmgr_t::kalloc(uint64_t size,KURD_t&no_succes_report,alloc_flags_t flags)
@@ -244,7 +251,7 @@ KURD_t kpoolmemmgr_t::self_heap_init()
     if (heap_complex) {
         return success; // 已经初始化
     }
-    alloc_flags_t meta_flags = default_panic_behaviors_flags;
+    alloc_flags_t meta_flags = default_flags;
     meta_flags.force_first_linekd_heap = true;
     heap_complex = new(meta_flags) GS_per_cpu_heap_complex_t;
     heap_complex->hcb_array[0]=new(meta_flags) HCB_v2(query_x2apicid());
@@ -254,7 +261,7 @@ KURD_t kpoolmemmgr_t::self_heap_init()
         return hcb_init_result_contain;
     }
     setmem(heap_complex, sizeof(GS_per_cpu_heap_complex_t), 0);
-    gs_u64_write(PER_CPU_HEAP_COMPLEX_GS_INDEX, reinterpret_cast<uint64_t>(heap_complex));
+    gs_u64_write(HEAP_COMPLEX_GS_INDEX, reinterpret_cast<uint64_t>(heap_complex));
     return success;
 }
 

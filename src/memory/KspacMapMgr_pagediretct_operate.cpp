@@ -10,6 +10,7 @@
 #include "panic.h"
 #include "msr_offsets_definitions.h"
 #include "util/kptrace.h"
+#include "util/kout.h"
 #ifdef USER_MODE
 #include <elf.h>
 #include <stdio.h>
@@ -48,7 +49,9 @@ KURD_t KspaceMapMgr::default_fatal()
 KURD_t KspaceMapMgr::Init()
 {
     KURD_t success=default_success();
+    KURD_t fail=default_failure();
     success.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT;
+    fail.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT;
     #ifdef KERNEL_MODE
     kspace_uppdpt_phyaddr=(phyaddr_t)&_kspace_uppdpt_lma;
     #endif
@@ -89,22 +92,24 @@ KURD_t KspaceMapMgr::Init()
     const char* elf_path = "/home/pangsong/PS_git/OS_pj_uefi/kernel/kernel.elf";
     int fd = open(elf_path, O_RDONLY);
     if (fd < 0) {
-        // 如果找不到kernel.elf，使用默认映射
-        return OS_BAD_FUNCTION;
+        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
+        return fail;
     }
 
     // 获取文件大小
     struct stat sb;
     if (fstat(fd, &sb) < 0) {
         close(fd);
-        return OS_BAD_FUNCTION;
+        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
+        return fail;
     }
     
     // 映射文件到内存
     void* elf_mapped = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (elf_mapped == MAP_FAILED) {
         close(fd);
-        return OS_BAD_FUNCTION;
+        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
+        return fail;
     }
 
     // ELF头部指针
@@ -117,7 +122,8 @@ KURD_t KspaceMapMgr::Init()
         ehdr->e_ident[EI_MAG3] != ELFMAG3) {
         munmap(elf_mapped, sb.st_size);
         close(fd);
-        return OS_BAD_FUNCTION;
+        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC;
+        return fail;
     }
 
     // 获取程序头表
@@ -137,13 +143,14 @@ KURD_t KspaceMapMgr::Init()
 
             // 使用pgs_remapp映射段
             result = (vaddr_t)pgs_remapp(
+                status,
                 phdr[i].p_paddr,     // 虚拟地址
                 phdr[i].p_memsz,     // 内存大小
                 access,              // 访问权限
                 phdr[i].p_vaddr      // 映射到相同虚拟地址
             );
             
-            if (result == 0) {
+            if (error_kurd(status)) {
                 munmap(elf_mapped, sb.st_size);
                 close(fd);
                 goto regist_segment_fault;
@@ -284,13 +291,28 @@ void KspaceMapMgr::invalidate_seg()
     asm volatile(
         "cli"
     );
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    KURD_t fatal = default_fatal();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB;
     constexpr uint32_t _4KB_SIZE = 0x1000;
     constexpr uint32_t _2MB_SIZE = 1ULL << 21;
     constexpr uint32_t _1GB_SIZE = 1ULL << 30;
-    
+    panic_info_inshort in_short{
+        .is_bug =true,
+        .is_policy =true,
+        .is_hw_fault=false,
+        .is_mem_corruption=false,
+        .is_escalated=false,
+    };
     if (shared_inval_kspace_VMentry_info.is_package_valid == false) {
-        kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid\n");
-        Panic::panic("invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid");
+        kio::bsp_kout<<"[KERNEL] invalid_kspace_VMentry_handler: stared_inval_kspace_VMentry_info is invalid"<<kio::kendl;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INVALIDATE_TLB_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VM_ENTRY;
+        Panic::panic(default_panic_behaviors_flags,
+            "invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid",
+        nullptr,&in_short,fail);
         return;
     }
     
@@ -337,10 +359,11 @@ void KspaceMapMgr::invalidate_seg()
                 
             default:
                 kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info\n");
-                asm volatile(
-        "sti"
-        );
-                Panic::panic("invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info");
+                asm volatile("sti");
+                fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INVALIDATE_TLB_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
+                Panic::panic(default_panic_behaviors_flags,
+            "invalid_k space_VMentry_handler: stared_inval_kspace_VMentry_info is invalid",
+        nullptr,&in_short,fatal);
                 return;  // 添加 return 避免继续执行
         }
     }
@@ -491,7 +514,7 @@ KURD_t KspaceMapMgr::_4lv_pdpte_1GB_entries_set(phyaddr_t phybase,
     for (uint16_t i = 0; i < count; i++) {
         PageTableEntryUnion& entry = kspaceUPpdpt[pdpt_index + i];
         if (entry.raw & PageTableEntry::P_MASK) [[unlikely]] {
-            fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_INVALID_PAGETABLE_ENTRY;
+            fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::PAGES_SET_RESULTS_CODE::FATAL_REASONS::REASON_CODE_HUGE_PDPTE_WHEN_GET_SUB;
             return fail;
         }
         PDPTEEntry1GB& huge = entry.pdpte1GB;

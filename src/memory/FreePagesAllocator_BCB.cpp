@@ -1,6 +1,7 @@
 #include "memory/FreePagesAllocator.h"
 #include "util/kout.h"
 #include "util/OS_utils.h"
+#include "panic.h"
 FreePagesAllocator::free_pages_in_seg_control_block*FreePagesAllocator::first_BCB;
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_success()
 {
@@ -73,18 +74,29 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
         result=error;
         return 0;
     }
-
+    KURD_t kurd;
+    kurd=free_pages_flush();
+    if(!success_all_kurd(kurd)){
+            kio::bsp_kout<<"free page allocator fatal error"<<kio::kendl;
+            print_basic_info();
+            result=kurd;
+            return 0;
+    }
     for(uint8_t i=order;i<=MAX_SUPPORT_ORDER;i++){
         if(suggest_order_free_page_index[i]!=INVALID_INBCB_INDEX&&order_freepage_existency_bitmaps->bit_get(order_bases[i]+suggest_order_free_page_index[i])){
             statistics.suggest_hit[order]++;
             if(i>order){
-                split_page(suggest_order_free_page_index[i],i,order);
+                kurd=split_page(suggest_order_free_page_index[i],i,order);
+                if(!success_all_kurd(kurd)){
+                    result=kurd;
+                    return 0;
+                }
             }
-            if(i==order){
-                order_freepage_existency_bitmaps->bit_set(order_bases[i]+suggest_order_free_page_index[i],false);
-                statistics.free_count[order]--;
-            }
+            order_freepage_existency_bitmaps->bit_set(order_bases[order]+(suggest_order_free_page_index[i]<<(i-order)),false);
+            statistics.free_count[order]--;
             phyaddr_t res_addr=base+(suggest_order_free_page_index[i]<< (i+12));
+            statistics.alloc_times_success++;
+            result=success;
             return res_addr;
         }else statistics.suggest_miss[order]++;
     }
@@ -95,17 +107,24 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
             1ULL<<(MAX_SUPPORT_ORDER-i)
         );
         if(found_idx!=0xFFFFFFFFFFFFFFFF){
+            result=success;
             if(i>order){
-                split_page(found_idx,i,order);
+                kurd=split_page(found_idx,i,order);
+                if(!success_all_kurd(kurd)){
+                    result=kurd;
+                    return 0;
+                }
             }
-            if(i==order){
-                order_freepage_existency_bitmaps->bit_set(order_bases[i]+found_idx,false);
-                statistics.free_count[order]--;
-            }
+            order_freepage_existency_bitmaps->bit_set(order_bases[order]+(found_idx<<(i-order)),false);
+            statistics.free_count[order]--;
+            statistics.alloc_times_success++;
             phyaddr_t res_addr=base+(found_idx<< (i+12));
             return res_addr;
         }
     }
+
+    kio::bsp_kout<<"higher order free page found,validation start"<<kio::kendl;
+        
     error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::ALLOCATE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_NO_AVALIABLE_BUDDY;
     result=error;
     return 0;
@@ -147,7 +166,7 @@ void FreePagesAllocator::free_pages_in_seg_control_block::free_page_without_merg
     suggest_order_free_page_index[order]=in_bcb_idx;
 }
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t splited_idx, uint8_t splited_order, uint8_t target_order)
-{
+{//每一层递归固定被拆分层减少一个，拆分出来两个增加
     KURD_t success=default_success();
     KURD_t error=default_error();
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_SPLIT_PAGE;
@@ -157,19 +176,12 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t 
         return error;
     }
     if(splited_order==target_order){//触底成功
-        order_freepage_existency_bitmaps->bit_set(order_bases[splited_order]+splited_idx,false);
-        statistics.free_count[splited_order]--;
         return success;
-    }
-    if(!order_freepage_existency_bitmaps->bit_get(order_bases[splited_order]+splited_idx)){//调用者传入了错误的参数
-        error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::SPLIT_PAGE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_PAGE_NOT_FREE;
-        return error;
     }
     order_freepage_existency_bitmaps->bit_set(order_bases[splited_order]+splited_idx,false);
     statistics.free_count[splited_order]--;
-    order_freepage_existency_bitmaps->bit_set(order_bases[splited_order-1]+(splited_idx<<1),true);
-    statistics.free_count[splited_order-1]++;
     free_page_without_merge(1+(splited_idx<<1),splited_order-1);
+    statistics.free_count[splited_order-1]++;
     statistics.split_count++;
     return split_page(splited_idx<<1,splited_order-1,target_order);
 }
@@ -211,21 +223,36 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
         if(order_freepage_existency_bitmaps->bit_get(order_bases[current_order+1]+current_idx)){
             //检测到二叉树结构被破坏，准备panic
             fatal.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::CONANICO_FREE_RESULTS_CODE::FATAL_REASONS_CODE::BIN_TREE_CONSISTENCY_VIOLATION;
+            return fatal;
         }
         order_freepage_existency_bitmaps->bit_set(order_bases[current_order+1]+current_idx,true);
         statistics.free_count[current_order+1]++;
     }
+    statistics.free_times_success++;
     return success;
 }
 bool FreePagesAllocator::free_pages_in_seg_control_block::is_addr_belong_to_this_BCB(phyaddr_t addr)
 {
-    return (this->base<=addr)&&(addr<this->base+(1<<MAX_SUPPORT_ORDER));
+    uint64_t base_val = static_cast<uint64_t>(this->base);
+    uint64_t addr_val = static_cast<uint64_t>(addr);
+    uint64_t end_val = base_val + (static_cast<uint64_t>(1) << (MAX_SUPPORT_ORDER+12));
+    
+    return (base_val <= addr_val) && (addr_val < end_val);
 }
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_buddy_way(phyaddr_t base, uint64_t size)
 {
-    uint8_t order=size_to_order(size);
-    uint64_t in_bcb_idx=(base-this->base)>>(order+12);//还要对齐校验
-    return conanico_free(in_bcb_idx,order);
+    bool base_belong=is_addr_belong_to_this_BCB(base);
+    bool top_belong=is_addr_belong_to_this_BCB(base+size-1);
+    if(base_belong&&top_belong){
+        uint8_t order=size_to_order(size);
+        uint64_t in_bcb_idx=(base-this->base)>>(order+12);//还要对齐校验
+        return conanico_free(in_bcb_idx,order);
+    }else{
+        KURD_t fail=default_error();
+        fail.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FREE;
+        fail.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FREE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_BASE_NOT_BELONG;
+        return fail;
+    }
 }
 bool FreePagesAllocator::free_pages_in_seg_control_block::is_reclusive_fold_success(uint64_t idx, uint8_t order)
 {
@@ -376,7 +403,13 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush()
             if(order_freepage_existency_bitmaps->bit_get(order_bases[i]+j))
                 actual_free_count++;
         }
-        if(actual_free_count!=statistics.free_count[i])fatal.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FLUSH_FREE_COUNT_RESULTS_CODE::FATAL_REASONS_CODE::COSISTENCY_VIOLATION;
+        if(actual_free_count!=statistics.free_count[i]){
+            kio::bsp_kout << "FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush() violation" << kio::kendl;
+            kio::bsp_kout << "Order " << (uint32_t)i << ": Expected free count: " << statistics.free_count[i] << ", Actual free count: " << actual_free_count << kio::kendl;
+            statistics.free_count[i]=actual_free_count;
+            fatal.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FLUSH_FREE_COUNT_RESULTS_CODE::FATAL_REASONS_CODE::COSISTENCY_VIOLATION;
+            Panic::panic(default_panic_behaviors_flags,nullptr,nullptr,nullptr,fatal);
+        }
     }
     if(fatal.reason)return fatal;
     return success;

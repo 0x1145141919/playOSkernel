@@ -57,7 +57,7 @@ uint64_t FreePagesAllocator::free_pages_in_seg_control_block::mixed_bitmap_t::fi
         }
     }
     for(uint64_t i = u64_begin/64; i < u64_end/64; i++) {
-        uint64_t u64_idx = i / 64;
+        uint64_t u64_idx = i;
         if(this->bitmap[u64_idx]) {
             uint64_t unit_base=i*64;
             return unit_base+__builtin_ctz(this->bitmap[u64_idx])-start_idx;

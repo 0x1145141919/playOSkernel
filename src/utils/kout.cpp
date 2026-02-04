@@ -433,17 +433,12 @@ kio::kout &kio::kout::operator<<(now_time time)
     
     if(time::hardware_time::get_if_hpet_initialized()){
         *this<<'[';
-        time::miusecond_time_stamp_t stamp=time::hardware_time::get_stamp(
-            *time::bsp_token
-        );//先暂时用bsp_token，smp下每个核心用自己的token
+        miusecond_time_stamp_t stamp=time::hardware_time::get_stamp();
         print_numer(&stamp, DEC, 8, false);
-
         *this<<']';
     }else{
         *this<<'<';
-        time::miusecond_time_stamp_t stamp=time::hardware_time::get_stamp(
-            *time::bsp_token
-        );
+        miusecond_time_stamp_t stamp=time::hardware_time::get_stamp();
         print_numer(&stamp, DEC, 8, false);
         *this<<'>';
     }

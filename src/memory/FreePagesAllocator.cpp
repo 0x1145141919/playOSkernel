@@ -1,15 +1,17 @@
 #include "memory/FreePagesAllocator.h"
 #include "memory/phygpsmemmgr.h"
+FreePagesAllocator::flags_t FreePagesAllocator::flags;
+
 KURD_t FreePagesAllocator::Init()
 {
     flags.allow_new_BCB=false;
     KURD_t kurd=phymemspace_mgr::pages_dram_buddy_regist(
-        0x100000000,0x40000
+        0x100000000,0x100000
     );
     if(error_kurd(kurd))return kurd;
     first_BCB=new free_pages_in_seg_control_block(
         0x100000000,
-        18
+        20
     );
     return first_BCB->second_stage_init();
 }

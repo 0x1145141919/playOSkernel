@@ -2,12 +2,11 @@
 #include "stdint.h"
 #include "util/bitmap.h"
 #include "memmodule_err_definitions.h"
+#include "GS_Slots_index_definitions.h"
 #include <util/lock.h>
-//#include <new>
 typedef uint64_t size_t;
 typedef uint64_t phyaddr_t;
 typedef uint64_t vaddr_t;
-//此模块待重构
 
 enum data_type_t:uint8_t
 {
@@ -16,7 +15,6 @@ enum data_type_t:uint8_t
     DT_STRUCT = 2,
     DT_CLASS = 3,
 };
-constexpr uint32_t PER_CPU_HEAP_COMPLEX_GS_INDEX=1;
 struct alloc_flags_t{
     bool is_longtime;
     bool is_crucial_variable;
@@ -104,6 +102,14 @@ namespace MEMMODULE_LOCAIONS
         }
     }
     constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR_HCB_BITMAP=6;//INIT事件涉及到KURD,但是不是这个层面产生的，是页框系统的
+    namespace KPOOLMEMMGR_HCB_BITMAP_EVENTS{ 
+        constexpr uint8_t EVENT_CODE_INIT=0;
+        namespace INIT_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_HCB_BITMAP_INIT_FAIL=1;
+            }
+        }
+    }
 };
 class kpoolmemmgr_t
 {
@@ -131,6 +137,10 @@ private:
         class HCB_bitmap:public bitmap_t
         { 
             HCB_bitmap_error_code_t param_checkment(uint64_t bit_idx,uint64_t bit_count);
+            KURD_t default_kurd();
+            KURD_t default_success();
+            KURD_t default_fail();
+            KURD_t default_fatal();
             public:
             int Init();//只有第一个堆的初始化会调用此函数，所以不用KURD
             KURD_t second_stage_Init(
@@ -246,9 +256,9 @@ public:
     ~kpoolmemmgr_t();
 };
 extern "C"{
-    void* __wrapped_heap_alloc(uint64_t size,alloc_flags_t flags=default_flags);
+    void* __wrapped_heap_alloc(uint64_t size,KURD_t*kurd,alloc_flags_t flags=default_flags);
     void __wrapped_heap_free(void*addr);
-    void* __wrapped_heap_realloc(void*addr,uint64_t size,alloc_flags_t flags);
+    void* __wrapped_heap_realloc(void*addr,uint64_t size,KURD_t*kurd,alloc_flags_t flags);
 }
 constexpr int INDEX_NOT_EXIST = -100;
 // 全局 new/delete 操作符重载声明

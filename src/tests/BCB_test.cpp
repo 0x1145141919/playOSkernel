@@ -1,3 +1,5 @@
+#include <fstream>
+#include <sstream>
 #include "../include/memory/FreePagesAllocator.h"
 #include "../include/util/kout.h"
 #include <vector>
@@ -18,7 +20,7 @@ int main()
      
     // 创建第一个BCB实例，用于管理从0x100000000开始的20阶内存区域（约1GB）
     FreePagesAllocator::first_BCB = new FreePagesAllocator::free_pages_in_seg_control_block(
-        0x100000000, 20,true
+        0x100000000, 14
     );
 
     // 验证BCB基本属性
@@ -47,6 +49,13 @@ int main()
     const int num_allocations = 10000; // 分配100次
     kio::bsp_kout << "Generating " << num_allocations << " random allocations..." << kio::kendl;
 
+    // 创建文件A用于保存测试集
+    std::ofstream test_set_file("test_set_A.txt");
+    if (!test_set_file.is_open()) {
+        kio::bsp_kout << "Failed to open test_set_A.txt for writing!" << kio::kendl;
+        return -1;
+    }
+
     for (int i = 0; i < num_allocations; ++i) {
         mem_seg seg;
         seg.start_addr = 1; // 按照注释初始化为无效地址
@@ -54,12 +63,25 @@ int main()
         uint64_t size = static_cast<uint64_t>(size_dist(gen)) % 0x100000000 + 1;
         seg.size = size; // 使用对数正态分布生成的size
         allocations.push_back(seg);
+        
+        // 保存到文件A
+        test_set_file << "Index: " << i << ", Size: " << size << ", InitialAddr: " << seg.start_addr << "\n";
+    }
+    test_set_file.close();
+    kio::bsp_kout << "Test set saved to test_set_A.txt" << kio::kendl;
+
+    // 创建文件B用于记录操作日志
+    std::ofstream operation_log_file("operation_log_B.txt");
+    if (!operation_log_file.is_open()) {
+        kio::bsp_kout << "Failed to open operation_log_B.txt for writing!" << kio::kendl;
+        return -1;
     }
 
     // 创建状态机进行100万次分配和释放操作
     std::uniform_int_distribution<int> index_dist(0, num_allocations - 1);
     kio::bsp_kout << "Starting state machine with 1,000,000 allocation/deallocation cycles..." << kio::kendl;
     uint64_t old_stamp=rdtsc();
+    
     for (int cycle = 0; cycle < 1000000; ++cycle) {
         // 随机选择一个索引
         int idx = index_dist(gen);
@@ -72,9 +94,14 @@ int main()
             KURD_t alloc_result;
             phyaddr_t addr = FreePagesAllocator::first_BCB->allocate_buddy_way(seg.size, alloc_result);
             
+            // 记录分配操作到文件B
+            operation_log_file << "Cycle: " << cycle << ", Operation: ALLOCATE, Index: " << idx 
+                              << ", RequestSize: " << seg.size << ", Result: ";
             if (alloc_result.result == result_code::SUCCESS && addr != 0) {
                 seg.start_addr = addr; // 更新为实际分配的地址
+                operation_log_file << "SUCCESS, AllocatedAddr: " << addr << "\n";
             } else {
+                operation_log_file << "FAILED, ErrorCode: " << (uint32_t)alloc_result.result << "\n";
                 kio::bsp_kout << "Allocation failed at cycle " << cycle 
                              << ", size=" << seg.size << kio::kendl;
             }
@@ -85,9 +112,15 @@ int main()
                 seg.size
             );
             
+            // 记录释放操作到文件B
+            operation_log_file << "Cycle: " << cycle << ", Operation: FREE, Index: " << idx 
+                              << ", AddrToFree: " << seg.start_addr << ", Size: " << seg.size 
+                              << ", Result: ";
             if (free_result.result == result_code::SUCCESS) {
                 seg.start_addr = 1; // 重置为无效地址
+                operation_log_file << "SUCCESS\n";
             } else {
+                operation_log_file << "FAILED, ErrorCode: " << (uint32_t)free_result.result << "\n";
                 kio::bsp_kout << "Deallocation failed at cycle " << cycle 
                              << ", addr=0x" << seg.start_addr << kio::kendl;
             }
@@ -102,8 +135,17 @@ int main()
             kio::bsp_kout << "Timestamp: " <<kio::now<< kio::kendl;
         }
     }
+    
+    // 关闭操作日志文件
+    operation_log_file.close();
+    kio::bsp_kout << "Operation log saved to operation_log_B.txt" << kio::kendl;
+    
     FreePagesAllocator::first_BCB->print_basic_info();
+    KURD_t flush=FreePagesAllocator::first_BCB->free_pages_flush();
+    if(!success_all_kurd(flush)){
+        kio::bsp_kout << "violation detect" << kio::kendl;
+        FreePagesAllocator::first_BCB->print_basic_info();
+    }
     kio::bsp_kout << "=== Random Allocation/Deallocation Test Completed ===" << kio::kendl;
-
     return 0;
 }

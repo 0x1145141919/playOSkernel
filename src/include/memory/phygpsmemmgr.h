@@ -9,6 +9,12 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR=8;//[8~15]是phymemspace_mgr的子模块
         namespace PHYMEMSPACE_MGR_EVENTS_CODE{
             constexpr uint8_t EVENT_CODE_INIT=0;
+            namespace INIT_RSEUL_RESULTS_CODE{
+                namespace FAIL_REASONS{
+                    constexpr uint16_t USER_TEST_KERNEL_IMAGE_SET_FAIL=0x1;
+                    constexpr uint16_t USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC=0x2;
+                }
+            }
             constexpr uint8_t EVENT_CODE_PAGES_SET=1;
             namespace PAGES_SET_RESULTS_CODE{
                 namespace FAIL_REASONS{
@@ -275,7 +281,7 @@ class phymemspace_mgr{
         uint64_t total_firmware;
         uint64_t total_reserved;
     };
-    static constexpr PHYSEG NULL_SEG={0,0,0,RESERVED_SEG};
+    static  const PHYSEG NULL_SEG;
     private:
     static KURD_t default_kurd();
     static KURD_t default_success();
@@ -293,8 +299,8 @@ class phymemspace_mgr{
     using Ktemplats::list_doubly<PHYSEG>::empty;
         KURD_t add_seg(PHYSEG& seg);
         KURD_t del_seg(phyaddr_t base);
-        KURD_t get_seg_by_base(phyaddr_t base,PHYSEG& seg);
-        KURD_t get_seg_by_addr(phyaddr_t addr,PHYSEG& seg);
+        PHYSEG& get_seg_by_base(phyaddr_t base,KURD_t& kurd);
+        PHYSEG& get_seg_by_addr(phyaddr_t addr,KURD_t& kurd);
         bool is_seg_have_cover(phyaddr_t base,uint64_t size);
     };
     static PHYSEG_LIST_ITEM*physeg_list;
@@ -535,6 +541,7 @@ class phymemspace_mgr{
     );
     static PHYSEG get_physeg_by_addr(phyaddr_t addr);
     static phymemmgr_statistics_t get_statisit_copy();
+    static void subtb_alloc_is_pool_way_flag_enable();
     /** 
      * 这个函数的工作是
      * 1.    phyaddr_t base;
@@ -551,11 +558,14 @@ class phymemspace_mgr{
     static KURD_t Init();
     #ifdef USER_MODE
     phymemspace_mgr();
+    #endif
     static int print_all_atom_table();//打印top_1gb_table下所有有效表项以及递归打印非原子表项
     static int print_allseg();//打印 static PHYSEG_LIST_ITEM*physeg_list;所有内容
-    #endif
+    
 };//todo:统计量相关子系统以及公开接口，强制统计量刷新的接口
 extern "C"{
-    void* __wrapped_pgs_valloc(KURD_t*kurd,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2);
-    KURD_t __wrapped_pgs_free(void*vbase,uint64_t _4kbpgscount);
+    void* __wrapped_pgs_valloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2);
+    KURD_t __wrapped_pgs_vfree(void*vbase,uint64_t _4kbpgscount);
+    phyaddr_t __wrapped_pgs_alloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2);
+    KURD_t __wrapped_pgs_free(phyaddr_t phybase,uint64_t _4kbpgscount);
 }

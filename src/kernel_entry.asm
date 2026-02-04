@@ -1,31 +1,36 @@
 ; 物理地址类型 (MAXPHYADDR ≤ 52)
 %define phys_addr_t dq
-%include "checkpoint.inc"
+%include "check_point.inc"
 ; 页大小数组
 %define PAGE_SIZE_IN_LV_0 (1 << 12)    ; NORMAL_4kb_MASK_OFFSET
 %define PAGE_SIZE_IN_LV_1 (1 << 21)    ; NORMAL_2MB_MASK_OFFSET
 %define PAGE_SIZE_IN_LV_2 (1 << 30)    ; NORMAL_1GB_MASK_OFFSET
 %define PAGE_SIZE_IN_LV_3 (1 << 39)    ; NORMAL_512GB_MASK_OFFSET
 %define PAGE_SIZE_IN_LV_4 (1 << 48)    ; NORMAL_256TB_MASK_OFFSET
+
 ; 页偏移掩码数组
 %define PAGE_OFFSET_MASK_0 ((1 << 12) - 1)   ; NORMAL_4kb_MASK_OFFSET
 %define PAGE_OFFSET_MASK_1 ((1 << 21) - 1)   ; NORMAL_2MB_MASK_OFFSET
 %define PAGE_OFFSET_MASK_2 ((1 << 30) - 1)   ; NORMAL_1GB_MASK_OFFSET
 %define PAGE_OFFSET_MASK_3 ((1 << 39) - 1)   ; NORMAL_512GB_MASK_OFFSET
 %define PAGE_OFFSET_MASK_4 ((1 << 48) - 1)   ; NORMAL_256TB_MASK_OFFSET
+
 ; 物理地址宽度（假设为52位）
 %define PHYS_ADDR_WIDTH 52
-%define PHYS_ADDR_MASK (1 << PHYS_ADDR_WIDTH) - 1
+%define PHYS_ADDR_MASK ((1 << PHYS_ADDR_WIDTH) - 1)
+
 ; 页表项位字段偏移和掩码
 %define P_BIT    0   ; Present 位偏移
 %define RW_BIT   1   ; Read/Write 位偏移
 %define US_BIT   2   ; User/Supervisor 位偏移
 %define PS_BIT  7
+
 ; 通用掩码
 %define P_MASK   (1 << P_BIT)
 %define RW_MASK  (1 << RW_BIT)
 %define US_MASK  (1 << US_BIT)
 %define PS_MASK  (1 << PS_BIT)
+
 extern KImgphybase 
 extern _stack_top
 extern kernel_start
@@ -35,46 +40,29 @@ extern bsp_init_gdt_descriptor
 extern bsp_init_idt_entries
 extern bsp_init_idtr
 extern idt_table_rm
+extern idt_descriptor_pe
+global realmode_enter_checkpoint
+
+global pemode_enter_checkpoint
 global _kernel_Init
 global pml4_table_init
 global pml5_table_init
 
 global AP_realmode_start
 global assigned_processor_id
+
 SECTION .bootdata
 
 
 ; 定义两个check_point结构体
 realmode_enter_checkpoint:
-    istruc check_point
-        at check_point.success_word, dd 0
-        at check_point.failure_flags, db 0
-        at check_point.failure_caused_excption_num, db 0
-        at check_point.failure_final_stack_top, dw 0
-        at check_point.check_point_id, dw 0
-        at check_point.reserved, dw 0, 0, 0
-    iend
+    resb check_point_size
 
 pemode_enter_checkpoint:
-    istruc check_point
-        at check_point.success_word, dd 0
-        at check_point.failure_flags, db 0
-        at check_point.failure_caused_excption_num, db 0
-        at check_point.failure_final_stack_top, dw 0
-        at check_point.check_point_id, dw 0
-        at check_point.reserved, dw 0, 0, 0
-    iend
-longmode_enter_checkpoint:
-    istruc check_point
-        at check_point.success_word, dd 0
-        at check_point.failure_flags, db 0
-        at check_point.failure_caused_excption_num, db 0
-        at check_point.failure_final_stack_top, dw 0
-        at check_point.check_point_id, dw 0
-        at check_point.reserved, dw 0, 0, 0
-    iend
+    resb check_point_size
 assigned_processor_id:
     dd 0
+
 SECTION .boottext
 
 AP_realmode_start:
@@ -83,7 +71,7 @@ align 0x1000
 bits 16
 cli
 mov eax, [assigned_processor_id]
-mov [realmode_enter_checkpoint.success_word], eax
+mov [realmode_enter_checkpoint+check_point.success_word], eax
 
     ; 加载GDT
     lgdt [gdt_descriptor]
@@ -110,13 +98,13 @@ bits 32
     mov eax, 0xB
     mov ecx, 1
     cpuid
-    mov [enter_pemode_word], edx
+    mov [pemode_enter_checkpoint+check_point.success_word], edx
     lidt [idt_descriptor_pe]
     mov cr0, eax
     mov eax, cr4
     or eax, 1<<5
-    and eax, ~(1 << 12)
-    and eax, ~(1 << 4)
+    and eax, ~(((1 << 12)))    ; 修复位运算表达式语法
+    and eax, ~(((1 << 4)))     ; 修复位运算表达式语法
     mov cr4, eax
     mov eax, pml4_table_init
     mov cr3, eax
@@ -141,43 +129,11 @@ bits 64
     
     
 _kernel_Init:
-.skip_x2apic:
-%ifdef PG5LV_ENABLE
-; 检查是否支持五级分页
-    mov eax, 7           ; CPUID 功能 7
-    xor ecx, ecx         ; 子功能 0
-    cpuid
-    test ecx, (1 << 16)  ; 检查 LA57 位 (bit 16)
-    jz .use_4level       ; 不支持则跳转到四级分页
-    
-    ; 支持五级分页，准备开启
-    ; 1. 切换到兼容性 CR3 (四级页表结构)
-    mov rax, pml5_table_pml4_low  ; 兼容性四级页表
-    mov cr3, rax
-    
-    ; 2. 启用 CR4.LA57
-    mov rax, cr4
-    or rax, (1 << 12)   ; 设置 LA57 位 (bit 12)
-    mov cr4, rax
-    
-    ; 3. 设置真正的五级页表 CR3
-    mov rax, pml5_table
-    add rax,3
-    mov cr3, rax
-    
-    jmp .paging_done
 
-%else
     ; 使用四级分页
     mov rax, pml4_table_init
     mov cr3, rax
-%endif
-
-.use_4level:
-    ; 四级分页继续执行
-    mov rax, pml4_table_init
-    mov cr3, rax
-
+    jmp .patch_bsp_idt
 .paging_done:
     ; 恢复寄存器
     mov rsp,_stack_top
@@ -185,20 +141,178 @@ _kernel_Init:
     rdmsr
     or eax, (1<<11)|(1<<8)|1
     wrmsr
-    mov eax, cr0
-    or eax, (1<<16)
-    mov cr0, eax
-    lgdt [bsp_init_gdt_descriptor]
+    mov rax, cr0
+    or rax, (1<<16)
+    mov cr0, rax
+    mov rax, bsp_init_gdt_descriptor
+    lgdt [rax]
     push 0x8
     mov rax, .jump_kernel
     push rax
     retfq
 .jump_kernel:
-    lidt [bsp_init_idtr]
+    mov rax, bsp_init_idtr
+    lidt [rax]
     mov rax, kernel_start
     call  rax
     hlt
 
+.patch_bsp_idt:
+extern  div_by_zero_bare_enter;
+extern  breakpoint_bare_enter;
+extern  nmi_bare_enter;
+extern  overflow_bare_enter;
+extern  invalid_opcode_bare_enter;
+extern  general_protection_bare_enter;
+extern  double_fault_bare_enter;
+extern  page_fault_bare_enter;
+extern  machine_check_bare_enter;
+extern  invalid_tss_bare_enter;
+extern  simd_floating_point_bare_enter;
+extern  virtualization_bare_enter;
+extern  timer_bare_enter;
+extern  ipi_bare_enter;
+extern  asm_panic_bare_enter;
+extern  bsp_init_idt_entries;这个IDT表
+
+    ; 先将bsp_init_idt_entries的地址加载到寄存器
+    mov rbx, qword bsp_init_idt_entries
+    
+    ; 设置除零异常 (中断号 0)
+    mov rax, qword div_by_zero_bare_enter
+    mov word  [rbx + 0*16 + 0], ax      ; offset_low
+    shr rax, 16
+    mov word  [rbx + 0*16 + 6], ax      ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 0*16 + 8], eax     ; offset_high
+    mov dword [rbx + 0*16 + 12], 0      ; reserved
+
+    ; 设置断点异常 (中断号 3)
+    mov rax, qword breakpoint_bare_enter
+    mov word  [rbx + 3*16 + 0], ax      ; offset_low
+    shr rax, 16
+    mov word  [rbx + 3*16 + 6], ax      ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 3*16 + 8], eax     ; offset_high
+    mov dword [rbx + 3*16 + 12], 0      ; reserved
+
+    ; 设置NMI (中断号 2)
+    mov rax, qword nmi_bare_enter
+    mov word  [rbx + 2*16 + 0], ax      ; offset_low
+    shr rax, 16
+    mov word  [rbx + 2*16 + 6], ax      ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 2*16 + 8], eax     ; offset_high
+    mov dword [rbx + 2*16 + 12], 0      ; reserved
+
+    ; 设置溢出异常 (中断号 4)
+    mov rax, qword overflow_bare_enter
+    mov word  [rbx + 4*16 + 0], ax      ; offset_low
+    shr rax, 16
+    mov word  [rbx + 4*16 + 6], ax      ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 4*16 + 8], eax     ; offset_high
+    mov dword [rbx + 4*16 + 12], 0      ; reserved
+
+    ; 设置无效操作码异常 (中断号 6)
+    mov rax, qword invalid_opcode_bare_enter
+    mov word  [rbx + 6*16 + 0], ax      ; offset_low
+    shr rax, 16
+    mov word  [rbx + 6*16 + 6], ax      ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 6*16 + 8], eax     ; offset_high
+    mov dword [rbx + 6*16 + 12], 0      ; reserved
+
+    ; 设置一般保护异常 (中断号 13)
+    mov rax, qword general_protection_bare_enter
+    mov word  [rbx + 13*16 + 0], ax     ; offset_low
+    shr rax, 16
+    mov word  [rbx + 13*16 + 6], ax     ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 13*16 + 8], eax    ; offset_high
+    mov dword [rbx + 13*16 + 12], 0     ; reserved
+
+    ; 设置双故障异常 (中断号 8)
+    mov rax, qword double_fault_bare_enter
+    mov word  [rbx + 8*16 + 0], ax      ; offset_low
+    shr rax, 16
+    mov word  [rbx + 8*16 + 6], ax      ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 8*16 + 8], eax     ; offset_high
+    mov dword [rbx + 8*16 + 12], 0      ; reserved
+
+    ; 设置页面故障异常 (中断号 14)
+    mov rax, qword page_fault_bare_enter
+    mov word  [rbx + 14*16 + 0], ax     ; offset_low
+    shr rax, 16
+    mov word  [rbx + 14*16 + 6], ax     ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 14*16 + 8], eax    ; offset_high
+    mov dword [rbx + 14*16 + 12], 0     ; reserved
+
+    ; 设置机器检查异常 (中断号 18)
+    mov rax, qword machine_check_bare_enter
+    mov word  [rbx + 18*16 + 0], ax     ; offset_low
+    shr rax, 16
+    mov word  [rbx + 18*16 + 6], ax     ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 18*16 + 8], eax    ; offset_high
+    mov dword [rbx + 18*16 + 12], 0     ; reserved
+
+    ; 设置无效TSS异常 (中断号 10)
+    mov rax, qword invalid_tss_bare_enter
+    mov word  [rbx + 10*16 + 0], ax     ; offset_low
+    shr rax, 16
+    mov word  [rbx + 10*16 + 6], ax     ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 10*16 + 8], eax    ; offset_high
+    mov dword [rbx + 10*16 + 12], 0     ; reserved
+
+    ; 设置SIMD浮点异常 (中断号 19)
+    mov rax, qword simd_floating_point_bare_enter
+    mov word  [rbx + 19*16 + 0], ax     ; offset_low
+    shr rax, 16
+    mov word  [rbx + 19*16 + 6], ax     ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 19*16 + 8], eax    ; offset_high
+    mov dword [rbx + 19*16 + 12], 0     ; reserved
+
+    ; 设置虚拟化异常 (中断号 20)
+    mov rax, qword virtualization_bare_enter
+    mov word  [rbx + 20*16 + 0], ax     ; offset_low
+    shr rax, 16
+    mov word  [rbx + 20*16 + 6], ax     ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 20*16 + 8], eax    ; offset_high
+    mov dword [rbx + 20*16 + 12], 0     ; reserved
+
+    ; 设置定时器中断 (中断号 0x20)
+    mov rax, qword timer_bare_enter
+    mov word  [rbx + 0x20*16 + 0], ax   ; offset_low
+    shr rax, 16
+    mov word  [rbx + 0x20*16 + 6], ax   ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 0x20*16 + 8], eax  ; offset_high
+    mov dword [rbx + 0x20*16 + 12], 0   ; reserved
+
+    ; 设置IPI中断 (中断号 0x21)
+    mov rax, qword ipi_bare_enter
+    mov word  [rbx + 0x21*16 + 0], ax   ; offset_low
+    shr rax, 16
+    mov word  [rbx + 0x21*16 + 6], ax   ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 0x21*16 + 8], eax  ; offset_high
+    mov dword [rbx + 0x21*16 + 12], 0   ; reserved
+
+    ; 设置汇编panic处理程序 (中断号 0xFF)
+    mov rax, qword asm_panic_bare_enter
+    mov word  [rbx + 0xFF*16 + 0], ax   ; offset_low
+    shr rax, 16
+    mov word  [rbx + 0xFF*16 + 6], ax   ; offset_mid
+    shr rax, 16
+    mov dword [rbx + 0xFF*16 + 8], eax  ; offset_high
+    mov dword [rbx + 0xFF*16 + 12], 0   ; reserved
+    jmp .paging_done
 SECTION .init_rodata
 align 0x1000
 pml4_table_init:
@@ -206,6 +320,7 @@ dq pml4_table_pdpt_lowmem_rigon+0x3
 times 255 dq 0
 dq pml4_table_pdpt_lowmem_rigon+0x3
 times 255 dq 0
+
 pml4_table_pdpt_lowmem_rigon:
 %assign i 0
 %rep 512
@@ -213,14 +328,17 @@ dq i*PAGE_SIZE_IN_LV_2+3+PS_MASK
 %assign i  i+1
 %endrep
 %undef i
+
 pml5_table_init:
 dq pml5_table_pml4_low+0x3
 times 255 dq 0
 dq pml5_table_pml4_low+0x3
 times 255 dq 0
+
 pml5_table_pml4_low:
 dq pml4_table_pdpt_lowmem_rigon+0x3
 times 511 dq 0
+
 ; GDT定义
 gdt_start:
     dq 0                                ; Nullwan quan bu yi yang descriptor

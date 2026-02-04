@@ -242,13 +242,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 0
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 0
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .debug:
@@ -291,13 +288,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 1
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 1
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .nmi:
@@ -340,13 +334,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 2
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 2
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .bp:
@@ -389,13 +380,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 3
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 3
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .of:
@@ -438,13 +426,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 4
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 4
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .br:
@@ -487,13 +472,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 5
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 5
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .ud:
@@ -536,13 +518,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 6
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 6
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .nm:
@@ -585,13 +564,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 7
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 7
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .df:
@@ -634,13 +610,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 8
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 8
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .cross:
@@ -683,13 +656,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 9
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 9
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .tss:
@@ -732,13 +702,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 10
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 10
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .NP:
@@ -781,13 +748,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 11
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 11
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .SS:
@@ -830,13 +794,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 12
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 12
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .GP:
@@ -879,13 +840,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 13
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 13
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .PF:
@@ -928,13 +886,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 14
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 14
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .vec15:
@@ -977,13 +932,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 15
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 15
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .MF:
@@ -1026,13 +978,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 16
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 16
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .AC:
@@ -1075,13 +1024,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 17
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 17
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .MC:
@@ -1124,13 +1070,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 18
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 18
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .XM:
@@ -1173,13 +1116,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 19
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 19
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .VE:
@@ -1222,13 +1162,10 @@ bits 64
     push rax
     mov rax, LONG_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push rax
-    
-    ; 使用通用寄存器 + 64位绝对寻址
-    mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
-    mov word [rbx + check_point.failure_final_stack_top], sp
-    mov byte [rbx + check_point.failure_caused_excption_num], 20
+    mov word [longmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [longmode_enter_checkpoint+check_point.failure_caused_excption_num], 20
     sfence
-    mov byte [rbx + check_point.failure_flags], 0x3
+    mov byte [longmode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt
     
     .CP:
@@ -1272,9 +1209,11 @@ bits 64
     mov rax, LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push rax
     
-    ; 使用通用寄存器 + 64位绝对寻址
+    ; 修复：使用通用寄存器 + 64位绝对寻址
     mov rbx, qword longmode_enter_checkpoint  ; 加载64位绝对地址到寄存器
     mov word [rbx + check_point.failure_final_stack_top], sp
+    
+    ; 同样的方法修复其他访问
     mov byte [rbx + check_point.failure_caused_excption_num], 21
     sfence
     mov byte [rbx + check_point.failure_flags], 0x3

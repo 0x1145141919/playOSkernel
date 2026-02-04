@@ -8,6 +8,7 @@ set(MEMORY_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_seg_managment.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_availabe_search.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/phypgsmemmgr_alloc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_buddy_about.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kpoolmemmgr.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kpoolmemmgr_HCBv2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AddresSpace.cpp
@@ -15,6 +16,9 @@ set(MEMORY_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/KspacMapMgr_pagediretct_operate.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/out_surfaces.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PhyAddrAccessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/FreePagesAllocator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/FreePagesAllocator_BCB.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mixed_bitmap.cpp
 )
 
 add_library(Mem_module OBJECT ${MEMORY_SOURCE})
@@ -33,10 +37,12 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../include
         -ffreestanding
         -fno-use-cxa-atexit
         -fno-exceptions
+        -fno-threadsafe-statics
         -fno-builtin
         -fno-rtti
         -fno-PIC
         -mgeneral-regs-only
+        -mno-red-zone
          -fno-stack-protector
         #-fno-asynchronous-unwind-tables
          -DKERNEL_MODE

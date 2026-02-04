@@ -147,47 +147,55 @@ bool phymemspace_mgr::PHYSEG_LIST_ITEM::is_seg_have_cover(phyaddr_t base, uint64
     return false;
 }
 
-KURD_t phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_base(phyaddr_t base, PHYSEG &seg)
+phymemspace_mgr::PHYSEG& phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_base(phyaddr_t base,KURD_t& kurd)
 {
     KURD_t success = default_success();
     KURD_t fail = default_failure();
     success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_SEARCH;
     fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_SEARCH;
-
+    
+    static PHYSEG null_seg = NULL_SEG;  // 静态变量，确保在整个程序运行期间存在
+    
     if(m_head==nullptr&&m_tail==nullptr){
         fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::MEMSEG_DOUBLE_LINK_LIST_SEARCH_RESULTS_CODE::FAIL_REASONS::REASON_CODE_SEG_NOT_FOUND;
-        return fail;
+        kurd = fail;  // 更新kurd参数
+        return null_seg;
     }
     for(node *it=m_head;it!=nullptr;it=it->next)
     {
         if(it->value.base==base)
         {
-            seg=it->value;
-            return success;
+            kurd = success;  // 更新kurd参数
+            return it->value;
         }
     }
     fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::MEMSEG_DOUBLE_LINK_LIST_SEARCH_RESULTS_CODE::FAIL_REASONS::REASON_CODE_SEG_NOT_FOUND;
-    return fail;
+    kurd = fail;  // 更新kurd参数
+    return null_seg;
 }
-KURD_t phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_addr(phyaddr_t addr, PHYSEG &seg)
+phymemspace_mgr::PHYSEG& phymemspace_mgr::PHYSEG_LIST_ITEM::get_seg_by_addr(phyaddr_t addr,KURD_t& kurd)
 {
     KURD_t success = default_success();
     KURD_t fail = default_failure();
     success.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_SEARCH;
     fail.event_code = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_SEARCH;
 
+    static PHYSEG null_seg = NULL_SEG;  // 静态变量，确保在整个程序运行期间存在
+    
     if(m_head==nullptr&&m_tail==nullptr){
         fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::MEMSEG_DOUBLE_LINK_LIST_SEARCH_RESULTS_CODE::FAIL_REASONS::REASON_CODE_SEG_NOT_FOUND;
-        return fail;
+        kurd = fail;  // 更新kurd参数
+        return null_seg;
     }
     for(node*cur=m_head;cur!=nullptr;cur=cur->next){
         if(cur->value.base<=addr&&(addr<cur->value.base+cur->value.seg_size)){
-            seg=cur->value;
-            return success;
+            kurd = success;  // 更新kurd参数
+            return cur->value;
         }
     }
     fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE::MEMSEG_DOUBLE_LINK_LIST_SEARCH_RESULTS_CODE::FAIL_REASONS::REASON_CODE_SEG_NOT_FOUND;
-    return fail;
+    kurd = fail;  // 更新kurd参数
+    return null_seg;
 }
 KURD_t phymemspace_mgr::low1mb_mgr_t::interval_LinkList::default_kurd()
 {

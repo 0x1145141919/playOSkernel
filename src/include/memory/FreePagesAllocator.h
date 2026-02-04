@@ -52,8 +52,17 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t EVENT_CODE_TOP_FOLD = 5;
         constexpr uint8_t EVENT_CODE_FREE_PAGES_FLUSH = 6;
         namespace FREE_PAGES_FLUSH_RESULTS_CODE{
+            namespace FAIL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_ADDR_NOT_BELONG=1;
+            }
             namespace FATAL_REASONS_CODE{
                 constexpr uint16_t COSISTENCY_VIOLATION=1; 
+            }
+        }
+        constexpr uint8_t EVENT_CODE_FREE=7;
+        namespace FREE_RESULTS_CODE{
+            namespace FAIL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_CODE_BASE_NOT_BELONG= 1;
             }
         }
     }
@@ -72,11 +81,13 @@ struct Alloc_result{
     KURD_t result;
 };
 class FreePagesAllocator{ 
-    private:
-        static constexpr uint16_t _4KB_PAGESIZE=4096;    
-        static struct flags_t{
+        public:
+         struct flags_t{
             uint64_t allow_new_BCB:1;
-        }flags;
+        };
+    public:
+        static constexpr uint16_t _4KB_PAGESIZE=4096;    
+        static flags_t flags;
         class free_pages_in_seg_control_block{
         private:
         static constexpr uint64_t INVALID_INBCB_INDEX=~0;
@@ -124,6 +135,8 @@ class FreePagesAllocator{
         uint64_t free_count[DESINGED_MAX_SUPPORT_ORDER];
         uint64_t suggest_hit[DESINGED_MAX_SUPPORT_ORDER];
         uint64_t suggest_miss[DESINGED_MAX_SUPPORT_ORDER];
+        uint64_t alloc_times_success;
+        uint64_t free_times_success;
         uint64_t scan_count;
         uint64_t fold_count_success;
         uint64_t fold_count_fail;
@@ -161,7 +174,9 @@ class FreePagesAllocator{
         );
         bool is_addr_belong_to_this_BCB(phyaddr_t addr);
         ~free_pages_in_seg_control_block()=default;
+         
     };
+    friend phymemspace_mgr;
     friend KspaceMapMgr;
     static free_pages_in_seg_control_block*first_BCB;//通过pages_alloc在align_log2=30时分配一个1GB页，哪个页用来初始化这个
     public:

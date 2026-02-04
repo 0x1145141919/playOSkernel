@@ -51,30 +51,52 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
     bitmap_used_bit=0;
     return OS_SUCCESS;
 }
-
-int kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
+KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::default_kurd()
 {
-    
-    if(this==&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)return OS_BAD_FUNCTION;
-    bitmap_size_in_64bit_units=entries_count/64;
-#ifdef KERNEL_MODE
-    phyaddr_t bitmap_phybase=phymemspace_mgr::pages_linear_scan_and_alloc(
-        (bitmap_size_in_64bit_units*8)/4096,
-        phymemspace_mgr::KERNEL
-    );
-    if(bitmap_phybase==0)
-    {
-        return OS_OUT_OF_MEMORY;
+    return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR_HCB_BITMAP,0,0,err_domain::CORE_MODULE);
+}
+KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::default_success()
+{
+    KURD_t kurd=default_kurd();
+    kurd.result=SUCCESS;
+    kurd.level=level_code::INFO;
+    return kurd;
+}
+KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::default_fail()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_result_fail_and_error_level(kurd);
+    return kurd;
+}
+KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::default_fatal()
+{
+    KURD_t kurd=default_kurd();
+    kurd=set_fatal_result_level(kurd);
+    return kurd;
+}
+KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_count)
+{
+    KURD_t success=default_success();
+    KURD_t fail=default_fail();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_BITMAP_EVENTS::EVENT_CODE_INIT;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_BITMAP_EVENTS::EVENT_CODE_INIT;
+    if(this==&kpoolmemmgr_t::first_linekd_heap.bitmap_controller){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_BITMAP_EVENTS::INIT_RESULTS::FAIL_RESONS::REASON_CODE_HCB_BITMAP_INIT_FAIL;
     }
-    this->bitmap=(uint64_t*)KspaceMapMgr::pgs_remapp(bitmap_phybase,bitmap_size_in_64bit_units*8,KSPACE_RW_ACCESS);
+    bitmap_size_in_64bit_units=entries_count/64;
+    KURD_t kurd;
+#ifdef KERNEL_MODE
+    this->bitmap=(uint64_t*)__wrapped_pgs_valloc(
+     &kurd,align_up(bitmap_size_in_64bit_units,512)/512,KERNEL,12
+    );
 #endif
 #ifdef USER_MODE
     this->bitmap=(uint64_t*)malloc((bitmap_size_in_64bit_units*8));
 #endif
-    if(this->bitmap==nullptr)return OS_MEMRY_ALLOCATE_FALT;
+    if(this->bitmap==nullptr||kurd.result!=result_code::SUCCESS)return kurd;
 
     byte_bitmap_base=(uint8_t*)this->bitmap;
-    return OS_SUCCESS;
+    return success;
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap::HCB_bitmap()
 {
@@ -84,15 +106,21 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
     byte_bitmap_base=nullptr;
     #ifdef KERNEL_MODE
    phyaddr_t bitmap_phyaddr;
-    int status=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
+    KURD_t status=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
     status=KspaceMapMgr::pgs_remapped_free((vaddr_t)this->bitmap);
-    
-    if(status!=OS_SUCCESS){
-        Panic::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed");
+    panic_info_inshort inshort={
+        .is_bug=true,
+        .is_policy=false,
+        .is_hw_fault=false,
+        .is_mem_corruption=false,
+        .is_escalated=false,  
+    };
+    if(status.result!=result_code::SUCCESS){
+        Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed",nullptr,&inshort,status);
     }
     status=phymemspace_mgr::pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
-    if(status!=OS_SUCCESS){
-        Panic::panic("kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed");
+    if(status.result!=result_code::SUCCESS){
+        Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed",nullptr,&inshort,status);
     }
     #endif
     #ifdef USER_MODE
@@ -320,13 +348,14 @@ KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
         fail.module_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::INIT_RESULTS::FAIL_RESONS::REASON_CODE_first_linekd_heap_NOT_ALLOWED;
         return fail;
     }
+    KURD_t contain;
     #ifdef KERNEL_MODE
-    phybase=phymemspace_mgr::pages_linear_scan_and_alloc(total_size_in_bytes/4096,phymemspace_mgr::KERNEL,21);
-    if(phybase==0)return OS_OUT_OF_MEMORY;
-    vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
+    phybase=__wrapped_pgs_alloc(&contain,0x200000/0x1000,KERNEL,21);
+    if(phybase==0||contain.result!=result_code::SUCCESS)return contain;
+    vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(contain,phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
     if(vbase==0){
         phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
-        return OS_MEMRY_ALLOCATE_FALT;
+        return contain;
     }
     #endif
     
@@ -344,7 +373,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
 kpoolmemmgr_t::HCB_v2::~HCB_v2()
 {
     bitmap_controller.~HCB_bitmap();
-    int status=OS_SUCCESS;
+    KURD_t status=KURD_t();
     #ifdef KERNEL_MODE
     status=KspaceMapMgr::pgs_remapped_free(vbase);
     #endif
@@ -352,12 +381,19 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
     std::free((void*)vbase);
     return;
     #endif
-    if(status!=OS_SUCCESS){
-        Panic::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed");
+    panic_info_inshort inshort={
+        .is_bug=true,
+        .is_policy=false,
+        .is_hw_fault=false,
+        .is_mem_corruption=false,
+        .is_escalated=false,  
+    };
+    if(status.result!=result_code::SUCCESS){
+        Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed",nullptr,&inshort,status);
     }
     status=phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
-    if(status!=OS_SUCCESS){
-        Panic::panic("kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed");
+    if(status.result!=result_code::SUCCESS){
+        Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed",nullptr,&inshort,status);
     }
 }
 KURD_t kpoolmemmgr_t::HCB_v2::clear(void *ptr)

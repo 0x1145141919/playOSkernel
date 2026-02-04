@@ -150,10 +150,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 0
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 0
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .debug:
@@ -176,10 +176,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 1
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 1
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .nmi:
@@ -202,10 +202,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 2
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 2
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .bp:
@@ -228,10 +228,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 3
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 3
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .of:
@@ -254,10 +254,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 4
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 4
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .br:
@@ -280,10 +280,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 5
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 5
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .ud:
@@ -306,10 +306,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 6
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 6
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .nm:
@@ -332,10 +332,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 7
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 7
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .df:
@@ -360,10 +360,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 8
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 8
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .cross:
@@ -386,10 +386,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 9
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 9
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .tss:
@@ -414,10 +414,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 10
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 10
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .NP:
@@ -442,10 +442,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 11
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 11
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .SS:
@@ -470,10 +470,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 12
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 12
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .GP:
@@ -498,10 +498,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 13
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 13
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .PF:
@@ -526,10 +526,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 14
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 14
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .vec15:
@@ -552,10 +552,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 15
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 15
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .MF:
@@ -578,10 +578,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 16
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 16
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .AC:
@@ -606,10 +606,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 17
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 17
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .MC:
@@ -632,10 +632,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 18
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 18
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .XM:
@@ -658,10 +658,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 19
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 19
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .VE:
@@ -684,10 +684,10 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 20
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 20
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
     
     .CP:
@@ -712,8 +712,8 @@ bits 32
     push eax
     mov eax, PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC
     push eax
-    mov byte [pemode_enter_checkpoint.failure_caused_excption_num], 21
-    mov word [pemode_enter_checkpoint.failure_final_stack_top], esp
+    mov byte [pemode_enter_checkpoint+check_point.failure_caused_excption_num], 21
+    mov word [pemode_enter_checkpoint+check_point.failure_final_stack_top], sp
     sfence                   ; 确保内存写入对其他核心可见
-    mov byte [pemode_enter_checkpoint.failure_flags], 0x3
+    mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机

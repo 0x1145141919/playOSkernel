@@ -27,6 +27,11 @@ cache_table_idx_struct_t cache_strategy_to_idx(cache_strategy_t cache_strategy)
     return result;
 }
 KURD_t KspaceMapMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
+    KURD_t success = default_success();
+    KURD_t fail = default_failure();
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_VM_SEARCH_BY_ADDR;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_VM_SEARCH_BY_ADDR;
+
     // 假定调用者持有 GMlock，并且前 valid_vmentry_count 项是紧凑排列的已用条目
     VM_DESC tmp_desc={
         0
@@ -36,9 +41,11 @@ KURD_t KspaceMapMgr::VM_search_by_vaddr(vaddr_t vaddr, VM_DESC &result){
     Node* result_node = kspace_vm_table->search(&tmp_desc);
     if(result_node) {
         result = *(static_cast<VM_DESC*>(result_node->data));
-        return OS_SUCCESS;
+        return success;
     }
-    return OS_NOT_EXIST; // not found
+    
+    fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::VM_SEARCH_BY_ADDR_RESULTS::FAIL_REASONS::REASON_CODE_NOT_FOUND;
+    return fail; // not found
 }
 
 
@@ -60,18 +67,18 @@ KURD_t KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
     KURD_t success = default_success();
     KURD_t fail = default_failure();
     KURD_t fatal = default_fatal();
-    success.event_code = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
-    fail.event_code = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
-    fatal.event_code = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
+    success.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
+    fail.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
+    fatal.event_code = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
 
     // basic alignment checks (4KB)
     if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE) {
-        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
         return fail;
     }
 
     if (vmentry.start >= vmentry.end) {
-        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
         return fail;
     }
 
@@ -105,14 +112,14 @@ KURD_t KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
         }
     };
     if (!vmentry_congruence_vlidation()) {
-        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_VMENTRY_congruence_vlidation;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_VMENTRY_congruence_vlidation;
         return fail;
     }
 
     // Only implement 4-level paging path here
     if (!pglv_4_or_5) {
         // 5-level not implemented in this function
-        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_NOT_SUPPORT_LV5_PAGING;
+        fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_NOT_SUPPORT_LV5_PAGING;
         return fail;
     }
 
@@ -129,7 +136,7 @@ KURD_t KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
         uint64_t psize = e.page_size_in_byte;
         // sanity check: vbase and base should be aligned to page size
         if ((e.vbase % psize) != 0 || (e.phybase % psize) != 0) {
-            fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+            fail.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
             return fail;
         }
 
@@ -150,7 +157,7 @@ KURD_t KspaceMapMgr::enable_VMentry(VM_DESC &vmentry)
                 break;
             }
             default:
-                fatal.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALIDE_PAGES_SIZE;
+                fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALIDE_PAGES_SIZE;
                 return fatal; // unknown page size
         }
         if (rc.result != result_code::SUCCESS) {

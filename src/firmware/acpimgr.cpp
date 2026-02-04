@@ -38,10 +38,11 @@ int acpimgr_t::Init(EFI_SYSTEM_TABLE *st)
     {
         return OS_INVALID_PARAMETER;
     }
-    acpi_seg_vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(des->PhysicalStart, des->NumberOfPages * 0x1000, KspaceMapMgr::PG_RW,0);
+    KURD_t kurd;
+    acpi_seg_vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,des->PhysicalStart, des->NumberOfPages * 0x1000, KspaceMapMgr::PG_RW,0);
     acpi_seg_pbase=des->PhysicalStart;
     acpi_seg_size=des->NumberOfPages * 0x1000;
-    if(acpi_seg_vbase==0)return OS_MEMRY_ALLOCATE_FALT;
+    if(acpi_seg_vbase==0)return kurd_get_raw(kurd);
     uint64_t acpi_seg_offset = acpi_seg_vbase - des->PhysicalStart;
     XSDT_OFFSET = xsdt_phy-acpi_seg_pbase;
     XSDT_Table*vXSDT = (XSDT_Table*)(XSDT_OFFSET+acpi_seg_pbase);

@@ -115,7 +115,7 @@ rootPhyMemDscptTbBsPtr[rootPhymemTbentryCount-1].NumberOfPages*PAGE_SIZE_4KB;
 
 #ifdef USER_MODE
     // 专门用于用户空间初始化的Init函数
-    void GlobalMemoryPGlevelMgr_t::Init()
+void GlobalMemoryPGlevelMgr_t::Init()
 {
     // 打开文件
     FILE *file = fopen("/home/pangsong/PS_git/OS_pj_uefi/kernel/logs/log_selftest.txt", "r");
@@ -556,7 +556,7 @@ void GlobalMemoryPGlevelMgr_t::pageSetValue(phyaddr_t EntryStartphyaddr, uint64_
         }
         
     }else{
-        kputsSecure("pageSetValue:Entry is null,Invalid EntryStartphyaddr");
+        kio::bsp_kout << "pageSetValue:Entry is null,Invalid EntryStartphyaddr";
     }
     
 }
@@ -590,70 +590,73 @@ const char *MemoryTypeToString(UINT32 type)
 }
 
 // 打印单个内存描述符
-
+void PrintMemoryDescriptor(const EFI_MEMORY_DESCRIPTORX64* desc) {
+    // 1. 打印起始物理地址
+    kio::bsp_kout << "Start: 0x";
+    kio::bsp_kout.shift_hex();
+    kio::bsp_kout << desc->PhysicalStart;
+    
+    // 2. 计算并打印终止物理地址
+    UINT64 endAddress = desc->PhysicalStart + (desc->NumberOfPages * EFI_PAGE_SIZE);
+    kio::bsp_kout << " - End: 0x";
+    kio::bsp_kout << endAddress;
+    
+    // 3. 打印内存类型和属性
+    kio::bsp_kout << " Type: ";
+    kio::bsp_kout << (char*)MemoryTypeToString(desc->Type);
+    
+    kio::bsp_kout << " Attr: 0x";
+    kio::bsp_kout << desc->Attribute;
+    
+    // 4. 打印页数（可选）
+    kio::bsp_kout << " Pages: ";
+    kio::bsp_kout.shift_dec();
+    kio::bsp_kout << desc->NumberOfPages;
+    
+    // 换行
+    kio::bsp_kout << kio::kendl;
+}
 
 phyaddr_t GlobalMemoryPGlevelMgr_t::getMaxPhyaddr()
 {
     return max_phy_addr;
 }
 
-// 打印单个内存描述符
-void PrintMemoryDescriptor(const EFI_MEMORY_DESCRIPTORX64* desc) {
-    // 1. 打印起始物理地址
-    kputsSecure("Start: 0x");
-    kpnumSecure((void*)&desc->PhysicalStart, UNHEX, sizeof(EFI_PHYSICAL_ADDRESS));
-    
-    // 2. 计算并打印终止物理地址
-    UINT64 endAddress = desc->PhysicalStart + (desc->NumberOfPages * EFI_PAGE_SIZE);
-    kputsSecure(" - End: 0x");
-    kpnumSecure((void*)&endAddress, UNHEX, sizeof(UINT64));
-    
-    // 3. 打印内存类型和属性
-    kputsSecure(" Type: ");
-    kputsSecure((char*)MemoryTypeToString(desc->Type));
-    
-    kputsSecure(" Attr: 0x");
-    kpnumSecure((void*)&desc->Attribute, UNHEX, sizeof(UINT64));
-    
-    // 4. 打印页数（可选）
-    kputsSecure(" Pages: ");
-    kpnumSecure((void*)&desc->NumberOfPages, UNDEC, sizeof(UINT64));
-    
-    // 换行
-    kputsSecure("\n");
-}void GlobalMemoryPGlevelMgr_t::printPhyMemDesTb()
+void GlobalMemoryPGlevelMgr_t::printPhyMemDesTb()
 {
-       kputsSecure("\n========== Phy Memory Map ==========\n");
+    kio::bsp_kout << kio::kendl << "========== Phy Memory Map ==========" << kio::kendl;
     
     // 打印表头
-    kputsSecure("Physical Range             Type               Attribute    Pages\n");
-    kputsSecure("-----------------------------------------------------------------\n");
+    kio::bsp_kout << "Physical Range             Type               Attribute    Pages" << kio::kendl;
+    kio::bsp_kout << "-----------------------------------------------------------------" << kio::kendl;
     
     // 遍历所有条目
     for (UINTN i = 0; i < rootPhymemTbentryCount; i++) {
-        kpnumSecure((void*)&i, UNDEC, sizeof(UINTN));
-        kputsSecure(": ");
+        kio::bsp_kout.shift_dec();
+        kio::bsp_kout << i;
+        kio::bsp_kout << ": ";
         PrintMemoryDescriptor((EFI_MEMORY_DESCRIPTORX64*)(rootPhyMemDscptTbBsPtr+i));
     }
     
-    kputsSecure("========== End of Map ==========\n");
+    kio::bsp_kout << "========== End of Map ==========" << kio::kendl;
 }
 void GlobalMemoryPGlevelMgr_t::printEfiMemoryDescriptorTable()
 {
-        kputsSecure("\n========== Memory Map ==========\n");
+    kio::bsp_kout << kio::kendl << "========== Memory Map ==========" << kio::kendl;
     
     // 打印表头
-    kputsSecure("Physical Range             Type               Attribute    Pages\n");
-    kputsSecure("-----------------------------------------------------------------\n");
+    kio::bsp_kout << "Physical Range             Type               Attribute    Pages" << kio::kendl;
+    kio::bsp_kout << "-----------------------------------------------------------------" << kio::kendl;
     
     // 遍历所有条目
     for (UINTN i = 0; i < EfiMemMapEntryCount; i++) {
-        kpnumSecure((void*)&i, UNDEC, sizeof(UINTN));
-        kputsSecure(": ");
+        kio::bsp_kout.shift_dec();
+        kio::bsp_kout << i;
+        kio::bsp_kout << ": ";
         PrintMemoryDescriptor(EfiMemMap+i);
     }
     
-    kputsSecure("========== End of Map ==========\n");
+    kio::bsp_kout << "========== End of Map ==========" << kio::kendl;
 }
 
 GlobalMemoryPGlevelMgr_t::GlobalMemoryPGlevelMgr_t()

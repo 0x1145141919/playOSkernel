@@ -105,8 +105,8 @@ namespace MEMMODULE_LOCAIONS{
                 constexpr uint16_t REASON_CODE_VMENTRY_congruence_vlidation=0x1;
                 constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
                 constexpr uint16_t REASON_CODE_BAD_VMENTRY_CANT_SPLIT=0x4;
+                constexpr uint16_t REASON_CODE_BAD_VMENTRY_TRY_TO_MAP_LOW_MEM_WHO_NOT_gKernelSpace=0x5;
                 constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;
-                    
                 }
             namespace FATAL_REASONS{
                     constexpr uint16_t REASON_CODE_TRY_TO_GET_SUB_PAGE_IN_ATOM_PAGE=0x1;//AddressSpace的设计的能力有限，
@@ -167,7 +167,8 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t EVENT_CODE_INIT=0x0;
         namespace INIT_RESULTS{
             namespace FAIL_REASONS{
-                constexpr uint16_t REASON_CODE_NOT_gKERNELSPACE=0x1;
+                constexpr uint16_t USER_TEST_KERNEL_IMAGE_SET_FAIL=0x1;
+                constexpr uint16_t USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC=0x2;
             }
         }
         constexpr uint8_t EVENT_CODE_ENABLE_VMENTRY=0x1;
@@ -253,6 +254,12 @@ namespace MEMMODULE_LOCAIONS{
             }
         }
         constexpr uint8_t EVENT_CODE_SEG_TO_INFO_PACKAGE=0x7;
+        constexpr uint8_t EVENT_CODE_VM_SEARCH_BY_ADDR=0x8;
+        namespace VM_SEARCH_BY_ADDR_RESULTS{ 
+            namespace FAIL_REASONS{
+                constexpr uint16_t REASON_CODE_NOT_FOUND=0x1;
+            }
+        }
     }
     constexpr uint8_t LOCATION_CODE_KSPACE_MAP_MGR_PGS_PAGE_TABLE=18;
 };

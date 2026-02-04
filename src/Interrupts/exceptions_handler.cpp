@@ -96,6 +96,7 @@ void double_fault_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_mem_corruption=0,
             .is_escalated=0
         };
+    kio::bsp_kout<<"double_fault_cpp_enter"<<kio::kendl;
     panic_context::x64_context panic_context = Panic::convert_to_panic_context(frame, 8);
     Panic::panic(default_panic_behaviors_flags,"kernel_context cause #DF(Double Fault)", &panic_context,&inshort,KURD_t());
 }

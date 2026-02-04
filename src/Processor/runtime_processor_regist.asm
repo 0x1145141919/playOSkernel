@@ -10,7 +10,7 @@ runtime_processor_regist:
     ; ---- reload CS ----
     mov ax, [rdi + 0x10]        ; K_CS_selector (16-bit)
     push rax
-    lea rax, [.load_cs_finish]
+    mov rax, .load_cs_finish
     push rax
     retfq
 

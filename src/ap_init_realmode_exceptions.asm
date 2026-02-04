@@ -17,10 +17,10 @@ bits 16
     mov cr0, eax
     push ax ; 只保留低16位，尤其是PE位
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 0
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 0
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .debug:
@@ -33,10 +33,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 1
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 1
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .nmi:
@@ -49,10 +49,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 2
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 2
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .bp:
@@ -65,10 +65,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 3
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 3
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .of:
@@ -81,10 +81,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 4
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 4
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .br:
@@ -97,10 +97,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 5
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 5
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .ud:
@@ -113,10 +113,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 6
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 6
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .nm:
@@ -129,10 +129,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 7
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 7
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .df:
@@ -145,10 +145,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 8
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 8
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .cross:
@@ -161,10 +161,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 9
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 9
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .tss:
@@ -177,10 +177,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 10
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 10
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .NP:
@@ -193,10 +193,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 11
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 11
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .SS:
@@ -209,10 +209,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 12
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 12
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .GP:
@@ -225,10 +225,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 13
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 13
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .PF:
@@ -241,10 +241,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 14
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 14
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .vec15:
@@ -257,10 +257,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 15
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 15
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .MF:
@@ -273,10 +273,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 16
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 16
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .AC:
@@ -289,10 +289,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 17
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 17
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .MC:
@@ -305,10 +305,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 18
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 18
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .XM:
@@ -321,10 +321,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 19
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 19
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .VE:
@@ -337,10 +337,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 20
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 20
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
     
     .CP:
@@ -353,10 +353,10 @@ bits 16
     mov cr0, eax
     push ax
     push realmode_magic
-    mov word [realmode_enter_checkpoint.failure_final_stack_top], sp
-    mov byte [realmode_enter_checkpoint.failure_caused_excption_num], 21
+    mov word [realmode_enter_checkpoint+check_point.failure_final_stack_top], sp
+    mov byte [realmode_enter_checkpoint+check_point.failure_caused_excption_num], 21
     sfence
-    mov byte [realmode_enter_checkpoint.failure_flags], 3
+    mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
 
 SECTION .init_rodata

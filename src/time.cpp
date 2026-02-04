@@ -2,7 +2,7 @@
 #include "util/OS_utils.h"
 #include "util/cpuid_intel.h"
 #include "core_hardwares/HPET.h"
-time::hardware_time_base_token* time::bsp_token;
+#include "GS_Slots_index_definitions.h"
 bool time::hardware_time::is_tsc_reliable = false;
 uint32_t time::hardware_time::tsc_fs_per_cycle = 0;
 bool time::hardware_time::is_hpet_initialized = false;
@@ -37,34 +37,32 @@ bool time::hardware_time::get_if_hpet_initialized()
 {
     return is_hpet_initialized;
 }
-time::hardware_time_base_token time::hardware_time::processor_regist()
+void time::hardware_time::processor_regist()
 {
     if(!is_tsc_reliable|| !is_hpet_initialized)
     {
-        //两者都不可用，无法注册
-        hardware_time_base_token null_token;
-        setmem(&null_token,0,sizeof(hardware_time_base_token));
-        return null_token;
+
     }else{
-        hardware_time_base_token token;
+        time_complex*complex=new time_complex;
         //读取当前HPET计数器值
-        token.hpet_base = readonly_timer->get_time_stamp_in_mius();
+        complex->private_token.hpet_base = readonly_timer->get_time_stamp_in_mius();
         //读取当前TSC值
-        token.tsc_base=rdtsc();
-        return token;
+        complex->private_token.tsc_base=rdtsc();
+        gs_u64_write(TIME_COMPLEX_GS_INDEX,(uint64_t)complex);
     }
 }
 
-time::miusecond_time_stamp_t time::hardware_time::get_stamp(hardware_time_base_token token)
+miusecond_time_stamp_t time::hardware_time::get_stamp( )
 {
     if(is_hpet_initialized){
         if(is_tsc_reliable){
             //同时可靠，使用TSC进行换算
+            time_complex*complex=(time_complex*)read_gs_u64(TIME_COMPLEX_GS_INDEX);
             uint64_t current_tsc=rdtsc();
-            uint64_t delta_cycles=current_tsc-token.tsc_base;
+            uint64_t delta_cycles=current_tsc-complex->private_token.tsc_base;
             uint64_t delta_mius=((__uint128_t)delta_cycles*tsc_fs_per_cycle)/1000000000;
             
-            return token.hpet_base+delta_mius;
+            return complex->private_token.hpet_base+delta_mius;
         }else{
             return readonly_timer->get_time_stamp_in_mius();
         }

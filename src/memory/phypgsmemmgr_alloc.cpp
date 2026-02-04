@@ -148,7 +148,7 @@ int phymemspace_mgr::phymemseg_to_pacage(
     
     return OS_SUCCESS;
 }
-phyaddr_t phymemspace_mgr::pages_linear_scan_and_alloc(uint64_t numof_4kbpgs,KURD_t&kurd, phymemspace_mgr::page_state_t state, uint8_t align_log2)
+phyaddr_t phymemspace_mgr::pages_linear_scan_and_alloc(uint64_t numof_4kbpgs,KURD_t&kurd, page_state_t state, uint8_t align_log2)
 {
     if(state==KERNEL||state==USER_ANONYMOUS||state==USER_FILE||state==DMA)
     {
@@ -276,10 +276,16 @@ static inline uint8_t normalize_align_log2(uint8_t log2)
     // 30以上按1GB处理（你的要求）
     return 30;
 }
+const phymemspace_mgr::PHYSEG phymemspace_mgr::NULL_SEG={
+    .base=0,
+    .seg_size=0,
+    .flags=0,
+    .type=RESERVED_SEG,
+};
 phymemspace_mgr::PHYSEG phymemspace_mgr::get_physeg_by_addr(phyaddr_t addr)
 {
-    PHYSEG result=NULL_SEG;
-    physeg_list->get_seg_by_addr(addr,result);
+    KURD_t kurd;
+    PHYSEG&result=physeg_list->get_seg_by_addr(addr,kurd);
     return result;
 }
 KURD_t phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs, seg_type_t type, blackhole_acclaim_flags_t flags)
@@ -293,7 +299,7 @@ KURD_t phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs,
     PHYSEG newseg={.base=base, .seg_size=numof_4kbpgs*4096,.flags=0,.type=type, };
     module_global_lock.lock();
     KURD_t status=physeg_list->add_seg(newseg);
-    if(status.event_code!=result_code::SUCCESS)
+    if(error_kurd(status))
     {
         module_global_lock.unlock();
         return status;
@@ -346,10 +352,9 @@ KURD_t phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
     if(base%4096!=0){
         fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::BLACK_HOLE_DECCLAIM_RESULTS_CODE::FAIL_REASONS::BASE_NOT_ALIGNED;
         return fail;
-    }
+    }KURD_t status;
     module_global_lock.lock();
-    PHYSEG seg;
-    KURD_t status=physeg_list->get_seg_by_base(base,seg);
+    PHYSEG&seg=physeg_list->get_seg_by_base(base,status);
     if(status.result!=result_code::SUCCESS)
     {
         module_global_lock.unlock();

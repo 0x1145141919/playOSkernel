@@ -5,6 +5,7 @@
 #include "linker_symbols.h"
 #include "memory/phyaddr_accessor.h"
 #include "util/kout.h"
+#include "panic.h"
 #ifdef KERNEL_MODE
 #include "util/kptrace.h"
 #endif
@@ -291,12 +292,29 @@ KURD_t phymemspace_mgr::pages_mmio_unregist(phyaddr_t phybase, uint64_t numof_4k
 }
 void phymemspace_mgr::in_module_panic(KURD_t kurd)
 {
-    kio::bsp_kout<<kurd;
-    
+    panic_info_inshort inshort={
+        .is_bug=1,
+        .is_policy=0,
+        .is_hw_fault=0,
+        .is_mem_corruption=0,
+        .is_escalated=0
+    };
+    Panic::panic(
+        default_panic_behaviors_flags,
+        "Panic in phymemspace_mgr",
+        nullptr,
+        &inshort,
+        kurd
+    );
 }
 KURD_t phymemspace_mgr::Init()
 {
-    KURD_t status=KURD_t();    
+    subtb_alloc_is_pool_way_flag=false;
+    KURD_t status=KURD_t();   
+    KURD_t fail=default_failure(); 
+    KURD_t success=default_success();
+    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_INIT;
+    success.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_INIT;
     //todo 注册函数
     physeg_list=new PHYSEG_LIST_ITEM();
     top_1gb_table=new Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,page_size1gb_t,__builtin_ctz(MAX_PHYADDR_1GB_PGS_COUNT)-9,9>;
@@ -343,6 +361,15 @@ KURD_t phymemspace_mgr::Init()
     low1mb_mgr=new low1mb_mgr_t();
     pages_state_set_flags_t low1mb_pgs_set = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
     status=pages_state_set(0,256,LOW1MB,low1mb_pgs_set);
+    dram_pages_state_set_flags_t dram_set={
+        .state=KERNEL_PERSIST,
+        .op=dram_pages_state_set_flags_t::normal,
+        .params={
+            .expect_meet_atom_pages_free=true,
+            .expect_meet_buddy_pages=false,
+            .if_init_ref_count=1,
+        }
+    };
 #ifdef KERNEL_MODE
     VM_DESC& basic_desc_ref= PhyAddrAccessor::BASIC_DESC;
     basic_desc_ref.SEG_SIZE_ONLY_UES_IN_BASIC_SEG=gBaseMemMgr.getMaxPhyaddr();
@@ -357,52 +384,47 @@ KURD_t phymemspace_mgr::Init()
         .type=low1mb_mgr_t::LOW1MB_TRAMPOILE_SEG
     };
     status=low1mb_mgr->regist_seg(trampoile);
-    if(status.result != result_code::SUCCESS) return status;
-    status=pages_state_set((phyaddr_t)&KImgphybase,(phyaddr_t)(text_end-text_begin)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
+    if(!success_all_kurd(status)) return status;
+    PHYSEG seg=physeg_list->get_seg_by_addr((phyaddr_t)&KImgphybase,status);
+    if(!success_all_kurd(status)){
+        return status;
+    }
+    status=dram_pages_state_set(seg,(phyaddr_t)&KImgphybase,(phyaddr_t)(text_end-text_begin)/_4KB_PG_SIZE, dram_set);
+    if(!success_all_kurd(status)) return status;
     
-    status=pages_state_set((phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
+    status=dram_pages_state_set(seg,(phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE, dram_set);
+    if(!success_all_kurd(status)) return status;
     
-    status=pages_state_set((phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
+    status=dram_pages_state_set(seg,(phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE, dram_set);
+    if(!success_all_kurd(status)) return status;
     
-    status=pages_state_set((phyaddr_t)&_stack_lma,(&_stack_top-&_stack_bottom)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
-    
-    status=pages_state_set((phyaddr_t)&_heap_bitmap_lma,(&__heap_bitmap_end-&__heap_bitmap_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
-    
-    status=pages_state_set((phyaddr_t)&_heap_lma,(&__heap_end-&__heap_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
-    
-    status=pages_state_set((phyaddr_t)&_klog_lma,(&__klog_end-&__klog_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    if(status.result != result_code::SUCCESS) return status;
-
-    status=pages_state_set((phyaddr_t)&_kspace_uppdpt_lma,(&__kspace_uppdpt_end-&__kspace_uppdpt_start)/_4KB_PG_SIZE,KERNEL_PERSIST, Kimage_regist_flags);
-    return status;
+    status=dram_pages_state_set(seg,(phyaddr_t)&_stack_lma,(&__klog_end-&_stack_bottom)/_4KB_PG_SIZE, dram_set);
+    if(!success_all_kurd(status)) return status;
+    seg.statistics.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
+    statisitcs.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
 #endif
 #ifdef USER_MODE
     //这里要通过读取kernel.elf的段信息来模仿内核态行为
     const char* elf_path = "/home/pangsong/PS_git/OS_pj_uefi/kernel/kernel.elf";
     int fd = open(elf_path, O_RDONLY);
     if (fd < 0) {
-        // 如果找不到kernel.elf，使用默认初始化
-        return OS_SUCCESS;
+        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
+        return fail;
     }
 
     // 获取文件大小
     struct stat sb;
     if (fstat(fd, &sb) < 0) {
         close(fd);
-        return OS_SUCCESS;
+        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
+        return fail;
     }
     
     // 映射文件到内存
     void* elf_mapped = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (elf_mapped == MAP_FAILED) {
-        close(fd);
-        return OS_SUCCESS;
+        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
+        return fail;
     }
 
     // ELF头部指针
@@ -415,7 +437,8 @@ KURD_t phymemspace_mgr::Init()
         ehdr->e_ident[EI_MAG3] != ELFMAG3) {
         munmap(elf_mapped, sb.st_size);
         close(fd);
-        return OS_SUCCESS;
+        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC;
+        return fail;
     }
 
     // 获取程序头表
@@ -423,8 +446,12 @@ KURD_t phymemspace_mgr::Init()
 
     // 遍历程序头表，模拟内核段注册
     pages_state_set_flags_t Kimage_regist_flags = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
+    PHYSEG&seg=physeg_list->get_seg_by_addr((phyaddr_t)phdr[4].p_paddr,status);
+    if(!success_all_kurd(status)){
+        return status;
+    }
     
-    for (int i = 0; i < ehdr->e_phnum; i++) {
+    for (int i = 4; i < ehdr->e_phnum; i++) {
         if (phdr[i].p_type == PT_LOAD && phdr[i].p_memsz > 0) {
             // 计算页数
             uint64_t page_count = (phdr[i].p_memsz + _4KB_PG_SIZE - 1) / _4KB_PG_SIZE;
@@ -433,42 +460,45 @@ KURD_t phymemspace_mgr::Init()
             page_state_t page_type = KERNEL_PERSIST; // 默认为内核持久段
             
             // 使用pages_state_set注册内存段
-            status = pages_state_set(phdr[i].p_paddr, page_count, page_type, Kimage_regist_flags);
-            if(status != OS_SUCCESS) {
+            status = dram_pages_state_set(seg,phdr[i].p_paddr, page_count, dram_set);
+            if(!success_all_kurd(status)) {
                 munmap(elf_mapped, sb.st_size);
                 close(fd);
                 return status;
             }
+            seg.statistics.kernel_persisit+=page_count;
+            statisitcs.kernel_persisit+=page_count;
         }
     }
 
     // 清理资源
     munmap(elf_mapped, sb.st_size);
     close(fd);
-    return OS_SUCCESS;
+    return success;
 #endif
 }
 #ifdef USER_MODE
 phymemspace_mgr::phymemspace_mgr()
 {
 }
-const char* page_state_to_string(phymemspace_mgr::page_state_t state) {
+#endif
+const char* page_state_to_string(page_state_t state) {
     switch (state) {
-        case phymemspace_mgr::RESERVED: return "RESERVED";
-        case phymemspace_mgr::FREE: return "FREE";
-        case phymemspace_mgr::NOT_ATOM: return "NOT_ATOM";
-        case phymemspace_mgr::FULL: return "FULL";
-        case phymemspace_mgr::MMIO_FREE: return "MMIO_FREE";
-        case phymemspace_mgr::KERNEL: return "KERNEL";
-        case phymemspace_mgr::KERNEL_PERSIST: return "KERNEL_PERSIST";
-        case phymemspace_mgr::UEFI_RUNTIME: return "UEFI_RUNTIME";
-        case phymemspace_mgr::ACPI_TABLES: return "ACPI_TABLES";
-        case phymemspace_mgr::ACPI_NVS: return "ACPI_NVS";
-        case phymemspace_mgr::USER_FILE: return "USER_FILE";
-        case phymemspace_mgr::USER_ANONYMOUS: return "USER_ANONYMOUS";
-        case phymemspace_mgr::DMA: return "DMA";
-        case phymemspace_mgr::MMIO: return "MMIO";
-        case phymemspace_mgr::LOW1MB: return "LOW1MB";
+        case RESERVED: return "RESERVED";
+        case FREE: return "FREE";
+        case NOT_ATOM: return "NOT_ATOM";
+        case FULL: return "FULL";
+        case MMIO_FREE: return "MMIO_FREE";
+        case KERNEL: return "KERNEL";
+        case KERNEL_PERSIST: return "KERNEL_PERSIST";
+        case UEFI_RUNTIME: return "UEFI_RUNTIME";
+        case ACPI_TABLES: return "ACPI_TABLES";
+        case ACPI_NVS: return "ACPI_NVS";
+        case USER_FILE: return "USER_FILE";
+        case USER_ANONYMOUS: return "USER_ANONYMOUS";
+        case DMA: return "DMA";
+        case MMIO: return "MMIO";
+        case LOW1MB: return "LOW1MB";
         default: return "UNKNOWN";
     }
 }
@@ -476,50 +506,58 @@ const char* page_state_to_string(phymemspace_mgr::page_state_t state) {
 int phymemspace_mgr::print_all_atom_table()
 {
     if (!top_1gb_table) {
-        printf("top_1gb_table is null\n");
+        kio::bsp_kout << "top_1gb_table is null" << kio::kendl;
         return 0;
     }
 
-    printf("Printing all atom table entries:\n");
+    kio::bsp_kout << "Printing all atom table entries:" << kio::kendl;
     
     // 遍历稀疏表的所有项
     for (uint32_t i = 0; i < MAX_PHYADDR_1GB_PGS_COUNT; i++) {
         page_size1gb_t *pg_1gb = top_1gb_table->get(i);
         if (pg_1gb) {
-            printf("1GB Page Table Entry [%u]:\n", i);
-            printf("  Base Address: 0x%lx00000000\n", (uint64_t)i);
-            printf("  State: %s\n", page_state_to_string(static_cast<page_state_t>(pg_1gb->flags.state)));
-            printf("  Sub-table valid: %s\n", pg_1gb->flags.is_sub_valid ? "true" : "false");
-            printf("  Ref Count: %u\n", pg_1gb->ref_count);
-            printf("  Map Count: %u\n", pg_1gb->map_count);
+            kio::bsp_kout << "1GB Page Table Entry [" << i << "]:" << kio::kendl;
+            kio::bsp_kout << "  Base Address: 0x";
+            kio::bsp_kout.shift_hex();
+            kio::bsp_kout << (uint64_t)i << "00000000" << kio::kendl;
+            kio::bsp_kout << "  State: " << page_state_to_string(static_cast<page_state_t>(pg_1gb->flags.state)) << kio::kendl;
+            kio::bsp_kout << "  Sub-table valid: " << (pg_1gb->flags.is_sub_valid ? "true" : "false") << kio::kendl;
+            kio::bsp_kout << "  Ref Count: ";
+            kio::bsp_kout.shift_dec();
+            kio::bsp_kout << pg_1gb->ref_count << kio::kendl;
+            kio::bsp_kout << "  Map Count: " << pg_1gb->map_count << kio::kendl;
             
             if (pg_1gb->flags.is_sub_valid) {
-                printf("  2MB Sub-table:\n");
+                kio::bsp_kout << "  2MB Sub-table:" << kio::kendl;
                 for (uint16_t j = 0; j < 512; j++) {
                     page_size2mb_t &pg_2mb = pg_1gb->sub2mbpages[j];
                     if (&pg_2mb) { // 检查是否存在
-                        printf("    2MB Page Entry [%u][%u]:\n", i, j);
-                        printf("      State: %s\n", page_state_to_string(static_cast<page_state_t>(pg_2mb.flags.state)));
-                        printf("      Sub-table valid: %s\n", pg_2mb.flags.is_sub_valid ? "true" : "false");
-                        printf("      Ref Count: %u\n", pg_2mb.ref_count);
-                        printf("      Map Count: %u\n", pg_2mb.map_count);
+                        kio::bsp_kout << "    2MB Page Entry [" << i << "][" << j << "]:" << kio::kendl;
+                        kio::bsp_kout << "      State: " << page_state_to_string(static_cast<page_state_t>(pg_2mb.flags.state)) << kio::kendl;
+                        kio::bsp_kout << "      Sub-table valid: " << (pg_2mb.flags.is_sub_valid ? "true" : "false") << kio::kendl;
+                        kio::bsp_kout << "      Ref Count: ";
+                        kio::bsp_kout.shift_dec();
+                        kio::bsp_kout << pg_2mb.ref_count << kio::kendl;
+                        kio::bsp_kout << "      Map Count: " << pg_2mb.map_count << kio::kendl;
                         
                         if (pg_2mb.flags.is_sub_valid) {
-                            printf("      4KB Sub-table:\n");
+                            kio::bsp_kout << "      4KB Sub-table:" << kio::kendl;
                             for (uint16_t k = 0; k < 512; k++) {
                                 page_size4kb_t &pg_4kb = pg_2mb.sub_pages[k];
                                 if (&pg_4kb) { // 检查是否存在
-                                    printf("        4KB Page Entry [%u][%u][%u]:\n", i, j, k);
-                                    printf("          State: %s\n", page_state_to_string(static_cast<page_state_t>(pg_4kb.flags.state)));
-                                    printf("          Ref Count: %u\n", pg_4kb.ref_count);
-                                    printf("          Map Count: %u\n", pg_4kb.map_count);
+                                    kio::bsp_kout << "        4KB Page Entry [" << i << "][" << j << "][" << k << "]:" << kio::kendl;
+                                    kio::bsp_kout << "          State: " << page_state_to_string(static_cast<page_state_t>(pg_4kb.flags.state)) << kio::kendl;
+                                    kio::bsp_kout << "          Ref Count: ";
+                                    kio::bsp_kout.shift_dec();
+                                    kio::bsp_kout << pg_4kb.ref_count << kio::kendl;
+                                    kio::bsp_kout << "          Map Count: " << pg_4kb.map_count << kio::kendl;
                                 }
                             }
                         }
                     }
                 }
             }
-            printf("\n");
+            kio::bsp_kout << kio::kendl;
         }
     }
     
@@ -528,43 +566,57 @@ int phymemspace_mgr::print_all_atom_table()
 int phymemspace_mgr::print_allseg()
 {
     if (!physeg_list) {
-        printf("physeg_list is null\n");
+        kio::bsp_kout << "physeg_list is null" << kio::kendl;
         return 0;
     }
 
-    printf("Printing all segments:\n");
-    printf("Total segments: %zu\n", physeg_list->size());
+    kio::bsp_kout << "Printing all segments:" << kio::kendl;
+    kio::bsp_kout << "Total segments: ";
+    kio::bsp_kout.shift_dec();
+    kio::bsp_kout << physeg_list->size() << kio::kendl;
     
     int idx = 0;
     for (auto it = physeg_list->begin(); it != physeg_list->end(); ++it, ++idx) {
         PHYSEG& seg = *it;
-        printf("Segment [%d]:\n", idx);
-        printf("  Base: 0x%lx\n", seg.base);
-        printf("  Size: 0x%lx bytes (%.2f MB)\n", seg.seg_size, seg.seg_size / (1024.0 * 1024.0));
-        printf("  Type: ");
+        kio::bsp_kout << "Segment [" << idx << "]:" << kio::kendl;
+        kio::bsp_kout << "  Base: 0x";
+        kio::bsp_kout.shift_hex();
+        kio::bsp_kout << seg.base << kio::kendl;
+        kio::bsp_kout << "  Size: 0x";
+        kio::bsp_kout.shift_hex();
+        kio::bsp_kout << seg.seg_size << " bytes (";
+        kio::bsp_kout.shift_dec();
+        kio::bsp_kout << (seg.seg_size / (1024 * 1024)) << " MB)" << kio::kendl;
+        kio::bsp_kout << "  Type: ";
         switch(seg.type) {
-            case DRAM_SEG: printf("DRAM_SEG\n"); break;
-            case FIRMWARE_RESERVED_SEG: printf("FIRMWARE_RESERVED_SEG\n"); break;
-            case RESERVED_SEG: printf("RESERVED_SEG\n"); break;
-            case MMIO_SEG: printf("MMIO_SEG\n"); break;
-            case LOW1MB_SEG: printf("LOW1MB_SEG\n"); break;
-            default: printf("Unknown(%d)\n", seg.type); break;
+            case DRAM_SEG: kio::bsp_kout << "DRAM_SEG" << kio::kendl; break;
+            case FIRMWARE_RESERVED_SEG: kio::bsp_kout << "FIRMWARE_RESERVED_SEG" << kio::kendl; break;
+            case RESERVED_SEG: kio::bsp_kout << "RESERVED_SEG" << kio::kendl; break;
+            case MMIO_SEG: kio::bsp_kout << "MMIO_SEG" << kio::kendl; break;
+            case LOW1MB_SEG: kio::bsp_kout << "LOW1MB_SEG" << kio::kendl; break;
+            default: kio::bsp_kout << "Unknown(";
+                     kio::bsp_kout.shift_dec();
+                     kio::bsp_kout << seg.type << ")" << kio::kendl; break;
         }
-        printf("  Flags: 0x%lx\n", seg.flags);
-        printf("  Statistics:\n");
-        printf("    Total Pages: %lu\n", seg.statistics.total_pages);
-        printf("    MMIO: %lu pages (%lu bytes)\n", seg.statistics.mmio, seg.statistics.mmio * 4096);
-        printf("    Kernel: %lu pages (%lu bytes)\n", seg.statistics.kernel, seg.statistics.kernel * 4096);
-        printf("    Kernel Persist: %lu pages (%lu bytes)\n", seg.statistics.kernel_persisit, seg.statistics.kernel_persisit * 4096);
-        printf("    User File: %lu pages (%lu bytes)\n", seg.statistics.user_file, seg.statistics.user_file * 4096);
-        printf("    User Anonymous: %lu pages (%lu bytes)\n", seg.statistics.user_anonymous, seg.statistics.user_anonymous * 4096);
-        printf("    DMA: %lu pages (%lu bytes)\n", seg.statistics.dma, seg.statistics.dma * 4096);
-        printf("\n");
+        kio::bsp_kout << "  Flags: 0x";
+        kio::bsp_kout.shift_hex();
+        kio::bsp_kout << seg.flags << kio::kendl;
+        kio::bsp_kout << "  Statistics:" << kio::kendl;
+        kio::bsp_kout << "    Total Pages: ";
+        kio::bsp_kout.shift_dec();
+        kio::bsp_kout << seg.statistics.total_pages << kio::kendl;
+        kio::bsp_kout << "    MMIO: " << seg.statistics.mmio << " pages (" << seg.statistics.mmio * 4096 << " bytes)" << kio::kendl;
+        kio::bsp_kout << "    Kernel: " << seg.statistics.kernel << " pages (" << seg.statistics.kernel * 4096 << " bytes)" << kio::kendl;
+        kio::bsp_kout << "    Kernel Persist: " << seg.statistics.kernel_persisit << " pages (" << seg.statistics.kernel_persisit * 4096 << " bytes)" << kio::kendl;
+        kio::bsp_kout << "    User File: " << seg.statistics.user_file << " pages (" << seg.statistics.user_file * 4096 << " bytes)" << kio::kendl;
+        kio::bsp_kout << "    User Anonymous: " << seg.statistics.user_anonymous << " pages (" << seg.statistics.user_anonymous * 4096 << " bytes)" << kio::kendl;
+        kio::bsp_kout << "    DMA: " << seg.statistics.dma << " pages (" << seg.statistics.dma * 4096 << " bytes)" << kio::kendl;
+        kio::bsp_kout << kio::kendl;
     }
     
     return 0;
 }
-#endif
+
 phymemspace_mgr::free_segs_t *phymemspace_mgr::free_segs_get()
 {
     return nullptr;
@@ -739,7 +791,7 @@ KURD_t phymemspace_mgr::pages_recycle_verify(
                 }
             }
 
-            if (p1-fan hui zhi>flags.state != orig_state) {
+            if (p1->flags.state != orig_state) {
                 fail.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_VERIFY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_PAGE_STATE_SHIFT;
                 return fail;
             }
@@ -781,4 +833,8 @@ KURD_t phymemspace_mgr::pages_recycle_verify(
 phymemspace_mgr::phymemmgr_statistics_t phymemspace_mgr::get_statisit_copy()
 {
     return statisitcs;
+}
+void phymemspace_mgr::subtb_alloc_is_pool_way_flag_enable()
+{
+    subtb_alloc_is_pool_way_flag = true;
 }

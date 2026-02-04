@@ -4,7 +4,6 @@
 #include "util/kout.h"
 #ifdef KERNEL_MODE
 #include "util/kptrace.h"
-#include "phygpsmemmgr.h"
 #endif
 KURD_t phymemspace_mgr::pages_dram_buddy_regist(phyaddr_t phybase, uint64_t numof_4kbpgs)
 {
@@ -16,16 +15,19 @@ KURD_t phymemspace_mgr::pages_dram_buddy_regist(phyaddr_t phybase, uint64_t numo
         //fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_RESULTS_CODE::FAIL_REASONS::REASON_CODE_DRAMSEG_NOT_EXIST;
     }
     dram_pages_state_set_flags_t flags={
-        .op=dram_pages_state_set_flags_t::buddypages_unregist,
+        .state=FREE,
+        .op=dram_pages_state_set_flags_t::buddypages_regist,
         .params{
             .expect_meet_atom_pages_free=true,
             .expect_meet_buddy_pages=false,
             .if_init_ref_count=true
         }
     };
-    return dram_pages_state_set(
+    KURD_t status= dram_pages_state_set(
         seg,phybase,numof_4kbpgs,flags
     );
+    module_global_lock.unlock();
+    return status;
 }
 KURD_t phymemspace_mgr::pages_dram_buddy_unregist(phyaddr_t phybase, uint64_t numof_4kbpgs)
 {
@@ -46,9 +48,11 @@ KURD_t phymemspace_mgr::pages_dram_buddy_unregist(phyaddr_t phybase, uint64_t nu
         }
         
     };
-    return dram_pages_state_set(
+    KURD_t status= dram_pages_state_set(
         seg,phybase,numof_4kbpgs,flags
     );
+    module_global_lock.unlock();
+    return status;
 }
 
 KURD_t phymemspace_mgr::pages_dram_buddy_pages_set(phyaddr_t phybase, uint64_t numof_4kbpgs, page_state_t state)
@@ -67,15 +71,17 @@ KURD_t phymemspace_mgr::pages_dram_buddy_pages_set(phyaddr_t phybase, uint64_t n
         .state=state,
         .op=dram_pages_state_set_flags_t::normal,
         .params{
-            .expect_meet_atom_pages_free=true,
+            .expect_meet_atom_pages_free=false,
             .expect_meet_buddy_pages=true,
-            .if_init_ref_count=true,
+            .if_init_ref_count=false,
         }
         
     };
-    return dram_pages_state_set(
+    KURD_t status= dram_pages_state_set(
         seg,phybase,numof_4kbpgs,flags
     );
+    module_global_lock.unlock();
+    return status;
 }
 
 KURD_t phymemspace_mgr::pages_dram_buddy_pages_free(phyaddr_t phybase, uint64_t numof_4kbpgs)
@@ -92,6 +98,7 @@ KURD_t phymemspace_mgr::pages_dram_buddy_pages_free(phyaddr_t phybase, uint64_t 
         phybase,numof_4kbpgs,state
     );
     if(status.result!=result_code::SUCCESS){
+        module_global_lock.unlock();
         return status;
     }
     dram_pages_state_set_flags_t flags={
@@ -104,7 +111,9 @@ KURD_t phymemspace_mgr::pages_dram_buddy_pages_free(phyaddr_t phybase, uint64_t 
         }
         
     };
-    return dram_pages_state_set(
+    status= dram_pages_state_set(
         seg,phybase,numof_4kbpgs,flags
     );
+    module_global_lock.unlock();
+    return status;
 }

@@ -75,5 +75,9 @@ KURD_t raw_analyze(uint64_t raw) {
 }
 bool error_kurd(KURD_t kurd)
 {
-    return kurd.reason>=result_code::FAIL;
+    return kurd.result>=result_code::FAIL;
+}
+bool success_all_kurd(KURD_t kurd)
+{
+    return kurd.result==result_code::SUCCESS;
 }

@@ -12,39 +12,10 @@
 #ifdef USER_MODE
 #include <unistd.h>
 #endif 
-
+kernel_state GlobalKernelStatus;
 panic_last_will will;
 bool Panic::is_latest_panic_valid;
-// 注意：global_gST已经在UefiRunTimeServices.cpp中定义，此处不再重复定义
-// EFI_SYSTEM_TABLE* global_gST = nullptr;
 
-void Panic::write_will()
-{
-    uint64_t start_addr = (uint64_t)&__heap_bitmap_start;
-    uint64_t end_addr = (uint64_t)&__heap_bitmap_end;
-    
-    // 将起始地址对齐到4KB边界
-    start_addr = (start_addr + 0xFFF) & (~0xFFF);
-    
-    // 遍历__heap_bitmap_start和__heap_bitmap_end之间每个4KB页对齐的地址并复制panic_last_will结构
-    for (uint64_t addr = start_addr; addr + sizeof(panic_last_will) <= end_addr; addr += 0x1000) {
-        panic_last_will* will_ptr = (panic_last_will*)addr;
-        ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
-    }
-    
-    // 同样处理__heap_start到__heap_end之间的内存区域
-    start_addr = (uint64_t)&__heap_start;
-    end_addr = (uint64_t)&__heap_end;
-    
-    // 将起始地址对齐到4KB边界
-    start_addr = (start_addr + 0xFFF) & (~0xFFF);
-    
-    // 遍历__heap_start和__heap_end之间每个4KB页对齐的地址并复制panic_last_will结构
-    for (uint64_t addr = start_addr; addr + sizeof(panic_last_will) <= end_addr; addr += 0x1000) {
-        panic_last_will* will_ptr = (panic_last_will*)addr;
-        ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
-    }
-}
 
 /**
  * 私有构造函数
@@ -238,6 +209,36 @@ void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context:
     asm volatile("cli");
     asm volatile("hlt");
 }
+// 注意：global_gST已经在UefiRunTimeServices.cpp中定义，此处不再重复定义
+// EFI_SYSTEM_TABLE* global_gST = nullptr;
+
+void Panic::write_will()
+{
+    uint64_t start_addr = (uint64_t)&__heap_bitmap_start;
+    uint64_t end_addr = (uint64_t)&__heap_bitmap_end;
+    
+    // 将起始地址对齐到4KB边界
+    start_addr = (start_addr + 0xFFF) & (~0xFFF);
+    
+    // 遍历__heap_bitmap_start和__heap_bitmap_end之间每个4KB页对齐的地址并复制panic_last_will结构
+    for (uint64_t addr = start_addr; addr + sizeof(panic_last_will) <= end_addr; addr += 0x1000) {
+        panic_last_will* will_ptr = (panic_last_will*)addr;
+        ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
+    }
+    
+    // 同样处理__heap_start到__heap_end之间的内存区域
+    start_addr = (uint64_t)&__heap_start;
+    end_addr = (uint64_t)&__heap_end;
+    
+    // 将起始地址对齐到4KB边界
+    start_addr = (start_addr + 0xFFF) & (~0xFFF);
+    
+    // 遍历__heap_start和__heap_end之间每个4KB页对齐的地址并复制panic_last_will结构
+    for (uint64_t addr = start_addr; addr + sizeof(panic_last_will) <= end_addr; addr += 0x1000) {
+        panic_last_will* will_ptr = (panic_last_will*)addr;
+        ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
+    }
+}
 #endif
 #ifdef USER_MODE
 void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context::x64_context *context,panic_info_inshort*panic_info, KURD_t kurd)
@@ -245,12 +246,17 @@ void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context:
     kio::bsp_kout<<kio::now<<"USERMODE EMULATION PANIC: "<<kio::kendl;
     kio::bsp_kout<<kurd<<kio::kendl;
     if(message)kio::bsp_kout<<message<<kio::kendl;
+    _exit(-1);
 }
 #endif
 void Panic::other_processors_froze_handler()
 {
     asm volatile("cli");
     asm volatile("hlt");
+}
+KURD_t Panic::will_check()
+{
+    return KURD_t();
 }
 /**
  * 转储 panic_context 中的 CPU 寄存器信息
@@ -276,14 +282,14 @@ void Panic::dumpregisters(panic_context::x64_context* regs) {
     kio::bsp_kout << "R14: 0x" << regs->r14 << kio::kendl;
     kio::bsp_kout << "R15: 0x" << regs->r15 << kio::kendl;
     
-    kio::bsp_kout << "\nControl Registers:" << kio::kendl;
+    kio::bsp_kout << "Control Registers:" << kio::kendl;
     kio::bsp_kout << "CR0: 0x" << regs->cr0 << kio::kendl;
     kio::bsp_kout << "CR2: 0x" << regs->cr2 << kio::kendl;
     kio::bsp_kout << "CR3: 0x" << regs->cr3 << kio::kendl;
     kio::bsp_kout << "CR4: 0x" << regs->cr4 << kio::kendl;
     kio::bsp_kout << "EFER: 0x" << regs->IA32_EFER << kio::kendl;
     
-    kio::bsp_kout << "\nSegment Registers:" << kio::kendl;
+    kio::bsp_kout << "Segment Registers:" << kio::kendl;
     kio::bsp_kout << "CS: 0x" << regs->cs << kio::kendl;
     kio::bsp_kout << "DS: 0x" << regs->ds << kio::kendl;
     kio::bsp_kout << "ES: 0x" << regs->es << kio::kendl;
@@ -291,19 +297,19 @@ void Panic::dumpregisters(panic_context::x64_context* regs) {
     kio::bsp_kout << "GS: 0x" << regs->gs << kio::kendl;
     kio::bsp_kout << "SS: 0x" << regs->ss << kio::kendl;
     
-    kio::bsp_kout << "\nOther Registers:" << kio::kendl;
+    kio::bsp_kout << "Other Registers:" << kio::kendl;
     kio::bsp_kout << "RFLAGS: 0x" << regs->rflags << kio::kendl;
     kio::bsp_kout << "RIP: 0x" << regs->rip << kio::kendl;
     kio::bsp_kout << "FS_BASE: 0x" << regs->fs_base << kio::kendl;
     kio::bsp_kout << "GS_BASE: 0x" << regs->gs_base << kio::kendl;
     
-    kio::bsp_kout << "\nDescriptor Tables:" << kio::kendl;
+    kio::bsp_kout << "Descriptor Tables:" << kio::kendl;
     kio::bsp_kout << "GDTR: Limit=0x" << regs->gdtr.limit << ", Base=0x" << regs->gdtr.base << kio::kendl;
     kio::bsp_kout << "IDTR: Limit=0x" << regs->idtr.limit << ", Base=0x" << regs->idtr.base << kio::kendl;
     
     // 如果是硬件中断，打印额外信息
     if (regs->specific.is_hadware_interrupt) {
-        kio::bsp_kout << "\nHardware Interrupt Information:" << kio::kendl;
+        kio::bsp_kout << "Hardware Interrupt Information:" << kio::kendl;
         kio::bsp_kout << "Hardware Error Code: 0x" << regs->specific.hardware_errorcode << kio::kendl;
         kio::bsp_kout << "Interrupt Vector Number: 0x" << (uint32_t)regs->specific.interrupt_vec_num << kio::kendl;
     }

@@ -124,3 +124,4 @@ namespace err_domain {
     constexpr uint8_t HARDWARE = 10;
 };
 bool error_kurd(KURD_t kurd);
+bool success_all_kurd(KURD_t kurd);

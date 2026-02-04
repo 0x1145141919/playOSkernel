@@ -11,48 +11,69 @@ HPET_driver_only_read_time_stamp::HPET_driver_only_read_time_stamp(HPET::ACPItb:
     hpet_timer_period_fs = 0;
     comparator_count = 0;
 }
-
-int HPET_driver_only_read_time_stamp::second_stage_init()
+KURD_t HPET_driver_only_read_time_stamp::default_kurd()
 {
-    int status = 0;
+    return KURD_t(0,0,module_code::DEVICES_CORE,COREHARDWARES_LOCATIONS::LOCATION_CODE_HPET,0,0,err_domain::CORE_MODULE);
+}
+KURD_t HPET_driver_only_read_time_stamp::default_success()
+{
+    KURD_t kurd=default_kurd();
+    kurd.result=result_code::SUCCESS;
+    kurd.level=level_code::INFO;
+    return kurd;
+}
+KURD_t HPET_driver_only_read_time_stamp::second_stage_init()
+{
+    KURD_t status = KURD_t();
+    KURD_t fail=default_kurd();
+    fail=set_result_fail_and_error_level(fail);
+    fail.event_code=COREHARDWARES_LOCATIONS::HPET_READONLY_DRIVERS_EVENTS::INIT;
     //先防重复调用
     if (virt_reg_base != 0||
         phy_reg_base != 0||
         hpet_timer_period_fs != 0)
-        return 0;
+        {
+            fail.reason=COREHARDWARES_LOCATIONS::HPET_READONLY_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::ALLREADE_INIT;
+            return fail;
+        }
 
 
      //再对ACPI表地址合法性进行检查
-     if(table == nullptr)   
-        return HPET::error_code::ERROR_INVALID_ACPI_ADDR;
+     if(table == nullptr){
+            fail.reason=COREHARDWARES_LOCATIONS::HPET_READONLY_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::INVALID_ACPI_ADDR;
+            return fail;
+        }
     phy_reg_base = table->Base_Address;
-    if(phy_reg_base%4096 != 0)
-        return HPET::error_code::ERROR_ACPI_ADDR_NOT_ALIGN;
+    if(phy_reg_base%4096 != 0){
+            fail.reason=COREHARDWARES_LOCATIONS::HPET_READONLY_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::ACPI_ADDR_NOT_ALIGN;
+            return fail;
+        }
     //先找物理页框系统注册mmio物理页
     status=phymemspace_mgr::pages_mmio_regist(phy_reg_base,1);
-    if(status==OS_INVALID_ADDRESS)//说明不落在一个mmio段内
+    if(status.event_code==MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_MMIO_REGIST||
+    status.reason==MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::MMIO_REGIST_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MMIOSEG_NOT_EXIST)//说明不落在一个mmio段内
         {
             status=phymemspace_mgr::blackhole_acclaim(
                 phy_reg_base,
                 1,
-                phymemspace_mgr::MMIO_SEG,
+                MMIO_SEG,
                 phymemspace_mgr::blackhole_acclaim_flags_t{0}
             );
-            if(status!=OS_SUCCESS)
+            if(status.result!=result_code::SUCCESS)
                 return status;
             status=phymemspace_mgr::pages_mmio_regist(phy_reg_base,1);
-            if(status!=OS_SUCCESS)
+            if(status.result!=result_code::SUCCESS)
                 return status;
         }
     pgaccess access=KspaceMapMgr::PG_RW;
     access.cache_strategy=UC;
-    virt_reg_base=(vaddr_t)KspaceMapMgr::pgs_remapp(
+    virt_reg_base=(vaddr_t)KspaceMapMgr::pgs_remapp(status,
         phy_reg_base,
         4096,
         access
     );
     if(virt_reg_base==0)
-        return HPET::error_code::ERROR_INVALID_STATE;
+        return status;
     uint64_t gen_cap_id_reg=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_General_Capabilities_and_ID));
     hpet_timer_period_fs=gen_cap_id_reg>>HPET::regs::COUNTER_CLK_PERIOD_LEFT_OFFSET;
     comparator_count=((gen_cap_id_reg>>HPET::regs::COMPARATOR_COUNT_LEFT_OFFSET)&HPET::regs::COMPARATOR_COUNT_MASK)+1;
@@ -70,17 +91,19 @@ int HPET_driver_only_read_time_stamp::second_stage_init()
     uint64_t gen_config_reg=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_General_Config));
     gen_config_reg |= HPET::regs::GCONFIG_ENABLE_BIT;
     atomic_write64_rdbk((void*)(virt_reg_base+HPET::regs::offset_General_Config), gen_config_reg);
-    return OS_SUCCESS;
+    KURD_t success=default_success();
+    success.event_code=COREHARDWARES_LOCATIONS::HPET_READONLY_DRIVERS_EVENTS::INIT;
+    return success;
 }
 
 HPET_driver_only_read_time_stamp::~HPET_driver_only_read_time_stamp()
 {
-    int status = 0;
+    KURD_t status = KURD_t();
     status=phymemspace_mgr::pages_mmio_unregist(phy_reg_base,1);
-    if(status!=OS_SUCCESS)
+    if(status.result!=result_code::SUCCESS)
         return;
     status=KspaceMapMgr::pgs_remapped_free(virt_reg_base);
-    if(status!=OS_SUCCESS)
+    if(status.result!=result_code::SUCCESS)
         return;
     uint64_t gen_config_reg=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_General_Config));
     gen_config_reg &= ~HPET::regs::GCONFIG_ENABLE_BIT;

@@ -97,7 +97,7 @@ KURD_t phymemspace_mgr::align4kb_pages_search(
                     return success;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
+                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST||p1->flags.state==DMA) {
                 accummulated_count = 0;
                 phyaddr_in_idx_t next_idx;
                 next_idx._1gb_idx = i1 + 1;
@@ -155,7 +155,7 @@ KURD_t phymemspace_mgr::align4kb_pages_search(
                     }
                 } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
                            p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||
-                        p2->flags.is_belonged_to_buddy) {
+                           p2->flags.state == DMA||p2->flags.is_belonged_to_buddy) {
                     accummulated_count = 0;
                     phyaddr_in_idx_t next_idx;
                     next_idx._1gb_idx = i1;
@@ -224,7 +224,7 @@ KURD_t phymemspace_mgr::align4kb_pages_search(
                     }
                 } else if (p4->flags.state == KERNEL || p4->flags.state == USER_ANONYMOUS ||
                            p4->flags.state == USER_FILE || p4->flags.state == KERNEL_PERSIST||
-                        p4->flags.is_belonged_to_buddy) {
+                           p4->flags.state==DMA||p4->flags.is_belonged_to_buddy) {
                     accummulated_count = 0;
                     expected_next_phys = p4_base + P4K;
                 } else { //剩下的类型不应该出现在DRAM段里面
@@ -242,7 +242,6 @@ KURD_t phymemspace_mgr::align4kb_pages_search(
                 kio::bsp_kout<<"[phymemspace_mgr::align4kb_pages_search]Illegal page state ("<<p2->flags.state<<") when scanning 2MB entry in dram seg, at index: "
                              <<"1GB:"<<cur2._1gb_idx<<", 2MB:"<<cur2._2mb_idx
                              <<", base address: "<<(void*)idx_to_phyaddr(cur2)<<kio::kendl;
-                self_trace();
                 result_base = 0;
                 fatal.reason = MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::ALIGN_SEARCHES_RESULTS_CODE::FATAL_REASONS::REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE;
                 return fatal;
@@ -307,7 +306,7 @@ KURD_t phymemspace_mgr::align2mb_pages_search(
                     return success;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST) {
+                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST||p1->flags.state==DMA) {
                 phyaddr_in_idx_t next_idx;
                 next_idx._1gb_idx = i1 + 1;
                 next_idx._2mb_idx = 0;
@@ -367,7 +366,7 @@ KURD_t phymemspace_mgr::align2mb_pages_search(
                         }
                     } else if (p2->flags.state == KERNEL || p2->flags.state == USER_ANONYMOUS ||
                                p2->flags.state == USER_FILE || p2->flags.state == KERNEL_PERSIST||
-                               p2->flags.state == NOT_ATOM || p2->flags.is_belonged_to_buddy) {
+                               p2->flags.state == NOT_ATOM ||p2->flags.state == DMA||p2->flags.is_belonged_to_buddy) {
                         phyaddr_in_idx_t next_idx;
                         next_idx._1gb_idx = i1;
                         next_idx._2mb_idx = i2 + 1;
@@ -458,7 +457,8 @@ KURD_t phymemspace_mgr::align1gb_pages_search(
                     return success;
                 }
             } else if (p1->flags.state == KERNEL || p1->flags.state == USER_ANONYMOUS ||
-                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST||p1->flags.is_belonged_to_buddy) {
+                       p1->flags.state == USER_FILE || p1->flags.state == KERNEL_PERSIST||
+                       p1->flags.state==DMA||p1->flags.is_belonged_to_buddy) {
                 phyaddr_in_idx_t next_idx;
                 next_idx._1gb_idx = i1 + 1;
                 next_idx._2mb_idx = 0;

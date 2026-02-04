@@ -6,35 +6,44 @@
 #include "linker_symbols.h"
 #include "memory/FreePagesAllocator.h"
 #include "memory/AddresSpace.h"
+#include "panic.h"
 bool phymemspace_mgr::subtb_alloc_is_pool_way_flag;
 static constexpr uint64_t PAGES_4KB_PER_2MB = 512;
 static constexpr uint64_t PAGES_2MB_PER_1GB = 512;
 static constexpr uint64_t PAGES_4KB_PER_1GB = PAGES_4KB_PER_2MB * PAGES_2MB_PER_1GB; // 262144
 phymemspace_mgr::page_size2mb_t *phymemspace_mgr::alloc_2mb_subtable()
 {//刻意不用pages_set,不然可能无限递归
+    #ifdef KERNEL_MODE
     if(subtb_alloc_is_pool_way_flag)return new page_size2mb_t[PAGES_2MB_PER_1GB];
     else{
+        
         uint32_t size=PAGES_4KB_PER_1GB * sizeof(page_size1gb_t);
         KURD_t kurd;
         phyaddr_t phybase=FreePagesAllocator::first_BCB->allocate_buddy_way(size,kurd);
         if(kurd.result!=result_code::SUCCESS){
-            //原子操作失败，直接panic
+            in_module_panic(kurd);
         }
         page_size2mb_t*result=(page_size2mb_t*)KspaceMapMgr::pgs_remapp(
-            phybase,
+            kurd,phybase,
             size,
             KspaceMapMgr::PG_RW,
             0,
             true
         );
         if(result==nullptr){
-            //内存分配失败，直接panic
+            in_module_panic(kurd);
         }
         return result;
+        
     }
+    #endif
+    #ifdef USER_MODE
+    return new page_size2mb_t[PAGES_2MB_PER_1GB];
+    #endif
 }
 void phymemspace_mgr::free_2mb_subtable(page_size2mb_t *table)
 {
+    #ifdef KERNEL_MODE
     if(subtb_alloc_is_pool_way_flag){
         delete[] table;
     }
@@ -42,42 +51,52 @@ void phymemspace_mgr::free_2mb_subtable(page_size2mb_t *table)
         uint32_t size=PAGES_4KB_PER_1GB * sizeof(page_size1gb_t);
         KURD_t kurd;
         phyaddr_t phybase;
-        int res=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)table,phybase);
-        if(res!=OS_SUCCESS){
-            //原子操作失败，直接panic
+        kurd=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)table,phybase);
+        if(kurd.result!=result_code::SUCCESS){
+            in_module_panic(kurd);
         }
         KspaceMapMgr::pgs_remapped_free((vaddr_t)table);
         kurd=FreePagesAllocator::first_BCB->free_buddy_way(phybase,size);
         if(kurd.result!=result_code::SUCCESS){
-            //内存分配失败，直接panic
+            in_module_panic(kurd);
         }
     }
+    #endif
+    #ifdef USER_MODE
+    delete[] table;
+    #endif
 }
 phymemspace_mgr::page_size4kb_t *phymemspace_mgr::alloc_4kb_subtable()
 {
+    #ifdef KERNEL_MODE
     if(subtb_alloc_is_pool_way_flag)return new page_size4kb_t[PAGES_2MB_PER_1GB];
     else{
         uint32_t size=PAGES_4KB_PER_1GB * sizeof(page_size4kb_t);
         KURD_t kurd;
         phyaddr_t phybase=FreePagesAllocator::first_BCB->allocate_buddy_way(size,kurd);
         if(kurd.result!=result_code::SUCCESS){
-            //原子操作失败，直接panic
+            in_module_panic(kurd);
         }
         page_size4kb_t*result=(page_size4kb_t*)KspaceMapMgr::pgs_remapp(
-            phybase,
+            kurd,phybase,
             size,
             KspaceMapMgr::PG_RW,
             0,
             true
         );
         if(result==nullptr){
-            //内存分配失败，直接panic
+            in_module_panic(kurd);
         }
         return result;
     }
+    #endif
+    #ifdef USER_MODE
+    return new page_size4kb_t[PAGES_4KB_PER_1GB];
+    #endif
 }
 void phymemspace_mgr::free_4kb_subtable(page_size4kb_t *table)
 {
+    #ifdef KERNEL_MODE
     if(subtb_alloc_is_pool_way_flag){
         delete[] table;
     }
@@ -85,16 +104,20 @@ void phymemspace_mgr::free_4kb_subtable(page_size4kb_t *table)
         uint32_t size=PAGES_4KB_PER_1GB * sizeof(page_size1gb_t);
         KURD_t kurd;
         phyaddr_t phybase;
-        int res=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)table,phybase);
-        if(res!=OS_SUCCESS){
-            //原子操作失败，直接panic
+        kurd=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)table,phybase);
+        if(kurd.result!=result_code::SUCCESS){
+            in_module_panic(kurd);
         }
         KspaceMapMgr::pgs_remapped_free((vaddr_t)table);
         kurd=FreePagesAllocator::first_BCB->free_buddy_way(phybase,size);
         if(kurd.result!=result_code::SUCCESS){
-            //内存分配失败，直接panic
+            in_module_panic(kurd);
         }
     }
+    #endif
+    #ifdef USER_MODE
+    delete[] table;
+    #endif
 }
 KURD_t phymemspace_mgr::pages_state_set(phyaddr_t base,
                                     uint64_t num_of_4kbpgs,
@@ -504,7 +527,7 @@ KURD_t phymemspace_mgr::pages_state_set(phyaddr_t base,
  */
 KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_t base, uint64_t numof_4kbpgs, dram_pages_state_set_flags_t flags)
 {
-    auto ensure_1gb_subtable_lambda = [](uint64_t idx_1gb){
+    auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb){
             page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
             if(p1==nullptr){
                 //panic,一致性违背
@@ -514,17 +537,24 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             page_size2mb_t* sub2 =alloc_2mb_subtable();//new失败里面自动panic,不用考虑空指针
 
             setmem(sub2, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t), 0);
-
+            for(uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++){
+                sub2[i].flags.state = FREE;
+                sub2[i].flags.is_belonged_to_buddy = p1->flags.is_belonged_to_buddy;
+            }
             p1->sub2mbpages = sub2;
             p1->flags.is_sub_valid = 1;
             p1->flags.state = NOT_ATOM;
             }
         };
-    auto ensure_2mb_subtable_lambda = [](page_size2mb_t &p2){
+    auto ensure_2mb_subtable_lambda = [flags](page_size2mb_t &p2){
         if (!p2.flags.is_sub_valid)
         {
             page_size4kb_t* sub4 = alloc_4kb_subtable();
             setmem(sub4, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t), 0);
+            for(uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++){
+                sub4[i].flags.state = FREE;
+                sub4[i].flags.is_belonged_to_buddy = p2.flags.is_belonged_to_buddy;
+            }
             p2.sub_pages = sub4;
             p2.flags.is_sub_valid = 1;
             p2.flags.state = NOT_ATOM;
@@ -543,12 +573,13 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
 
         bool all_free = true;
         bool all_full = true;
-
+        bool all_budy =true;
         for (uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++)
         {
             uint8_t st = p2.sub_pages[i].flags.state;
             if (st != FREE) all_free = false;
             if (st == FREE) all_full = false;
+            if(!p2.sub_pages[i].flags.is_belonged_to_buddy)all_budy=false;
             if (!all_free && !all_full)
                 break; // 已经确定是 NOT_ATOM
         }
@@ -560,6 +591,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             p2.sub_pages = nullptr;
             p2.flags.is_sub_valid = 0;
             p2.flags.state = FREE;
+            p2.flags.is_belonged_to_buddy = all_budy;
             return FOLDED_FREE;
         }
 
@@ -584,7 +616,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
 
         bool all_free = true;
         bool all_full = true;
-
+        bool all_budy =true;
         for (uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++)
         {
             page_size2mb_t &p2 = p1.sub2mbpages[i];
@@ -598,7 +630,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             }
             if (p2.flags.state != FREE) all_free = false;
             if (p2.flags.state != FULL) all_full = false;
-
+            if(!p2.flags.is_belonged_to_buddy)all_budy=false;
             if (!all_free && !all_full)
                 break; // 已经确定是 NOT_ATOM
         }
@@ -610,6 +642,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             p1.sub2mbpages = nullptr;
             p1.flags.is_sub_valid = 0;
             p1.flags.state = FREE;
+            p1.flags.is_belonged_to_buddy = all_budy;
             return FOLDED_FREE;
         }
 
@@ -653,6 +686,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             auto &ent = pak.entries[i];
             switch(ent.page_size_in_byte){
                 case _1GB_PG_SIZE:{
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
                          page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
@@ -669,7 +703,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                 }
                 break; // 添加break语句
                 case _2MB_PG_SIZE:{
-
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     ensure_1gb_subtable_lambda(entry_base_idx);
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
@@ -688,6 +722,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                 }
                 break; // 添加break语句
                 case _4KB_PG_SIZE:{
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     ensure_1gb_subtable_lambda(entry_base_idx);
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
@@ -707,6 +742,8 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     }
                 }
                 break; // 添加break语句
+                case 0:
+                break;
                 default:{
                     //panic,前面的函数不可能出现，出现了只能说明内存损坏
                     fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_BAD_PAGE_SIZE;
@@ -721,6 +758,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             auto &ent = pak.entries[i];
             switch(ent.page_size_in_byte){
                 case _1GB_PG_SIZE:{
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
                          page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
@@ -737,7 +775,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                 }
                 break; // 添加break语句
                 case _2MB_PG_SIZE:{
-
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
                     if(p1==nullptr){
@@ -763,6 +801,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                 }
                 break; // 添加break语句
                 case _4KB_PG_SIZE:{
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
                     if(p1==nullptr){
@@ -793,6 +832,8 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     }
                 }
                 break; // 添加break语句
+                case 0:
+                break;
                 default:{
                     //panic,前面的函数不可能出现，出现了只能说明内存损坏
                     fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_BAD_PAGE_SIZE;
@@ -807,6 +848,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             auto &ent = pak.entries[i];
             switch(ent.page_size_in_byte){
                 case _1GB_PG_SIZE:{
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
                          page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
@@ -833,6 +875,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                 }
                 break; // 添加break语句
                 case _2MB_PG_SIZE: {
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     ensure_1gb_subtable_lambda(entry_base_idx);
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
@@ -860,6 +903,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                 }
                 break; // 添加break语句
                 case _4KB_PG_SIZE:{
+                    if(ent.num_of_pages==0)break;
                     uint64_t entry_base_idx=ent.base>>30;
                     ensure_1gb_subtable_lambda(entry_base_idx);
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
@@ -891,6 +935,9 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     if(!flags.params.expect_meet_atom_pages_free)try_fold_1gb_lambda(*p1);
                 }
                 break; // 添加break语句
+                case 0:{
+                    break;
+                }
                 default:{
                     //panic,前面的函数不可能出现，出现了只能说明内存损坏
                     fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_BAD_PAGE_SIZE;

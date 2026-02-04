@@ -26,8 +26,9 @@ int EFI_RT_SVS::Init(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
     {
         if (copyptr[i].Attribute & EFI_MEMORY_RUNTIME)
         {
-            vaddr_t vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(copyptr[i].PhysicalStart,4096*copyptr[i].NumberOfPages,KspaceMapMgr::PG_RWX,0);
-            if(!vbase)return OS_MEMRY_ALLOCATE_FALT;            
+            KURD_t kurd=KURD_t();
+            vaddr_t vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,copyptr[i].PhysicalStart,4096*copyptr[i].NumberOfPages,KspaceMapMgr::PG_RWX,0);
+            if(!vbase)return kurd_get_raw(kurd);            
             copyptr[i].VirtualStart=(vaddr_t)vbase;
             if(copyptr[i].PhysicalStart<=(phyaddr_t)sti&&(phyaddr_t)sti<(copyptr[i].PhysicalStart+4096*copyptr[i].NumberOfPages))
             {

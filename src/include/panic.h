@@ -80,5 +80,6 @@ public:
      * 打印指定的 x86_64 CPU 上下文寄存器内容。
      * @param regs 指向 panic_context::x64_context 结构的指针，包含需要打印的寄存器状态。
      */
+    static KURD_t will_check();
     static void dumpregisters(panic_context::x64_context* regs);
 };

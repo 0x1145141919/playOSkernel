@@ -98,7 +98,7 @@ KURD_t AddressSpace::invalidate_tlb_of_VM_desc(VM_DESC desc, tlb_invalidate_flag
 AddressSpace::AddressSpace()
 {
 }
-static inline uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
+
 KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)    
 {
     constexpr uint16_t ILLEAGLE_PAGES_COUNT=0x1;
@@ -154,7 +154,9 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
             return subtb_phybase;
         }else{
             phyaddr_t entry_to_alloc_phybase=0;
-            entry_to_alloc_phybase = phymemspace_mgr::pages_linear_scan_and_alloc(1, phymemspace_mgr::KERNEL, 12);
+            entry_to_alloc_phybase = __wrapped_pgs_alloc(
+                &pages_alloc_event_kurd,1,KERNEL,12
+            );
             if(!entry_to_alloc_phybase) return 0;
             
             // 初始化新分配的页表内存为0
@@ -930,19 +932,20 @@ void AddressSpace::unsafe_load_pml4_to_cr3(uint16_t pcid)
 
 AddressSpace::~AddressSpace()
 {
-    int status=phymemspace_mgr::pages_recycle(pml4_phybase,1);
-    if(status!=OS_SUCCESS){
+    KURD_t status=phymemspace_mgr::pages_recycle(pml4_phybase,1);
+    if(status.result!=result_code::SUCCESS){
         kio::bsp_kout<<"phymemspace_mgr::pages_recycle failed in result:"<<status<<kio::kendl;
     }
 }
 
-int AddressSpace::second_stage_init()
+KURD_t AddressSpace::second_stage_init()
 {
     alloc_flags_t flags=default_flags;
     flags.force_first_linekd_heap=true;
     flags.align_log2=12;
-    pml4_phybase=phymemspace_mgr::pages_linear_scan_and_alloc(1,phymemspace_mgr::KERNEL,12);
-    if(pml4_phybase==0)return OS_OUT_OF_MEMORY;
+    KURD_t contain=KURD_t();
+    pml4_phybase=__wrapped_pgs_alloc(&contain,1,KERNEL,12);
+    if(pml4_phybase==0)return contain;
     for(uint16_t i=0;i<256;i++){
         PhyAddrAccessor::writeu64(
             pml4_phybase+i*sizeof(PageTableEntryUnion),
@@ -961,7 +964,9 @@ int AddressSpace::second_stage_init()
         );
     }
     occupyied_size=0;
-    return OS_SUCCESS;
+    KURD_t success=default_success();
+    success.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INIT;
+    return success;
 }
 KURD_t AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
 {
