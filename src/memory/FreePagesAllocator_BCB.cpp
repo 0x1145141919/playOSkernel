@@ -75,7 +75,7 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
         return 0;
     }
     KURD_t kurd;
-    kurd=free_pages_flush();
+    //kurd=free_pages_flush();
     if(!success_all_kurd(kurd)){
             kio::bsp_kout<<"free page allocator fatal error"<<kio::kendl;
             print_basic_info();

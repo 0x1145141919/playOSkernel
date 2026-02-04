@@ -5,12 +5,9 @@
 #include "core_hardwares/lapic.h"
 #include "time.h"
 #include "util/cpuid_intel.h"
-extern "C" check_point realmode_enter_checkpoint;
-extern "C" check_point pemode_enter_checkpoint;
-extern "C" char AP_realmode_start;
-extern "C" uint32_t assigned_processor_id;
-check_point longmode_enter_checkpoint;
-check_point init_finish_checkpoint;
+
+extern  check_point longmode_enter_checkpoint={0};
+extern  check_point init_finish_checkpoint={0};
 constexpr uint32_t error_code_bitmap = 0
     | (1 << 8)   // #DF
     | (1 << 10)  // #TS
@@ -327,7 +324,9 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         while(now_microseconds < ddline_stamp){
             int observe_ap_result= observe_ap(success_word);
             if(observe_ap_result==SUCCESS_TAHT_TIME)return CHECKPOINT_SUCCESS;
-            if(observe_ap_result==FAIL_TAHT_TIME)return CHECKPOINT_FAIL;    
+            if(observe_ap_result==FAIL_TAHT_TIME){
+                failer_dealing();
+                return CHECKPOINT_FAIL;}    
             
             now_microseconds = time::hardware_time::get_stamp();
         }
@@ -345,32 +344,32 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         icr_sipi.param.destination.raw = proc.apicid;
         assigned_processor_id=processor_id;
         asm volatile("sfence");
-        kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor"<<kio::kendl;
+        kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for "<<proc.apicid<<" processor"<<kio::kendl;
         x2apic::x2apic_driver::raw_send_ipi(icr_sipi);
         ap_observe_result_t status= ap_init_stage_func(1000,observe_realmode,nullptr,processor_id);//只有成功/超时两种状态
         if(status==CHECKPOINT_TIMEOUT){
-            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one realmode enter timeout for processor "<<proc.apicid<<kio::kendl;
         }
         status= ap_init_stage_func(1000,observe_pemode_enter,pe_fail_dealing,proc.apicid);
         if(status==CHECKPOINT_FAIL){
-            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor fail"<<kio::kendl;
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one pemode enter fail for processor "<<proc.apicid<<kio::kendl;
         }
         if(status==CHECKPOINT_TIMEOUT){
-            
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one pemode enter timeout for processor "<<proc.apicid<<kio::kendl;
         }
         status= ap_init_stage_func(1000,observe_longmode_enter,longmode_enter_fail_dealing,~processor_id);
         if(status==CHECKPOINT_FAIL){
-            
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one longmode enter fail for processor "<<proc.apicid<<kio::kendl;
         }
         if(status==CHECKPOINT_TIMEOUT){
-            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one longmode enter timeout for processor "<<proc.apicid<<kio::kendl;
         }
         status= ap_init_stage_func(1000,observe_finish,finish_fail_dealing,~proc.apicid);    
         if(status==CHECKPOINT_FAIL){
-
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one finish stage fail for processor "<<proc.apicid<<kio::kendl;
         }
         if(status==CHECKPOINT_TIMEOUT){
-            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one send sipi for"<<proc.apicid<<"processor timeout"<<kio::kendl;
+            kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one finish stage timeout for processor "<<proc.apicid<<kio::kendl;
         }
     }
 

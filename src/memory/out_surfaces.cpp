@@ -22,7 +22,7 @@ phyaddr_t __wrapped_pgs_alloc(KURD_t *kurd_out, uint64_t _4kbpgscount, page_stat
     if(result.base==0||result.result.result!=result_code::SUCCESS){
         //尝试用phymemspace_mgr::pages_linear_scan_and_alloc
         Alloc_result result={0};
-        //result.base=phymemspace_mgr::pages_linear_scan_and_alloc(_4kbpgscount,result.result,TYPE,alignment_log2);
+        result.base=phymemspace_mgr::pages_linear_scan_and_alloc(_4kbpgscount,result.result,TYPE,alignment_log2);
         if(result.base==0||result.result.result!=result_code::SUCCESS){
             *kurd_out=result.result;
             return 0;
@@ -44,9 +44,9 @@ phyaddr_t __wrapped_pgs_alloc(KURD_t *kurd_out, uint64_t _4kbpgscount, page_stat
 KURD_t __wrapped_pgs_free(phyaddr_t phybase, uint64_t _4kbpgscount)
 {
     KURD_t kurd=FreePagesAllocator::free(phybase,_4kbpgscount*0x1000);
-    /*if(!success_all_kurd(kurd)){
+    if(!success_all_kurd(kurd)){
         return phymemspace_mgr::pages_recycle(phybase,_4kbpgscount);
-    }*/
+    }
     kurd=phymemspace_mgr::pages_dram_buddy_pages_set(
             phybase,
             _4kbpgscount,

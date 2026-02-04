@@ -147,4 +147,10 @@ struct check_point{//不论长模式/保护模式/实模式都使用这个检查
     uint16_t check_point_id;
     uint16_t reserved[3];
 };
+extern "C" check_point realmode_enter_checkpoint;
+extern "C" check_point pemode_enter_checkpoint;
+extern "C" char AP_realmode_start;
+extern "C" uint32_t assigned_processor_id;
+extern  check_point longmode_enter_checkpoint;
+extern  check_point init_finish_checkpoint;
 

@@ -174,17 +174,16 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     
 
 }
-extern check_point longmode_enter_checkpoint;
-extern check_point init_finish_checkpoint;
+
 extern "C" void ap_init(uint32_t processor_id)
 {
-    longmode_enter_checkpoint.check_point_id=~processor_id;
+    longmode_enter_checkpoint.success_word=~processor_id;
     asm volatile("sfence");
     gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
     x86_smp_processors_container::regist_core(processor_id); 
     kpoolmemmgr_t::self_heap_init();
     time::hardware_time::processor_regist();
-    longmode_enter_checkpoint.check_point_id=~query_x2apicid();
+    init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");
     asm volatile("sti");
     asm volatile("hlt");

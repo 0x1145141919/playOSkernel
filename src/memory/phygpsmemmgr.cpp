@@ -309,7 +309,7 @@ void phymemspace_mgr::in_module_panic(KURD_t kurd)
 }
 KURD_t phymemspace_mgr::Init()
 {
-    subtb_alloc_is_pool_way_flag=false;
+    subtb_alloc_is_pool_way_flag=true;
     KURD_t status=KURD_t();   
     KURD_t fail=default_failure(); 
     KURD_t success=default_success();
@@ -389,7 +389,7 @@ KURD_t phymemspace_mgr::Init()
     if(!success_all_kurd(status)){
         return status;
     }
-    status=dram_pages_state_set(seg,(phyaddr_t)&KImgphybase,(phyaddr_t)(text_end-text_begin)/_4KB_PG_SIZE, dram_set);
+    status=dram_pages_state_set(seg,(phyaddr_t)&KImgphybase,(phyaddr_t)(&text_end-&text_begin)/_4KB_PG_SIZE, dram_set);
     if(!success_all_kurd(status)) return status;
     
     status=dram_pages_state_set(seg,(phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE, dram_set);
@@ -474,8 +474,9 @@ KURD_t phymemspace_mgr::Init()
     // 清理资源
     munmap(elf_mapped, sb.st_size);
     close(fd);
-    return success;
+    
 #endif
+return success;
 }
 #ifdef USER_MODE
 phymemspace_mgr::phymemspace_mgr()

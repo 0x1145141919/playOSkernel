@@ -1,223 +1,154 @@
-#include <cerrno>
 #include "memory/kpoolmemmgr.h"
 #include "util/cpuid_intel.h"
 #include "util/OS_utils.h"
 #include "memory/AddresSpace.h"
 #include "memory/phygpsmemmgr.h"
-#include <cstdio>
-#include <cassert>
-#include <elf.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
+#include "memory/FreePagesAllocator.h"
+#include "util/kout.h"
 #include <unistd.h>
-
-
-int test_basic_init() {
-    printf("Testing basic initialization...\n");
+#include <vector>
+#include <random>
+struct mem_seg
+{
+    uint64_t start_addr;//为1代表无效地址，其它4k对齐的地址都是有效地址
+    uint64_t size;
+    uint8_t page_state_replace;//表示页类型，0:KERNEL,1:USER_ANONYMOUS,2:USER_FILE,3:DMA
+};
+KURD_t test_basic_init() {
+    kio::bsp_kout << "Testing basic initialization..." << kio::kendl;
     
     gBaseMemMgr.Init();
     
     gBaseMemMgr.printPhyMemDesTb();
     
-    int status = phymemspace_mgr::Init();
-    if (status != 0) {
-        printf("phymemspace_mgr::Init() failed with status: %d\n", status);
+    KURD_t status = phymemspace_mgr::Init();
+    if (!success_all_kurd(status)) {
+        kio::bsp_kout << "phymemspace_mgr::Init() failed with status: ";
+        kio::bsp_kout << status;
+        kio::bsp_kout << kio::kendl;
         return status;
     }
-    
-    printf("Basic initialization test passed.\n");
-    return 0;
+    status=FreePagesAllocator::Init();
+    kio::bsp_kout << "Basic initialization test passed." << kio::kendl;
+    return status;
 }
 
-int test_memory_allocation_and_recycling() {
-    printf("Testing memory allocation and recycling...\n");
+
+// 压力测试函数
+KURD_t stress_test_page_allocation_and_deallocation() {
+    kio::bsp_kout << "Starting stress test for page allocation and deallocation..." << kio::kendl;
     
-    // 尝试分配一些内存
-    phyaddr_t alloc_addr = phymemspace_mgr::pages_linear_scan_and_alloc(2, phymemspace_mgr::KERNEL, 21);
-    if (alloc_addr == 0) {
-        printf("pages_alloc failed - no memory available\n");
+    // 生成随机mem_seg向量
+    std::vector<mem_seg> allocations;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::lognormal_distribution<double> size_dist(log(1<<14), 1.0); // 平均约16KB大小
+
+    const int num_allocations = 10000; // 生成10000个测试项
+    kio::bsp_kout << "Generating " << num_allocations << " random allocations..." << kio::kendl;
+
+    for (int i = 0; i < num_allocations; ++i) {
+        mem_seg seg;
+        seg.start_addr = 1; // 按照注释初始化为无效地址
+        // 使用对数正态分布生成大小，并转换为uint64_t类型，限制最大值为256MB
+        uint64_t size = static_cast<uint64_t>(size_dist(gen)) % 0x10000000 + 1;
+        seg.size = size; // 使用对数正态分布生成的size
+        // 随机选择页面类型 (0:KERNEL,1:USER_ANONYMOUS,2:USER_FILE,3:DMA)
+        seg.page_state_replace = static_cast<uint8_t>(gen() % 4);
+        allocations.push_back(seg);
+    }
+
+    // 创建状态机进行100万次分配和释放操作
+    std::uniform_int_distribution<int> index_dist(0, num_allocations - 1);
+    kio::bsp_kout << "Starting state machine with 1,000,000 allocation/deallocation cycles..." << kio::kendl;
+    uint64_t old_stamp=rdtsc();
+    
+    for (int cycle = 0; cycle < 1000000; ++cycle) {
+        // 随机选择一个索引
+        int idx = index_dist(gen);
+        
+        // 获取对应的mem_seg
+        mem_seg& seg = allocations[idx];
+        
+        if (seg.start_addr == 1) {
+            // 地址无效，进行分配
+            KURD_t alloc_result;
+            // 根据page_state_replace确定页面类型
+            page_state_t page_type;
+            switch(seg.page_state_replace) {
+                case 0: page_type = page_state_t::KERNEL; break;
+                case 1: page_type = page_state_t::USER_ANONYMOUS; break;
+                case 2: page_type = page_state_t::USER_FILE; break;
+                case 3: page_type = page_state_t::DMA; break;
+                default: page_type = page_state_t::KERNEL; break; // 默认使用KERNEL
+            }
+            
+            // 计算需要的页数（向上取整）
+            uint64_t page_count = (seg.size + 0xFFF) >> 12; // 4KB页大小
+            
+            phyaddr_t addr = __wrapped_pgs_alloc(&alloc_result, page_count, page_type, 12);
+            
+            if (alloc_result.result == result_code::SUCCESS && addr != 0) {
+                seg.start_addr = addr; // 更新为实际分配的地址
+            } else {
+                kio::bsp_kout << "Allocation failed at cycle " << cycle 
+                             << ", size=" << seg.size << kio::kendl;
+            }
+        } else {
+            // 地址有效，进行释放
+            // 计算页数
+            uint64_t page_count = (seg.size + 0xFFF) >> 12;
+            
+            KURD_t free_result = __wrapped_pgs_free(seg.start_addr, page_count);
+            
+            if (free_result.result == result_code::SUCCESS) {
+                seg.start_addr = 1; // 重置为无效地址
+            } else {
+                kio::bsp_kout << "Deallocation failed at cycle " << cycle 
+                             << ", addr=0x" << seg.start_addr << kio::kendl;
+            }
+        }
+        
+        // 每隔100000次输出一次进度和时间
+        if ((cycle + 1) % 100000 == 0) {
+            kio::bsp_kout << "Completed " << (cycle + 1) << " cycles" << kio::kendl;
+            uint64_t now_tsc=rdtsc();
+            kio::bsp_kout << "Elapsed time: " << (now_tsc-old_stamp)/100000 << " tsc avg per 100k ops" << kio::kendl;
+            old_stamp=now_tsc;
+            kio::bsp_kout << "Timestamp: " <<kio::now<< kio::kendl;
+        }
+    }
+    
+    kio::bsp_kout << "=== Stress Test Completed ===" << kio::kendl;
+
+    return KURD_t();
+}
+
+int main() {
+    kio::bsp_kout.Init();
+    kio::bsp_kout << "Starting comprehensive phymemspace_mgr tests..." << kio::kendl;
+    
+    // 基本初始化测试
+    KURD_t status = test_basic_init();
+    if (!success_all_kurd(status)) {
+        kio::bsp_kout << "Basic init test failed with status: ";
+        kio::bsp_kout << status;
+        kio::bsp_kout << kio::kendl;
+        return -1;
+    }    
+    
+    // 执行压力测试
+    status = stress_test_page_allocation_and_deallocation();
+    if (!success_all_kurd(status)) {
+        kio::bsp_kout << "Stress test failed with status: ";
+        kio::bsp_kout << status;
+        kio::bsp_kout << kio::kendl;
         return -1;
     }
     
-    printf("Allocated memory at: 0x%lx (2 pages)\n", alloc_addr);
-    
-    // 测试回收刚才分配的内存
-    int status = phymemspace_mgr::pages_recycle(alloc_addr, 2);
-    if (status != 0) {
-        printf("pages_recycle failed with status: %d\n", status);
-        return status;
-    }
-    
-    printf("Memory allocation and recycling test passed.\n");
-    return 0;
-}
-
-int test_different_page_sizes() {
-    printf("Testing different page sizes...\n");
-    
-    // 测试分配4KB页
-    phyaddr_t addr_4kb = phymemspace_mgr::pages_linear_scan_and_alloc(1, phymemspace_mgr::KERNEL, 12);
-    if (addr_4kb == 0) {
-        printf("Failed to allocate 4KB page\n");
-    } else {
-        printf("Allocated 4KB page at: 0x%lx\n", addr_4kb);
-        phymemspace_mgr::pages_recycle(addr_4kb, 1);
-    }
-    
-    // 测试分配2MB页 (512 * 4KB = 2MB)
-    phyaddr_t addr_2mb = phymemspace_mgr::pages_linear_scan_and_alloc(512, phymemspace_mgr::KERNEL, 21);
-    if (addr_2mb == 0) {
-        printf("Failed to allocate 2MB page\n");
-    } else {
-        printf("Allocated 2MB page at: 0x%lx\n", addr_2mb);
-        phymemspace_mgr::pages_recycle(addr_2mb, 512);
-    }
-    
-    // 测试分配1GB页 (262144 * 4KB = 1GB)
-    phyaddr_t addr_1gb = phymemspace_mgr::pages_linear_scan_and_alloc(262144, phymemspace_mgr::KERNEL, 30);
-    if (addr_1gb == 0) {
-        printf("Failed to allocate 1GB page\n");
-    } else {
-        printf("Allocated 1GB page at: 0x%lx\n", addr_1gb);
-        phymemspace_mgr::pages_recycle(addr_1gb, 262144);
-    }
-    
-    printf("Different page sizes test passed.\n");
-    return 0;
-}
-
-int test_mmio_registration() {
-    printf("Testing MMIO registration...\n");
-    
-    // 尝试注册一个MMIO段
-    // 首先声明一个blackhole类型的段
-    phymemspace_mgr::blackhole_acclaim_flags_t flags = {0};
-    int status = phymemspace_mgr::blackhole_acclaim(0x1000000000, 10, phymemspace_mgr::MMIO_SEG, flags);
-    
-    if (status == 0) {
-        // 现在尝试注册MMIO
-        status = phymemspace_mgr::pages_mmio_regist(0x1000000000, 5);
-        if (status == 0) {
-            printf("MMIO registration successful\n");
-            
-            // 注销MMIO
-            status = phymemspace_mgr::pages_mmio_unregist(0x1000000000, 5);
-            if (status == 0) {
-                printf("MMIO unregistration successful\n");
-            } else {
-                printf("MMIO unregistration failed with status: %d\n", status);
-            }
-        } else {
-            printf("MMIO registration failed with status: %d\n", status);
-        }
-        
-        // 释放blackhole
-        status = phymemspace_mgr::blackhole_decclaim(0x1000000000);
-        if (status != 0) {
-            printf("Failed to decclaim blackhole, status: %d\n", status);
-        }
-    } else {
-        printf("Could not create MMIO segment for testing, status: %d\n", status);
-    }
-    
-    printf("MMIO registration test completed.\n");
-    return 0;
-}
-
-int test_statistics() {
-    printf("Testing statistics...\n");
-    
-    auto stats = phymemspace_mgr::get_statisit_copy();
-    printf("Statistics - Total allocatable: %lu, Kernel: %lu, User anonymous: %lu\n", 
-           stats.total_allocatable, stats.kernel, stats.user_anonymous);
-    
-    printf("Statistics test passed.\n");
-    return 0;
-}
-
-int test_segment_management() {
-    printf("Testing segment management...\n");
-    
-    // 获取一个已知的物理地址并查询其段信息
-    // 尝试获取第一个可用段的信息
-    phymemspace_mgr::PHYSEG seg = phymemspace_mgr::get_physeg_by_addr(0x1000000);  // 随意选择一个地址
-    if (seg.base != 0) {
-        printf("Segment info - Base: 0x%lx, Size: %lu, Type: %d\n", seg.base, seg.seg_size, seg.type);
-    } else {
-        printf("No segment found for test address\n");
-    }
-    
-    printf("Segment management test completed.\n");
-    return 0;
-}
-
-
-int main() {
-    printf("Starting comprehensive phymemspace_mgr tests...\n");
-    
-    // 基本初始化测试
-    int status = test_basic_init();
-    if (status != 0) {
-        printf("Basic init test failed with status: %d\n", status);
-        return status;
-    }
-    
-    // 等待初始化完成
-    sleep(1);
-    
     // 打印初始状态
-    //phymemspace_mgr::print_all_atom_table();
-    //phymemspace_mgr::print_allseg();
-    
-    // 内存分配和回收测试
-    status = test_memory_allocation_and_recycling();
-    if (status != 0) {
-        printf("Memory allocation test failed with status: %d\n", status);
-        return status;
-    }
-    
-    // 不同页面大小测试
-    status = test_different_page_sizes();
-    if (status != 0) {
-        printf("Different page sizes test failed with status: %d\n", status);
-        return status;
-    }
-    
-    // MMIO注册测试
-    status = test_mmio_registration();
-    if (status != 0) {
-        printf("MMIO registration test failed with status: %d\n", status);
-        // 不返回错误，因为MMIO测试可能因环境而失败
-    }
-    
-    // 统计测试
-    status = test_statistics();
-    if (status != 0) {
-        printf("Statistics test failed with status: %d\n", status);
-        return status;
-    }
-    
-    // 段管理测试
-    status = test_segment_management();
-    if (status != 0) {
-        printf("Segment management test failed with status: %d\n", status);
-        return status;
-    }
-    
-    if (status != 0) {
-        printf("Atom page iteration test failed with status: %d\n", status);
-        return status;
-    }
-    
-    // 最后再次打印状态
-    //phymemspace_mgr::print_all_atom_table();
-    //phymemspace_mgr::print_allseg();
-    
-    printf("All tests completed successfully!\n");
-    
-    KspaceMapMgr::Init();
+    phymemspace_mgr::print_all_atom_table();
+    phymemspace_mgr::print_allseg();
     
     return 0;
 }

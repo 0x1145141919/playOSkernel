@@ -70,8 +70,8 @@ AP_realmode_start:
 align 0x1000
 bits 16
 cli
-mov eax, [assigned_processor_id]
-mov [realmode_enter_checkpoint+check_point.success_word], eax
+    mov eax, [assigned_processor_id]
+    mov [realmode_enter_checkpoint+check_point.success_word], eax
 
     ; 加载GDT
     lgdt [gdt_descriptor]
@@ -144,9 +144,11 @@ _kernel_Init:
     mov rax, cr0
     or rax, (1<<16)
     mov cr0, rax
+    
     mov rax, bsp_init_gdt_descriptor
     lgdt [rax]
-    push 0x8
+    mov rax, 0x8
+    push rax
     mov rax, .jump_kernel
     push rax
     retfq
