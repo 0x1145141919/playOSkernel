@@ -21,7 +21,6 @@ namespace time
         static EFI_TIME GetTime_in_os();  
         static int modify_time(EFI_TIME time);
     };
-    
     class hardware_time
     {
         private:
@@ -37,5 +36,4 @@ namespace time
         static miusecond_time_stamp_t get_stamp();
         static void timer_polling_spin_delay(uint64_t mius);
     };
-    extern hardware_time_base_token*bsp_token;
 }

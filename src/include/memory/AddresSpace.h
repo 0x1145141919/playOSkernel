@@ -2,9 +2,9 @@
 #include "stdint.h"
 #include "memory/Memory.h"
 #include "memory/pgtable45.h"
+#include "memory/kpoolmemmgr.h"
 #include <util/lock.h>
 #include "memmodule_err_definitions.h"
-#include "util/RB_btree.h"
 namespace PAGE_TBALE_LV{
     constexpr bool LV_4=true;
     constexpr bool LV_5=false;
@@ -69,14 +69,11 @@ struct vphypair_t
     uint32_t size;
 };
 
-constexpr uint64_t DESC_SMALL_SEG_MAX=0x3200000;//32mb以上为大段，懒加载，以下为小段，直接全部加载
 struct VM_DESC
 {
     vaddr_t start;    // inclusive
     vaddr_t end;      // exclusive
                       // 区间长度 = end - start
-    // 映射物理页的模式
-    uint64_t SEG_SIZE_ONLY_UES_IN_BASIC_SEG;//只有BASIC_SEG才可用此字段，且非0，非BASIC_SEG此字段必须为0
     enum map_type_t : uint8_t {
         MAP_NONE = 0,     // 未分配物理页（仅占位）
         MAP_PHYSICAL,     // 连续物理页,只有内核因为立即要求而使用，用户空间不能用
@@ -89,6 +86,7 @@ struct VM_DESC
     uint8_t committed_full:1;   // 物理页是否完全已经分配（lazy allocation 用）
     uint8_t is_vaddr_alloced:1;    // 虚拟地址是否由地址空间管理器分配（否则为固定映射）
     uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
+    uint64_t SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
 };
 int VM_vaddr_cmp(VM_DESC* a,VM_DESC* b);
 namespace MEMMODULE_LOCAIONS{
@@ -357,25 +355,38 @@ static bool is_phypgsmgr_enabled;//这个位影响页框管理的
  * 为true时用物理页框管理分配页框
  */
 //这个数组按照虚拟地址从小到大排序,规定虚拟地址是主键
-class kspace_vm_table_t:public RBTree_t
+class kspace_vm_table_t
 {
-    private:    
-    using RBTree_t::root;
-    using RBTree_t::cmp;
-    using RBTree_t::left_rotate;
-    using RBTree_t::right_rotate;
-    using RBTree_t::fix_insert;
-    using RBTree_t::subtree_min;
-    using RBTree_t::fix_remove;
-    using RBTree_t::subtree_max;
-    using RBTree_t::successor;
-    public:
-    kspace_vm_table_t():RBTree_t((int (*)(const void*, const void*))VM_vaddr_cmp){
-        
-    }
-    using RBTree_t::search;
-    using RBTree_t::insert;
-    using RBTree_t::remove;
+public:
+static constexpr alloc_flags_t specify_alloc_flag={
+    .is_longtime=true,
+    .is_crucial_variable=true,
+    .vaddraquire=true,
+    .force_first_linekd_heap=true,
+    .is_when_realloc_force_new_addr=false,//在realloc中强制重新分配内存，非realloc接口忽视此位但是会忠实记录进入metadata,realloc中此位不设置会优先原地调整，原地调整解决则不会修改源地址和元数据flags
+    .align_log2=4
+};
+    struct Node {
+        VM_DESC data;
+        Node* left;
+        Node* right;
+        Node* parent;
+        bool color; // 0 = black, 1 = red
+    };
+private:
+    Node* root=nullptr;
+    Node* left_rotate(Node* x);
+    Node* right_rotate(Node* x);
+    void fix_insert(Node* n);
+    static Node* subtree_min(Node* x);
+    void fix_remove(Node* x, Node* parent);
+    static Node* subtree_max(Node* x);
+    static Node* successor(Node* x);
+public:
+    kspace_vm_table_t();
+    Node* search(vaddr_t vaddr);//是否落在对应VM_desc的[VM_DESC.start,VM_DESC.end)
+    int insert(VM_DESC data);
+    int remove(vaddr_t vaddr);//删除VM_desc若vaddr落在其[VM_DESC.start,VM_DESC.end)
     vaddr_t alloc_available_space(uint64_t size,uint32_t target_vaddroffset);
 };
 static kspace_vm_table_t*kspace_vm_table;
@@ -449,6 +460,8 @@ static void*pgs_remapp(KURD_t&kurd,
 );//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
 static KURD_t Init();
 static KURD_t v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
-
+friend KURD_t kpoolmemmgr_t::multi_heap_enable();
+friend KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init();
+friend kpoolmemmgr_t::HCB_v2::~HCB_v2();
 };
 extern shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info;

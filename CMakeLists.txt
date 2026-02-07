@@ -2,10 +2,12 @@
 
 cmake_minimum_required(VERSION 3.15)  # 推荐使用较新版本以支持现代特性
 project(Kernel LANGUAGES C CXX)       # 显式声明支持 C 和 C++
+
 # 设置构建类型变量，默认为Debug
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build (Debug or Release)" FORCE)
 endif()
+
 # 查找 NASM 汇编器
 find_program(NASM_EXECUTABLE nasm)
 if(NOT NASM_EXECUTABLE)
@@ -23,7 +25,7 @@ set(CMAKE_ASM_NASM_SOURCE_FILE_EXTENSIONS asm)  # 关联 .asm 后缀
 
 # 设置 NASM 编译器和选项
 set(CMAKE_ASM_NASM_COMPILER ${NASM_EXECUTABLE})
-set(CMAKE_ASM_NASM_COMPILE_OBJECT "<CMAKE_ASM_NASM_COMPILER> <FLAGS> -gdwarf -o <OBJECT> <SOURCE>")
+set(CMAKE_ASM_NASM_COMPILE_OBJECT "<CMAKE_ASM_NASM_COMPILER> <FLAGS> -I${CMAKE_CURRENT_SOURCE_DIR}/src/ -gdwarf -o <OBJECT> <SOURCE>")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcmodel=large")
 # 根据构建类型设置不同的编译选项
@@ -36,6 +38,7 @@ else()
     message(STATUS "Building in RELEASE mode")
     add_compile_options(-O2)
 endif()
+
 # 语言特定的选项（可选）
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c23")          # C 标准
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++23")    # C++ 标准
@@ -53,6 +56,7 @@ set(SRC_COMMON
     src/utils/RB_btree.cpp
     src/utils/kout.cpp
     src/utils/intel_cpuid.cpp
+    src/panic.cpp
 )
 
 # 添加gnu-efi作为外部项目
@@ -73,15 +77,9 @@ add_custom_target(ksymbols
     COMMENT "运行自定义目标"
 )
 add_dependencies(ksymbols symbols_dumper)
-add_custom_target(initramfs
-    COMMAND ./mkinitramfs
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "运行自定义目标"
-)
-add_dependencies(initramfs mkinitramfs)
+
 add_dependencies(kernel_resources 
     kernel.elf 
-    initramfs
     ksymbols
 ) 
 # 获取gnu-efi构建目录路径
@@ -103,18 +101,26 @@ add_executable(kernel.elf
     src/ap_init_longmode_exceptions.asm
     src/ap_init_pemode_exceptions.asm
     src/ap_init_realmode_exceptions.asm
+    src/panic_processor_resources_shift.asm
     src/utils/int128_div.cpp
-    src/Interrupts/lapic.cpp
+    src/core_hardwares/lapic.cpp
     src/Interrupts/exceptions_handler.cpp
     src/Processor/local_processor_manage.cpp
-        src/firmware/APIC_convert_functions.cpp
-        src/firmware/APIC_table_analyzer.cpp
-        src/Interrupts/Sysdef_exception_entries.asm
-        src/core_hardwares/HPET.cpp
-        src/time.cpp
-        src/utils/kptrace.cpp
-        src/firmware/acpimgr.cpp
-        $<TARGET_OBJECTS:Mem_module>
+    src/firmware/APIC_convert_functions.cpp
+    src/firmware/APIC_table_analyzer.cpp
+    src/Interrupts/Sysdef_exception_entries.asm
+    src/core_hardwares/HPET.cpp
+    src/time.cpp
+    src/utils/kptrace.cpp
+    src/firmware/acpimgr.cpp
+    src/Processor/APs_bringup.cpp  
+    src/Processor/early_bsp_resources.cpp  
+    src/Processor/fixed_interrupt_resources.cpp  
+    src/Processor/runtime_processor_regist.asm
+    src/core_hardwares/PortDriver.cpp
+    src/core_hardwares/VideoDriver.cpp
+    src/scheduler/per_processor_scheduler.cpp
+    $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
 add_executable(BCB_test
@@ -122,7 +128,7 @@ add_executable(BCB_test
      ${SRC_COMMON}
     src/memory/mixed_bitmap.cpp
     src/memory/FreePagesAllocator_BCB.cpp
-    src/memory/FreePagesAllocator.cpp
+    #src/memory/FreePagesAllocator.cpp
 )
 target_include_directories(
     BCB_test PRIVATE
@@ -133,38 +139,44 @@ target_compile_options(
     BCB_test PRIVATE
     -DUSER_MODE
 )
-add_executable(mkinitramfs
-    src/tests/fs_test_main.cpp
-    src/drivers/MemoryDisk.cpp
+
+
+add_executable(test_mem
+    src/tests/test_memmodule.cpp
+    src/memory/Memory.cpp
+    src/memory/phygpsmemmgr.cpp
+    src/memory/phygpsmemmgr_pgcount_modify.cpp
+    src/memory/phygpsmemmgr_pgs_set.cpp
+    src/memory/phygpsmemmgr_seg_managment.cpp
+    src/memory/phygpsmemmgr_availabe_search.cpp
+    src/memory/phypgsmemmgr_alloc.cpp
+    src/memory/phygpsmemmgr_buddy_about.cpp
+    src/memory/mixed_bitmap.cpp
+    src/memory/FreePagesAllocator_BCB.cpp
+    src/memory/FreePagesAllocator.cpp
+    src/memory/out_surfaces.cpp
      ${SRC_COMMON}
 )
-
 target_include_directories(
-    mkinitramfs PRIVATE
+    test_mem PRIVATE
     "/usr/include/efi"
      "${CMAKE_SOURCE_DIR}/src/include"
 )
 target_compile_options(
-    mkinitramfs PRIVATE
+    test_mem PRIVATE
     -DUSER_MODE
-    -fsanitize=address
+
 )
-
-# 链接gnu-efi库
-target_link_libraries(mkinitramfs PRIVATE
-    fs_user_test
-    -fsanitize=address
-)
-
-
 add_executable(fs_test
     src/tests/fs_test_main.cpp
-    src/drivers/MemoryDisk.cpp
+
      ${SRC_COMMON}
 )
+
 target_include_directories(
     fs_test PRIVATE
     "/usr/include/efi"
+     "${CMAKE_SOURCE_DIR}/src/include/memory"
      "${CMAKE_SOURCE_DIR}/src/include"
 )
 target_compile_options(
@@ -176,7 +188,6 @@ target_compile_options(
 target_link_libraries(kernel.elf PRIVATE 
     ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
     ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
-    fs_static
 )
 
 
@@ -197,7 +208,7 @@ set(KERNEL_LINK_OPTS
     -fno-rtti
     -fno-omit-frame-pointer
     -fno-asynchronous-unwind-tables
-    -ftls-model=local-exec
+    #-ftls-model=local-exec
     -mno-red-zone
     -static
     -T${CMAKE_SOURCE_DIR}/kld.ld
@@ -220,7 +231,6 @@ target_compile_options(kernel.elf PRIVATE
     -fno-rtti
     -static
     -mgeneral-regs-only
-    -ftls-model=local-exec
     -fno-lto
     -fpermissive
     -fno-PIC
@@ -228,4 +238,16 @@ target_compile_options(kernel.elf PRIVATE
     -DPGLV_4>
 $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
 )
-target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS})
+target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS}
+    -fno-exceptions
+    -fno-builtin
+    -fno-rtti
+    -static
+    -mgeneral-regs-only
+    -fno-lto
+    -fpermissive
+    -fno-PIC
+    -DKERNEL_MODE>
+    -DPGLV_4>
+$<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
+)

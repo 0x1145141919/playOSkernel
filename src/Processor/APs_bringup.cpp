@@ -6,8 +6,8 @@
 #include "time.h"
 #include "util/cpuid_intel.h"
 
-extern  check_point longmode_enter_checkpoint={0};
-extern  check_point init_finish_checkpoint={0};
+check_point longmode_enter_checkpoint={0};
+check_point init_finish_checkpoint={0};
 constexpr uint32_t error_code_bitmap = 0
     | (1 << 8)   // #DF
     | (1 << 10)  // #TS
@@ -332,6 +332,7 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         }
         return CHECKPOINT_TIMEOUT;
     };
+    uint64_t ipi_fai_count=0;
     // 遍历gAnalyzer的processor_x64_list链表
     for(auto it = gAnalyzer->processor_x64_list->begin(); it != gAnalyzer->processor_x64_list->end(); ++it) {
         APICtb_analyzed_structures::processor_x64_lapic_struct& proc = *it;
@@ -349,29 +350,45 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         ap_observe_result_t status= ap_init_stage_func(1000,observe_realmode,nullptr,processor_id);//只有成功/超时两种状态
         if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one realmode enter timeout for processor "<<proc.apicid<<kio::kendl;
+            ipi_fai_count++;
         }
         status= ap_init_stage_func(1000,observe_pemode_enter,pe_fail_dealing,proc.apicid);
         if(status==CHECKPOINT_FAIL){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one pemode enter fail for processor "<<proc.apicid<<kio::kendl;
+            goto stage_fail;
         }
         if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one pemode enter timeout for processor "<<proc.apicid<<kio::kendl;
+            goto stage_fail;
         }
         status= ap_init_stage_func(1000,observe_longmode_enter,longmode_enter_fail_dealing,~processor_id);
         if(status==CHECKPOINT_FAIL){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one longmode enter fail for processor "<<proc.apicid<<kio::kendl;
+            goto stage_fail;
         }
         if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one longmode enter timeout for processor "<<proc.apicid<<kio::kendl;
+            goto stage_fail;
         }
         status= ap_init_stage_func(1000,observe_finish,finish_fail_dealing,~proc.apicid);    
         if(status==CHECKPOINT_FAIL){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one finish stage fail for processor "<<proc.apicid<<kio::kendl;
+            goto stage_fail;
         }
         if(status==CHECKPOINT_TIMEOUT){
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one finish stage timeout for processor "<<proc.apicid<<kio::kendl;
+            goto stage_fail;
         }
-    }
 
+
+    }
+    if(ipi_fai_count){
+        success.result=result_code::PARTIAL_SUCCESS;
+        success.reason=INTERRUPT_SUB_MODULES_LOCATIONS::PROCESSORS_EVENT_CODE::APS_INIT_RESULTS_CODE::PARTIAL_SUCCESS_CODE::PARTIAL_SUCCESS_CODE_SOME_APS_IPI_TIME_OUT;
+    }
     return success;
+    stage_fail:
+    fatal.reason=INTERRUPT_SUB_MODULES_LOCATIONS::PROCESSORS_EVENT_CODE::APS_INIT_RESULTS_CODE::FATAL_REASON::AP_STAGE_FAIL;
+    return fatal;
+
 }

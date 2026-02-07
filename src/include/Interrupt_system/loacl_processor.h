@@ -11,14 +11,17 @@ namespace gdtentry
 }
 namespace INTERRUPT_SUB_MODULES_LOCATIONS{
     namespace PROCESSORS_EVENT_CODE{
-        constexpr uint8_t EVENT_CODE_RUNTIME_RESGIS=1;
+        constexpr uint8_t EVENT_CODE_RUNTIME_RESGIS=1;//主要对应的是x64_local_processor::x64_local_processor构造函数
         constexpr uint8_t EVENT_CODE_APS_INIT = 2;
         namespace APS_INIT_RESULTS_CODE{
             namespace RETRY_REASON_CODE{
                 constexpr uint16_t RETRY_REASON_CODE_DEPENDIES_NOT_INITIALIZED = 1;
             }
             namespace PARTIAL_SUCCESS_CODE{
-                constexpr uint8_t PARTIAL_SUCCESS_CODE_SOME_APS_NOT_TIME_OUT = 1;
+                constexpr uint8_t PARTIAL_SUCCESS_CODE_SOME_APS_IPI_TIME_OUT = 1;
+            }
+            namespace FATAL_REASON{
+                constexpr uint8_t AP_STAGE_FAIL = 1;
             }
         }
     }
@@ -200,13 +203,13 @@ class x64_local_processor {//承担部分当前核心状态机切换维护的语
     static constexpr uint32_t  L_PROCESSOR_GS_IDX= 0;
     static int template_init();
     x64_local_processor(uint32_t alloced_id);
-    int unsafe_handler_register_without_vecnum_chech(uint8_t vector,void*handler);
-    int unsafe_handler_unregister_without_vecnum_chech(uint8_t vector);
-    int handler_register(uint8_t vector,void*handler);//会注意不在TOP_FOR_TEMPLATE_VECS之下注册，进行校验
-    int handler_unregister(uint8_t vector);
-    int GS_slot_register(uint32_t idx,void* ptr);//0号是被占用了，其它的都可以自由分配注册
-    void* GS_slot_get(uint32_t idx);
-    int GS_slot_unregister(uint32_t idx);
+    void unsafe_handler_register_without_vecnum_chech(uint8_t vector,void*handler);
+    void unsafe_handler_unregister_without_vecnum_chech(uint8_t vector);
+    bool handler_register(uint8_t vector,void*handler);
+    bool handler_unregister(uint8_t vector);
+    void GS_slot_write(uint32_t idx,uint64_t content);//0号是被占用了，静默失败，超过索引（GS_SLOT_MAX_ENTRY_COUNT）则静默失败其它情况正常写
+    uint64_t GS_slot_get(uint32_t idx);//超过索引（GS_SLOT_MAX_ENTRY_COUNT）则返回~0其它情况正常读
+
     uint32_t get_apic_id();
     uint32_t get_processor_id();
 };
@@ -242,4 +245,3 @@ class  x86_smp_processors_container {
     static int unregist_core();
 };
 extern uint64_t ap_hlt_word;
-

@@ -9,8 +9,9 @@ extern "C" const x64_gdtentry bsp_init_gdt_entries[] = {
 };
 extern "C" const GDTR bsp_init_gdt_descriptor = {
     .limit = sizeof(bsp_init_gdt_entries) - 1,
-    .base = reinterpret_cast<uint64_t>(bsp_init_gdt_entries)
+    .base = (uint64_t)bsp_init_gdt_entries
 };
+
 // 定义前21个IDT项的数组
 extern "C" const IDTEntry bsp_init_idt_entries[21] = {
     // ivec::DIVIDE_ERROR (0) - 除零异常
@@ -308,6 +309,8 @@ extern "C" const IDTEntry bsp_init_idt_entries[21] = {
         .reserved3 = 0
     }
 };
+
+//extern "C" const IDTEntry bsp_init_idt_entries[21]={0};
 extern "C" IDTR const bsp_init_idtr={
     .limit = sizeof(bsp_init_idt_entries) - 1,
     .base = (uint64_t)bsp_init_idt_entries

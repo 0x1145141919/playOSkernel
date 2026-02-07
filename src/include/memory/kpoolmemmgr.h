@@ -40,6 +40,7 @@ namespace MEMMODULE_LOCAIONS
         namespace ALLOC_RESULTS{
             namespace FAIL_RESONS{
                 constexpr uint16_t REASON_CODE_NO_AVALIABLE_MEM=4;
+                constexpr uint16_t REASON_CODE_SIZE_IS_ZERO=5;
             }
             
         }
@@ -47,10 +48,23 @@ namespace MEMMODULE_LOCAIONS
         namespace REALLOC_RESULTS{
             namespace FAIL_RESONS{
                 constexpr uint16_t REASON_CODE_DEMAND_SIZE_IS_ZERO=4;
+                constexpr uint16_t REASON_CODE_PTR_NOT_IN_ANY_HEAP=5;
+                constexpr uint16_t REASON_CODE_NO_AVALIABLE_MEM=6;
             }
             
         }
         constexpr uint8_t EVENT_CODE_PER_PROCESSOR_HEAP_INIT=3;
+        namespace PER_PROCESSOR_HEAP_INIT_RESULTS{
+            namespace FAIL_RESONS{
+                constexpr uint16_t REASON_CODE_ALREADY_ENABLED=1;
+                constexpr uint16_t REASON_CODE_BAD_PROCESSOR_COUNT=2;
+                constexpr uint16_t REASON_CODE_NO_VADDR_SPACE=3;
+                constexpr uint16_t REASON_CODE_VM_ADD_FAIL=4;
+                constexpr uint16_t REASON_CODE_IDX_OUT_OF_RANGE=5;
+                constexpr uint16_t REASON_CODE_HEAP_ALREADY_EXISTS=6;
+                constexpr uint16_t REASON_CODE_HEAP_NOT_EXIST=7;
+            }
+        }
     }
     constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR_HCB=5;
     namespace KPOOLMEMMGR_HCB_EVENTS{
@@ -114,13 +128,14 @@ namespace MEMMODULE_LOCAIONS
 class kpoolmemmgr_t
 {
 private:
-    static constexpr uint64_t HCB_ARRAY_MAX_COUNT = 0x1000;
-    static constexpr uint64_t MAX_TRY_TIME = 0x10;
+    static constexpr uint32_t HCB_DEFAULT_SIZE=0x200000;
+    static constexpr uint32_t HCB_DEFAULT_BITMAP_SIZE=HCB_DEFAULT_SIZE/128;
+    static constexpr uint8_t PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2 = 0x4;
+public:
     class HCB_v2//堆控制块，必须是连续物理地址空间的连续内存
     {
         private:
             // 活跃分配魔数（推荐）
-        uint32_t belonged_to_cpu_apicid=0;//只考虑x2apic的32位apic_id
         static constexpr uint64_t MAGIC_ALLOCATED    = 0xDEADBEEFCAFEBABEull;
         KURD_t default_kurd();
         KURD_t default_success();
@@ -174,7 +189,7 @@ private:
         static_assert(sizeof(data_meta)==16,"data_meta size must be 16 bytes");
         int first_linekd_heap_Init();//只能由first_linekd_heap调用的初始化
         //用指针检验是不是那个特殊堆
-        HCB_v2(uint32_t apic_id);//给某个逻辑处理器初始化一个HCB
+        HCB_v2(uint32_t size,vaddr_t vbase);//给某个逻辑处理器初始化一个HCB
         HCB_v2();
         KURD_t second_stage_Init();
         ~HCB_v2();
@@ -215,7 +230,6 @@ private:
          * 5.返回管理器的realloc接口的时候根据返回值尝试新堆alloc,释放原堆，或者内核恐慌，并且报告相关错误信息
          * */
         KURD_t in_heap_realloc(void*&ptr, uint32_t new_size,alloc_flags_t flags);
-        uint32_t get_belonged_cpu_apicid();
         uint64_t get_used_bytes_count();
         bool is_full();
         void count_used_bytes();
@@ -223,21 +237,20 @@ private:
         phyaddr_t tran_to_phy(void* addr);//这两个是通过HCB里面的虚拟基址，物理基址直接算出来的
         vaddr_t tran_to_virt(phyaddr_t addr);//地址翻译函数若没有命中就返回垃圾值
     };
+private:
     static KURD_t default_kurd();
     static KURD_t default_success();
     static KURD_t default_fail();
     static KURD_t default_fatal();
-    static bool is_able_to_alloc_new_hcb;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
+    static bool is_muli_heap_enabled;//是否允许在HCB_ARRAY中分配新的HCB,应该在全局页管理器初始化完成之后调用
     //这个位开启后会优先在cpu专属堆里面操作，再尝试first_linekd_heap
     static HCB_v2 first_linekd_heap;
+    static HCB_v2**HCB_ARRAY;
+    static spinrwlock_cpp_t HCB_ARRAY_lock;
+    static KURD_t alloc_heap(uint32_t idx);
+    static KURD_t free_heap(uint32_t idx);
+    static HCB_v2*find_hcb_by_address(void* ptr);
 public:
-    static constexpr uint32_t PER_CPU_HEAP_MAX_HCB_COUNT=32;
-    struct GS_per_cpu_heap_complex_t{
-        HCB_v2* hcb_array[PER_CPU_HEAP_MAX_HCB_COUNT];
-    };
-    static kpoolmemmgr_t::HCB_v2* find_hcb_by_address(void* ptr);
-    static void enable_new_hcb_alloc();
-    static kpoolmemmgr_t::GS_per_cpu_heap_complex_t *get_current_heap_complex();
     /**
      * @param vaddraquire true返回虚拟地址，false返回物理地址
      * @param alignment 实际对齐值=2<<alignment,最高支持到13，8kb对齐
@@ -248,7 +261,7 @@ public:
     static void clear(void *ptr); // 主要用于结构体清理内存，new一个结构体后用这个函数根据传入的起始地址查找堆的元信息表项，并把该元信息项对应的内存空间全部写0
     // 别用这个清理new之后的对象
     static int Init(); // 真正的初始化，全局对象手动初始化函数，但是是全局单例，设计上都是依赖静态资源，理论上这个模块初始化不可能失败，不引入KURD
-    static KURD_t self_heap_init();
+    static KURD_t multi_heap_enable();
     static void kfree(void *ptr);
     static phyaddr_t get_phy(vaddr_t addr);
     static vaddr_t get_virt(phyaddr_t addr);

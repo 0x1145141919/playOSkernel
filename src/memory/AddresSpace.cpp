@@ -978,7 +978,6 @@ KURD_t AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
     VM_DESC identity_desc={
         .start=0,
         .end=0x1000000000,
-        .SEG_SIZE_ONLY_UES_IN_BASIC_SEG=0,
         .map_type=VM_DESC::map_type_t::MAP_PHYSICAL,
         .phys_start=0,
         .access={
@@ -991,7 +990,8 @@ KURD_t AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
         },
         .committed_full=0,
         .is_vaddr_alloced=0,
-        .is_out_bound_protective=0
+        .is_out_bound_protective=0,
+        .SEG_SIZE_ONLY_UES_IN_BASIC_SEG=0,
     };
     return enable_VM_desc(identity_desc);
 }

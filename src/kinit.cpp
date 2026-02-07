@@ -162,13 +162,22 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     time::hardware_time::inform_initialized_hpet();
     time::hardware_time::processor_regist();
     kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
+    if(time::hardware_time::get_tsc_reliable()){
+        kio::bsp_kout<<"TSC is reliable"<<kio::kendl;
+    }
     x86_smp_processors_container::template_idt_init();
     x86_smp_processors_container::regist_core(0);
-    kpoolmemmgr_t::self_heap_init();
     kio::bsp_kout<<kio::now<<"BSP online"<<kio::kendl;
     gAnalyzer=new APIC_table_analyzer((MADT_Table*)gAcpiVaddrSapceMgr.get_acpi_table("APIC"));
-    x86_smp_processors_container::AP_Init_one_by_one();
-    kpoolmemmgr_t::enable_new_hcb_alloc();
+    bsp_init_kurd=kpoolmemmgr_t::multi_heap_enable();
+    if(error_kurd(bsp_init_kurd)){
+        kio::bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kio::kendl;
+    }
+    uint64_t*test=new uint64_t[1024];
+    bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
+    if(error_kurd(bsp_init_kurd)){
+        kio::bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kio::kendl;
+    }
     //中断接管工作
     asm volatile("hlt");
     
@@ -181,7 +190,6 @@ extern "C" void ap_init(uint32_t processor_id)
     asm volatile("sfence");
     gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
     x86_smp_processors_container::regist_core(processor_id); 
-    kpoolmemmgr_t::self_heap_init();
     time::hardware_time::processor_regist();
     init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");

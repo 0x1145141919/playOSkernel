@@ -23,8 +23,14 @@ static constexpr uint8_t MACHINE_CHECK = 18;
 static constexpr uint8_t SIMD_FLOATING_POINT_EXCEPTION = 19;
 static constexpr uint8_t VIRTUALIZATION_EXCEPTION = 20;
 static constexpr uint8_t CONTROL_PROTECTION_EXCEPTION = 21;
-static constexpr uint8_t LAPIC_TIMER = 32;
-static constexpr uint8_t IPI = 33;
-static constexpr uint8_t ASM_PANIC = 34;
-static constexpr uint8_t TOP_FOR_TEMPLATE_VECS = 64;
+static constexpr uint8_t BOTTOM_FOR_SYSTEM_RESERVED_VECS = 224;
+static constexpr uint8_t LAPIC_TIMER = 224;
+static constexpr uint8_t ASM_PANIC = 225;//只推荐用int ASM_PANIC触发
+static constexpr uint8_t IPI = 240;
+static constexpr uint8_t LAPIC_ERR=241;
 };
+/**
+ * 0～31架构占用
+ * 224～255系统占用
+ * 中间32～223允许自由分配
+ */

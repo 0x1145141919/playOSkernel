@@ -173,7 +173,6 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
             Panic::panic(default_panic_behaviors_flags,
                 "[x64_local_processor]x2apic enable failed",nullptr,&inshort,KURD_t());
         }
-        uint64_t icr=rdmsr(msr::apic::IA32_X2APIC_ICR);
     }else{
         panic_info_inshort inshort={
             .is_bug=false,
@@ -186,6 +185,7 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
             "[x64_local_processor]x2apic not supported",nullptr,&inshort,KURD_t());
     }
 }
+
 KURD_t x64_local_processor::default_kurd()
 {
     return KURD_t(0,0,module_code::INTERRUPT,INTERRUPT_SUB_MODULES_LOCATIONS::LOCATION_CODE_PROCESSORS,0,0,err_domain::ARCH);
@@ -232,7 +232,7 @@ KURD_t x86_smp_processors_container::default_fatal()
     result=set_fatal_result_level(result);
     return result;
 }
-int x64_local_processor::unsafe_handler_register_without_vecnum_chech(uint8_t vector, void *handler)
+void x64_local_processor::unsafe_handler_register_without_vecnum_chech(uint8_t vector, void *handler)
 {
     idt[vector].offset_low = static_cast<uint16_t>(reinterpret_cast<uint64_t>(handler) & 0xFFFF);
     idt[vector].offset_mid = static_cast<uint16_t>((reinterpret_cast<uint64_t>(handler) >> 16) & 0xFFFF);
@@ -241,10 +241,71 @@ int x64_local_processor::unsafe_handler_register_without_vecnum_chech(uint8_t ve
     idt[vector].reserved3 = 0;
     idt[vector].reserved2 = 0;
     idt[vector].reserved1 = 0;
-    return 0;
 }
 
-int x64_local_processor::unsafe_handler_unregister_without_vecnum_chech(uint8_t vector)
+void x64_local_processor::unsafe_handler_unregister_without_vecnum_chech(uint8_t vector)
 {
-    return x64_local_processor::unsafe_handler_register_without_vecnum_chech(vector,template_idt[vector].handler);
+    x64_local_processor::unsafe_handler_register_without_vecnum_chech(vector,template_idt[vector].handler);
+}
+bool x64_local_processor::handler_unregister(uint8_t vector){
+        if(vector < 32 || vector >= ivec::BOTTOM_FOR_SYSTEM_RESERVED_VECS){
+            return false;
+        }
+        unsafe_handler_unregister_without_vecnum_chech(vector);
+        return true;
+    }
+bool x64_local_processor::handler_register(uint8_t vector,void*handler){
+    if(vector < 32 || vector >= ivec::BOTTOM_FOR_SYSTEM_RESERVED_VECS){
+        return false;
+    }
+    unsafe_handler_register_without_vecnum_chech(vector,handler);
+    return true;
+}
+
+void x64_local_processor::GS_slot_write(uint32_t idx, uint64_t content)
+{
+    if(idx == 0 || idx >= GS_SLOT_MAX_ENTRY_COUNT){
+        return;
+    }
+    gs_slot[idx]=content;
+}
+
+uint64_t x64_local_processor::GS_slot_get(uint32_t idx)
+{
+    if(idx == 0 || idx >= GS_SLOT_MAX_ENTRY_COUNT){
+        return 0;
+    }
+    return gs_slot[idx];
+}
+
+uint32_t x64_local_processor::get_apic_id()
+{
+    return apic_id;
+}
+uint32_t x64_local_processor::get_processor_id()
+{
+    return processor_id;
+}
+x64_local_processor *x86_smp_processors_container::get_processor_mgr_by_processor_id(prcessor_id_t id)
+{
+    // 遍历local_processor_interrupt_mgr_array寻找对应的x64_local_processor*
+    for (uint32_t i = 0; i < max_processor_count; i++) {
+        x64_local_processor* processor = local_processor_interrupt_mgr_array[i];
+        if (processor != nullptr && processor->get_processor_id() == id) {
+            return processor;
+        }
+    }
+    return nullptr;
+}
+
+x64_local_processor* x86_smp_processors_container::get_processor_mgr_by_apic_id(x2apicid_t apic_id)
+{
+    // 遍历local_processor_interrupt_mgr_array寻找对应的x64_local_processor*
+    for (uint32_t i = 0; i < max_processor_count; i++) {
+        x64_local_processor* processor = local_processor_interrupt_mgr_array[i];
+        if (processor != nullptr && processor->get_apic_id() == apic_id) {
+            return processor;
+        }
+    }
+    return nullptr;
 }

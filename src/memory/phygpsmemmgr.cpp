@@ -315,7 +315,6 @@ KURD_t phymemspace_mgr::Init()
     KURD_t success=default_success();
     fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_INIT;
     success.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_INIT;
-    //todo 注册函数
     physeg_list=new PHYSEG_LIST_ITEM();
     top_1gb_table=new Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,page_size1gb_t,__builtin_ctz(MAX_PHYADDR_1GB_PGS_COUNT)-9,9>;
     uint32_t phymemtb_count=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();

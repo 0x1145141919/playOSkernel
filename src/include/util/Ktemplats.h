@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "bitmap.h"
+#include "util/OS_utils.h"
 #ifdef KERNEL_MODE
 #include "memory/kpoolmemmgr.h"
 #endif
@@ -76,7 +77,7 @@ public:
     };
 
 private:
-    root_entry* m_root;
+    root_entry m_root[HIGH_ENTRIES];
 
     static inline uint32_t high_index(IndexT idx) {
         return (uint32_t)(idx >> sub_entries_log2);
@@ -87,7 +88,6 @@ private:
     }
 public:
     sparse_table_2level_no_OBJCONTENT() {
-        m_root = new root_entry[HIGH_ENTRIES];
     }
 
     ~sparse_table_2level_no_OBJCONTENT() {
@@ -95,7 +95,6 @@ public:
             if (m_root[i].table)
                 delete m_root[i].table;
         }
-        delete[] m_root;
     }
 
 

@@ -4,17 +4,31 @@
 #include "util/kout.h"
 #include "panic.h"
 #include "memory/kpoolmemmgr.h"
+#include "memory/AddresSpace.h"
+#include "firmware/ACPI_APIC.h"
 #include "util/cpuid_intel.h"
 #include "util/kptrace.h"
+#include "util/OS_utils.h"
+#include "Interrupt_system/loacl_processor.h"
 #ifdef USER_MODE
 #include "stdlib.h"
-#include "kpoolmemmgr.h"
 #endif  
 
-// 定义类中的静态成员变量
-bool kpoolmemmgr_t::is_able_to_alloc_new_hcb = false;
-kpoolmemmgr_t::HCB_v2 kpoolmemmgr_t::first_linekd_heap;
 
+kpoolmemmgr_t::HCB_v2**kpoolmemmgr_t::HCB_ARRAY;
+// 定义类中的静态成员变量
+bool kpoolmemmgr_t::is_muli_heap_enabled = false;
+kpoolmemmgr_t::HCB_v2 kpoolmemmgr_t::first_linekd_heap;
+spinrwlock_cpp_t kpoolmemmgr_t::HCB_ARRAY_lock;
+VM_DESC heap_area={.start=0,
+    .end=0,
+    .map_type=VM_DESC::MAP_NONE,
+    .phys_start=0,
+    .access=KspaceMapMgr::PG_RW,
+    .committed_full=0,
+    .is_vaddr_alloced=0,
+    .is_out_bound_protective=0
+};
 KURD_t kpoolmemmgr_t::default_kurd()
 {
     return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR,0,0,err_domain::CORE_MODULE);
@@ -38,26 +52,126 @@ KURD_t kpoolmemmgr_t::default_fatal()
     kurd=set_fatal_result_level(kurd);
     return  kurd;
 }
-
-
+KURD_t kpoolmemmgr_t::multi_heap_enable()//只能由BSP在SCHDULE阶段之前调用
+{
+    KURD_t success=default_success();
+    KURD_t fail=default_fail();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
+    if(is_muli_heap_enabled){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_ALREADY_ENABLED;
+        return fail;
+    }
+    uint64_t processor_count=gAnalyzer->processor_x64_list->size();
+    if(processor_count==0){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_BAD_PROCESSOR_COUNT;
+        return fail;
+    }
+    uint64_t hcb_count=processor_count*(1<<PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2);
+    HCB_ARRAY_lock.write_lock();
+    HCB_ARRAY=new kpoolmemmgr_t::HCB_v2*[hcb_count];
+    setmem(HCB_ARRAY,hcb_count*sizeof(HCB_ARRAY[0]),0);
+    HCB_ARRAY_lock.write_unlock();
+    uint64_t heap_area_size=HCB_DEFAULT_SIZE*hcb_count;
+    heap_area.start=KspaceMapMgr::kspace_vm_table->alloc_available_space(heap_area_size,0);
+    if(heap_area.start==0){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_NO_VADDR_SPACE;
+        return fail;
+    }
+    heap_area.end=heap_area.start+heap_area_size;
+    heap_area.is_vaddr_alloced=1;
+    if(KspaceMapMgr::VM_add(heap_area)!=OS_SUCCESS){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_VM_ADD_FAIL;
+        return fail;
+    }
+    is_muli_heap_enabled=true;
+    return success;
+}
+KURD_t kpoolmemmgr_t::alloc_heap(uint32_t idx)
+{
+    KURD_t success=default_success();
+    KURD_t fail=default_fail();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
+    uint64_t processor_count=gAnalyzer->processor_x64_list->size();
+    uint64_t hcb_count=processor_count*(1<<PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2);
+    if(idx>=hcb_count){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_IDX_OUT_OF_RANGE;
+        return fail;
+    }
+    HCB_ARRAY_lock.read_lock();
+    bool exists=(HCB_ARRAY[idx]!=nullptr);
+    HCB_ARRAY_lock.read_unlock();
+    if(exists){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_HEAP_ALREADY_EXISTS;
+        return fail;
+    }
+    alloc_flags_t flags=default_flags;
+    void* ptr=nullptr;
+    KURD_t contain=first_linekd_heap.in_heap_alloc(
+        ptr,sizeof(HCB_v2),flags
+    );
+    if(!success_all_kurd(contain))return contain;
+    HCB_ARRAY_lock.write_lock();
+    if(HCB_ARRAY[idx]){
+        HCB_ARRAY_lock.write_unlock();
+        first_linekd_heap.free(ptr);
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_HEAP_ALREADY_EXISTS;
+        return fail;
+    }
+    HCB_ARRAY[idx]=(HCB_v2*)ptr;
+    new(HCB_ARRAY[idx]) HCB_v2(HCB_DEFAULT_SIZE,heap_area.start+HCB_DEFAULT_SIZE*idx);
+    contain=HCB_ARRAY[idx]->second_stage_Init();
+    if(!success_all_kurd(contain)){
+        HCB_ARRAY[idx]=nullptr;
+        HCB_ARRAY_lock.write_unlock();
+        first_linekd_heap.free(ptr);
+        return contain;
+    }
+    HCB_ARRAY_lock.write_unlock();
+    return success;
+}
+KURD_t kpoolmemmgr_t::free_heap(uint32_t idx)
+{
+    KURD_t success=default_success();
+    KURD_t fail=default_fail();
+    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
+    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
+    uint64_t processor_count=gAnalyzer->processor_x64_list->size();
+    uint64_t hcb_count=processor_count*(1<<PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2);
+    if(idx>=hcb_count){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_IDX_OUT_OF_RANGE;
+        return fail;
+    }
+    HCB_ARRAY_lock.read_lock();
+    bool exists=(HCB_ARRAY[idx]!=nullptr);
+    HCB_ARRAY_lock.read_unlock();
+    if(!exists){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_HEAP_NOT_EXIST;
+        return fail;
+    }
+    HCB_ARRAY_lock.write_lock();
+    HCB_v2* hcb=HCB_ARRAY[idx];
+    HCB_ARRAY[idx]=nullptr;
+    HCB_ARRAY_lock.write_unlock();
+    hcb->~HCB_v2();
+    KURD_t contain=first_linekd_heap.free(hcb);
+    if(!success_all_kurd(contain))return contain;
+    return success;
+}
 kpoolmemmgr_t::HCB_v2 *kpoolmemmgr_t::find_hcb_by_address(void *ptr)
 {
-    auto* heap_complex = get_current_heap_complex();
-    if (!heap_complex) return nullptr;
-    
-    for (uint16_t i = 0; i < kpoolmemmgr_t::PER_CPU_HEAP_MAX_HCB_COUNT; ++i) {
-        auto* hcb = heap_complex->hcb_array[i];
-        if (hcb && hcb->is_addr_belong_to_this_hcb(ptr)) {
-            return hcb;
-        }
-    }
-    return nullptr;
+    if(first_linekd_heap.is_addr_belong_to_this_hcb(ptr))return &first_linekd_heap;
+    if((uint64_t)ptr>=heap_area.end||(uint64_t)ptr<heap_area.start)return nullptr;
+    uint64_t offset=(uint64_t)ptr-(uint64_t)heap_area.start;
+    uint64_t idx=offset/HCB_DEFAULT_SIZE;
+    HCB_ARRAY_lock.read_lock();
+    HCB_v2* hcb=HCB_ARRAY[idx];
+    HCB_ARRAY_lock.read_unlock();
+    return hcb;
 }
 
-void kpoolmemmgr_t::enable_new_hcb_alloc()
-{
-    is_able_to_alloc_new_hcb = true;
-}
+
 
 // 辅助函数：处理堆对象被销毁的错误
 static void handle_heap_obj_destroyed(const char* operation, void* ptr) {
@@ -75,10 +189,7 @@ static void handle_heap_obj_destroyed(const char* operation, void* ptr) {
 }
 
 // 辅助函数：获取当前处理器的堆复合结构
-kpoolmemmgr_t::GS_per_cpu_heap_complex_t* kpoolmemmgr_t::get_current_heap_complex() {
-    return reinterpret_cast<kpoolmemmgr_t::GS_per_cpu_heap_complex_t*>(
-        read_gs_u64(HEAP_COMPLEX_GS_INDEX));
-}
+
 
 void* kpoolmemmgr_t::kalloc(uint64_t size,KURD_t&no_succes_report,alloc_flags_t flags)
 {
@@ -89,52 +200,52 @@ void* kpoolmemmgr_t::kalloc(uint64_t size,KURD_t&no_succes_report,alloc_flags_t 
     fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_ALLOC;
     fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_ALLOC;
     // 参数验证
-    if (size == 0) return nullptr;
-    
+    if (size == 0){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SIZE_IS_ZERO;
+        no_succes_report=fail;
+        return nullptr;
+    }
+    KURD_t contain=KURD_t();
     void* ptr = nullptr;
-    if((!flags.force_first_linekd_heap)&&is_able_to_alloc_new_hcb) {
+    if((!flags.force_first_linekd_heap)&&is_muli_heap_enabled) {
         // 尝试在当前处理器的堆中分配
-        auto* heap_complex = get_current_heap_complex();
-        if (!heap_complex) {
-            KURD_t result_container = self_heap_init();
-            if (result_container.result != result_code::SUCCESS) {
-                kio::bsp_kout << kio::now 
-                    << "kpoolmemmgr_t::kalloc: self_heap_init failed" << kio::kendl;
-                no_succes_report = result_container;
+        x64_local_processor*local_processor=(x64_local_processor*)read_gs_u64(PROCESSOR_SELF_RESOURCES_COMPELX_GS_INDEX);
+        uint32_t id=local_processor->get_processor_id();
+        for(uint32_t i = 0; i < (1<<PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2); ++i){
+            uint32_t idx=(id<<PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2)+i;
+            HCB_ARRAY_lock.read_lock();
+            HCB_v2* hcb=HCB_ARRAY[idx];
+            HCB_ARRAY_lock.read_unlock();
+            if(!hcb){
+                contain=alloc_heap(idx);
+                if(!success_all_kurd(contain)){
+                    no_succes_report = contain;
                     return nullptr;
-            }
-            heap_complex = get_current_heap_complex();
-        }
-        
-        // 遍历HCB数组尝试分配
-        for (uint16_t i = 0; i < PER_CPU_HEAP_MAX_HCB_COUNT; ++i) {
-            if (!heap_complex->hcb_array[i]) {
-                // 初始化新的HCB
-                alloc_flags_t meta_flags = flags;
-                meta_flags.force_first_linekd_heap = true;
-                heap_complex->hcb_array[i] = new(meta_flags) HCB_v2(query_x2apicid());
-                if (heap_complex->hcb_array[i]->second_stage_Init().result != result_code::SUCCESS) {
-                    delete heap_complex->hcb_array[i];
-                    heap_complex->hcb_array[i] = nullptr;
-                    continue;
                 }
+                HCB_ARRAY_lock.read_lock();
+                hcb=HCB_ARRAY[idx];
+                HCB_ARRAY_lock.read_unlock();
             }
-            
-            auto* hcb = heap_complex->hcb_array[i];
-            if (!hcb->is_full()) {
-                if (hcb->in_heap_alloc(ptr, size, flags).result == result_code::SUCCESS) {
-                    return ptr;
-                }
+            if(!hcb){
+                fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_NO_AVALIABLE_MEM;
+                no_succes_report = fail;
+                return nullptr;
+            }
+            contain=hcb->in_heap_alloc(ptr,size,flags);
+            if(success_all_kurd(contain)){
+                no_succes_report = contain;
+                return ptr;
             }
         }
-        
         // 所有每CPU堆都失败，回退到第一个链接堆
         kio::bsp_kout << kio::now << "kpoolmemmgr_t::kalloc: fallback to first_linekd_heap on processor " 
                       << query_x2apicid() << kio::kendl;
     }
     
     // 使用第一个链接堆分配
-    if (first_linekd_heap.in_heap_alloc(ptr, size, flags).result == result_code::SUCCESS) {
+    contain=first_linekd_heap.in_heap_alloc(ptr, size, flags);
+    if (contain.result == result_code::SUCCESS) {
+        no_succes_report = contain;
         return ptr;
     }
     
@@ -163,6 +274,8 @@ void* kpoolmemmgr_t::realloc(void* ptr,KURD_t&no_succes_report, uint64_t size, a
     HCB_v2* located_private_heap=find_hcb_by_address(ptr);
     if(!located_private_heap)located_private_heap =(first_linekd_heap.is_addr_belong_to_this_hcb(ptr)?&first_linekd_heap:nullptr);
     if(!located_private_heap){
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::REALLOC_RESULTS::FAIL_RESONS::REASON_CODE_PTR_NOT_IN_ANY_HEAP;
+        no_succes_report=fail;
         return nullptr;
     }
     if(!flags.is_when_realloc_force_new_addr)subhcb_results_contianer=located_private_heap->in_heap_realloc(ptr, size, flags);
@@ -176,10 +289,11 @@ void* kpoolmemmgr_t::realloc(void* ptr,KURD_t&no_succes_report, uint64_t size, a
         no_succes_report=subhcb_results_contianer;
         return ptr;
     }
-    if (is_able_to_alloc_new_hcb) {
+    if (is_muli_heap_enabled) {
         // 尝试分配新内存并复制数据
         KURD_t err_container = KURD_t();
         void* new_ptr = kalloc(size,err_container, flags);
+        no_succes_report = err_container;
         if (new_ptr) {
             // 获取旧数据大小
             auto* old_meta = reinterpret_cast<HCB_v2::data_meta*>(
@@ -187,6 +301,12 @@ void* kpoolmemmgr_t::realloc(void* ptr,KURD_t&no_succes_report, uint64_t size, a
             ksystemramcpy(ptr, new_ptr, old_meta->data_size);
             kfree(ptr);
             return new_ptr;
+        }
+        if(!success_all_kurd(err_container)){
+            no_succes_report=err_container;
+        }else{
+            fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::REALLOC_RESULTS::FAIL_RESONS::REASON_CODE_NO_AVALIABLE_MEM;
+            no_succes_report=fail;
         }
         return nullptr;
     } else {
@@ -199,7 +319,17 @@ void* kpoolmemmgr_t::realloc(void* ptr,KURD_t&no_succes_report, uint64_t size, a
         }
     }
     
-    return (subhcb_results_contianer.result == result_code::SUCCESS) ? ptr : nullptr;
+    if(subhcb_results_contianer.result == result_code::SUCCESS){
+        no_succes_report=subhcb_results_contianer;
+        return ptr;
+    }
+    if(!success_all_kurd(subhcb_results_contianer)){
+        no_succes_report=subhcb_results_contianer;
+    }else{
+        fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::REALLOC_RESULTS::FAIL_RESONS::REASON_CODE_NO_AVALIABLE_MEM;
+        no_succes_report=fail;
+    }
+    return nullptr;
 }
 
 void kpoolmemmgr_t::clear(void* ptr)
@@ -209,8 +339,8 @@ void kpoolmemmgr_t::clear(void* ptr)
     KURD_t subhcb_results_contianer = KURD_t();
     
     // 优先在每CPU堆中查找
-    if (is_able_to_alloc_new_hcb) {
-        auto* hcb = find_hcb_by_address(ptr);
+    if (is_muli_heap_enabled) {
+        HCB_v2* hcb = find_hcb_by_address(ptr);
         if (hcb) {
             subhcb_results_contianer = hcb->clear(ptr);
             if (subhcb_results_contianer.result==result_code::FATAL&&subhcb_results_contianer.level==level_code::FATAL&&
@@ -235,34 +365,8 @@ void kpoolmemmgr_t::clear(void* ptr)
 
 int kpoolmemmgr_t::Init()
 {
-    is_able_to_alloc_new_hcb = false;
+    is_muli_heap_enabled = false;
     return first_linekd_heap.first_linekd_heap_Init();
-}
-
-KURD_t kpoolmemmgr_t::self_heap_init()
-{
-    KURD_t success=default_success();
-    KURD_t fail=default_fail();
-    KURD_t fatal=default_fatal();
-    success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
-    fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
-    fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT;
-    auto* heap_complex = get_current_heap_complex();
-    if (heap_complex) {
-        return success; // 已经初始化
-    }
-    alloc_flags_t meta_flags = default_flags;
-    meta_flags.force_first_linekd_heap = true;
-    heap_complex = new(meta_flags) GS_per_cpu_heap_complex_t;
-    heap_complex->hcb_array[0]=new(meta_flags) HCB_v2(query_x2apicid());
-    KURD_t hcb_init_result_contain=heap_complex->hcb_array[0]->second_stage_Init();
-    if (hcb_init_result_contain.result != result_code::SUCCESS) {
-        delete heap_complex;
-        return hcb_init_result_contain;
-    }
-    setmem(heap_complex, sizeof(GS_per_cpu_heap_complex_t), 0);
-    gs_u64_write(HEAP_COMPLEX_GS_INDEX, reinterpret_cast<uint64_t>(heap_complex));
-    return success;
 }
 
 void kpoolmemmgr_t::kfree(void* ptr)
@@ -271,7 +375,7 @@ void kpoolmemmgr_t::kfree(void* ptr)
     
     KURD_t subhcb_results_contianer = KURD_t();
     
-    if (is_able_to_alloc_new_hcb) {
+    if (is_muli_heap_enabled) {
         auto* hcb = find_hcb_by_address(ptr);
         if (hcb) {
             subhcb_results_contianer = hcb->free(ptr);
@@ -284,16 +388,10 @@ void kpoolmemmgr_t::kfree(void* ptr)
             
             // 如果HCB为空，则销毁它
             if (hcb->get_used_bytes_count() == 0) {
-                auto* heap_complex = get_current_heap_complex();
-                if (heap_complex) {
-                    for (uint16_t i = 0; i < PER_CPU_HEAP_MAX_HCB_COUNT; ++i) {
-                        if (heap_complex->hcb_array[i] == hcb) {
-                            hcb->~HCB_v2();
-                            first_linekd_heap.free(hcb);
-                            heap_complex->hcb_array[i] = nullptr;
-                            break;
-                        }
-                    }
+                uint64_t offset=(uint64_t)ptr-(uint64_t)heap_area.start;
+                subhcb_results_contianer=free_heap(offset/HCB_DEFAULT_SIZE);
+                if(!success_all_kurd(subhcb_results_contianer)){
+                    //panic,释放失败
                 }
             }
             return;
@@ -342,7 +440,7 @@ phyaddr_t kpoolmemmgr_t::get_phy(vaddr_t addr)
         return 0;
     }
     
-    if (is_able_to_alloc_new_hcb) {
+    if (is_muli_heap_enabled) {
         auto* hcb = find_hcb_by_address(reinterpret_cast<void*>(addr));
         if (hcb) {
             return hcb->tran_to_phy(reinterpret_cast<void*>(addr));
@@ -361,7 +459,7 @@ vaddr_t kpoolmemmgr_t::get_virt(phyaddr_t addr)
         return 0;
     }
     
-    if (is_able_to_alloc_new_hcb) {
+    if (is_muli_heap_enabled) {
         auto* hcb = find_hcb_by_address(reinterpret_cast<void*>(addr));
         if (hcb) {
             return hcb->tran_to_virt(addr);

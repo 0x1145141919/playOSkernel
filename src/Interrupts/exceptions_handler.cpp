@@ -216,14 +216,11 @@ void Control_Protection_cpp_enter(x64_Interrupt_saved_context *frame)
     
 }
 
-void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
-{
 
-}
 
 void ipi_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
 {
-
+    global_ipi_handler();
 }
 
 void asm_panic_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)

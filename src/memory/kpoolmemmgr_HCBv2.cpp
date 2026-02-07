@@ -11,14 +11,20 @@
 #endif  
 #ifdef USER_MODE
     constexpr uint64_t FIRST_STATIC_HEAP_SIZE=1ULL<<24;
+    
     kpoolmemmgr_t::HCB_v2::HCB_v2()
-{
-    bitmap_controller.Init();
-}
+    {
+        bitmap_controller.Init();
+    }
 #endif
  kpoolmemmgr_t::HCB_v2::HCB_v2()
 {
     
+}
+kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t size, vaddr_t vbase)
+{
+    this->total_size_in_bytes=size;
+    this->vbase=vbase;
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::param_checkment(uint64_t bit_idx, uint64_t bit_count)
 {
@@ -328,14 +334,10 @@ int kpoolmemmgr_t::HCB_v2::first_linekd_heap_Init()
     total_size_in_bytes=FIRST_STATIC_HEAP_SIZE;
     if(vbase==NULL)return OS_OUT_OF_MEMORY;
     return OS_SUCCESS;
-#endif
+    #endif
 }
 
-kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t apic_id)
-{
-  total_size_in_bytes=0x200000;
-  belonged_to_cpu_apicid=apic_id;
-}
+
 KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
 {
     KURD_t success=default_success();
@@ -348,15 +350,23 @@ KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
         fail.module_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::INIT_RESULTS::FAIL_RESONS::REASON_CODE_first_linekd_heap_NOT_ALLOWED;
         return fail;
     }
+    
     KURD_t contain;
+    this->phybase=__wrapped_pgs_alloc(&contain,total_size_in_bytes/0x1000,KERNEL,21);
+    if(!success_all_kurd(contain))return contain;
     #ifdef KERNEL_MODE
-    phybase=__wrapped_pgs_alloc(&contain,0x200000/0x1000,KERNEL,21);
-    if(phybase==0||contain.result!=result_code::SUCCESS)return contain;
-    vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(contain,phybase,total_size_in_bytes,KSPACE_RW_ACCESS);
-    if(vbase==0){
-        phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
-        return contain;
-    }
+    VM_DESC desc={
+        .start=vbase,
+        .end=vbase+total_size_in_bytes,
+        .map_type=VM_DESC::MAP_PHYSICAL,
+        .phys_start=phybase,
+        .access=KspaceMapMgr::PG_RW,
+        .committed_full=true,
+        .is_vaddr_alloced=true,
+        .is_out_bound_protective=false,
+    };
+    contain=KspaceMapMgr::enable_VMentry(desc);
+    if(!success_all_kurd(contain))return contain;
     #endif
     
     #ifdef USER_MODE
@@ -375,12 +385,29 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
     bitmap_controller.~HCB_bitmap();
     KURD_t status=KURD_t();
     #ifdef KERNEL_MODE
-    status=KspaceMapMgr::pgs_remapped_free(vbase);
+    VM_DESC desc={
+        .start=vbase,
+        .end=vbase+total_size_in_bytes,
+        .map_type=VM_DESC::MAP_PHYSICAL,
+        .phys_start=phybase,
+        .access=KspaceMapMgr::PG_RW,
+        .committed_full=true,
+        .is_vaddr_alloced=true,
+        .is_out_bound_protective=false,
+    };
+    status=KspaceMapMgr::disable_VMentry(desc);
+    if(!success_all_kurd(status))goto free_wrong;
+    status=__wrapped_pgs_free(
+        phybase,
+        total_size_in_bytes/0x1000
+    );
+    if(!success_all_kurd(status))goto free_wrong;
     #endif
     #ifdef USER_MODE
     std::free((void*)vbase);
     return;
     #endif
+free_wrong:    
     panic_info_inshort inshort={
         .is_bug=true,
         .is_policy=false,
@@ -953,8 +980,4 @@ vaddr_t kpoolmemmgr_t::HCB_v2::tran_to_virt(phyaddr_t addr)
         return (vaddr_t)((uint64_t)addr-phybase+vbase);
     }
     return 0;
-}
-uint32_t kpoolmemmgr_t::HCB_v2::get_belonged_cpu_apicid()
-{
-    return this->belonged_to_cpu_apicid;
 }

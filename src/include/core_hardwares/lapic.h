@@ -59,6 +59,44 @@ namespace LAPIC_PARAMS_ENUM{
 }
 namespace x2apic
 {
+    namespace ESR_BITS {
+    // 错误标志位 (位 0-7)
+    constexpr uint8_t SEND_CHECKSUM_ERROR    = 0;  // 发送校验和错误
+    constexpr uint8_t RECEIVE_CHECKSUM_ERROR  = 1;  // 接收校验和错误
+    constexpr uint8_t SEND_ACCEPT_ERROR       = 2;  // 发送接受错误
+    constexpr uint8_t RECEIVE_ACCEPT_ERROR    = 3;  // 接收接受错误
+    constexpr uint8_t REDIRECTABLE_IPI        = 4;  // 可重定向IPI
+    constexpr uint8_t SEND_ILLEGAL_VECTOR     = 5;  // 发送非法向量
+    constexpr uint8_t RECEIVE_ILLEGAL_VECTOR  = 6;  // 接收非法向量
+    constexpr uint8_t ILLEGAL_REGISTER_ADDR   = 7;  // 非法寄存器地址
+    
+    // 位 8-31 为保留位
+    constexpr uint8_t RESERVED_START = 8;
+    constexpr uint8_t RESERVED_END = 31;
+}
+
+// ESR 位掩码常量
+namespace ESR_MASKS {
+    constexpr uint32_t SEND_CHECKSUM_ERROR    = 1 << ESR_BITS::SEND_CHECKSUM_ERROR;
+    constexpr uint32_t RECEIVE_CHECKSUM_ERROR = 1 << ESR_BITS::RECEIVE_CHECKSUM_ERROR;
+    constexpr uint32_t SEND_ACCEPT_ERROR      = 1 << ESR_BITS::SEND_ACCEPT_ERROR;
+    constexpr uint32_t RECEIVE_ACCEPT_ERROR   = 1 << ESR_BITS::RECEIVE_ACCEPT_ERROR;
+    constexpr uint32_t REDIRECTABLE_IPI       = 1 << ESR_BITS::REDIRECTABLE_IPI;
+    constexpr uint32_t SEND_ILLEGAL_VECTOR    = 1 << ESR_BITS::SEND_ILLEGAL_VECTOR;
+    constexpr uint32_t RECEIVE_ILLEGAL_VECTOR = 1 << ESR_BITS::RECEIVE_ILLEGAL_VECTOR;
+    constexpr uint32_t ILLEGAL_REGISTER_ADDR  = 1 << ESR_BITS::ILLEGAL_REGISTER_ADDR;
+    
+    // 保留位掩码
+    constexpr uint32_t RESERVED_MASK = 0xFFFFFF00;  // 位 8-31
+    constexpr uint32_t ERROR_FLAGS_MASK = 0xFF;      // 位 0-7
+    
+    // 错误标志组合掩码
+    constexpr uint32_t CHECKSUM_ERRORS = SEND_CHECKSUM_ERROR | RECEIVE_CHECKSUM_ERROR;
+    constexpr uint32_t ACCEPT_ERRORS = SEND_ACCEPT_ERROR | RECEIVE_ACCEPT_ERROR;
+    constexpr uint32_t ILLEGAL_VECTOR_ERRORS = SEND_ILLEGAL_VECTOR | RECEIVE_ILLEGAL_VECTOR;
+    constexpr uint32_t ALL_ERROR_FLAGS = 0xFF;
+}
+
     union timer_lvt_entry
     {
     struct params
@@ -145,6 +183,58 @@ constexpr x2apic_icr_t broadcast_exself_icr{
         .destination = {.raw = 0},
     }
 };
+    // ==================== LVT CMCI 寄存器 ====================
+union lvt_error_entry {
+    struct params {
+        uint8_t vector;          // 位 7:0   - 中断向量
+        uint8_t reserved0 :4;   // 位 11:8    - 保留
+        uint8_t delivery_status : 1; // 位 12  - 投递状态
+        uint8_t reserved1 : 3;    // 位 15:13 - 保留
+        uint8_t masked : 1;       // 位 16    - 掩码位
+        uint8_t reserved2 : 7;    // 位 23:17 - 保留
+        uint8_t reserved3;        // 位 31:24 - 保留
+    } __attribute__((packed));
+    params param;
+    uint32_t raw;
+};
+static_assert(sizeof(lvt_error_entry) == 4, "LVT CMCI must be 4 bytes");
+
+// ==================== LVT LINT0/LINT1 寄存器 ====================
+union lvt_lint_entry {
+    struct params {
+        uint8_t vector;          // 位 7:0   - 中断向量
+        uint8_t delivery_mode : 3; // 位 10:8  - 投递模式
+        uint8_t reserved0 : 1;   // 位 11    - 保留
+        uint8_t delivery_status : 1; // 位 12  - 投递状态
+        uint8_t pin_polarity : 1; // 位 13    - 管脚极性 (0: Active High, 1: Active Low)
+        uint8_t remote_irr : 1;   // 位 14    - Remote IRR
+        uint8_t trigger_mode : 1;  // 位 15   - 触发模式 (0: Edge, 1: Level)
+        uint8_t masked : 1;       // 位 16    - 掩码位
+        uint8_t reserved1 : 7;    // 位 23:17 - 保留
+        uint8_t reserved2;        // 位 31:24 - 保留
+    } __attribute__((packed));
+    params param;
+    uint32_t raw;
+};
+static_assert(sizeof(lvt_lint_entry) == 4, "LVT LINT must be 4 bytes");
+
+// ==================== LVT CMCI/Performance/Thermal 寄存器 ====================
+union lvt_general_entry {
+    struct params {
+        uint8_t vector;          // 位 7:0   - 中断向量
+        uint8_t delivery_mode : 3; // 位 10:8  - 投递模式
+        uint8_t reserved0 : 1;   // 位 11    - 保留
+        uint8_t delivery_status : 1; // 位 12  - 投递状态
+        uint8_t reserved1 : 3;    // 位 16:13 - 保留 (包括13-15位)
+        uint8_t masked : 1;       // 位 16    - 掩码位
+        uint8_t reserved2 : 7;    // 位 23:17 - 保留
+        uint8_t reserved3;        // 位 31:24 - 保留
+    } __attribute__((packed));
+    params param;
+    uint32_t raw;
+};
+static_assert(sizeof(lvt_general_entry) == 4, "LVT General must be 4 bytes");
+    
     class x2apic_driver{
     private:
     public:
