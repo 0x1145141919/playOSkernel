@@ -70,7 +70,7 @@ KURD_t kpoolmemmgr_t::multi_heap_enable()//只能由BSP在SCHDULE阶段之前调
     uint64_t hcb_count=processor_count*(1<<PER_PROCESSOR_MAX_HCB_COUNT_ALIGN2);
     HCB_ARRAY_lock.write_lock();
     HCB_ARRAY=new kpoolmemmgr_t::HCB_v2*[hcb_count];
-    setmem(HCB_ARRAY,hcb_count*sizeof(HCB_ARRAY[0]),0);
+    ksetmem_8(HCB_ARRAY, 0, hcb_count*sizeof(HCB_ARRAY[0]));
     HCB_ARRAY_lock.write_unlock();
     uint64_t heap_area_size=HCB_DEFAULT_SIZE*hcb_count;
     heap_area.start=KspaceMapMgr::kspace_vm_table->alloc_available_space(heap_area_size,0);

@@ -1,5 +1,6 @@
 #include "Scheduler/per_processor_scheduler.h"
 #include "memory/kpoolmemmgr.h"
+#include "util/kout.h"
 #include "Interrupt_system/Interrupt.h"
 task_node null_task_node={
     .pre_node=0,
@@ -408,7 +409,7 @@ bool per_processor_scheduler::tasks_dll::iterator::operator==(const iterator& ot
 }
 void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
 {
-
+    kio::bsp_kout<<"timer_cpp_enter"<<kio::kendl;
 }
 void per_processor_scheduler::schedule_and_switch()
 {//先暂时只考虑单队列

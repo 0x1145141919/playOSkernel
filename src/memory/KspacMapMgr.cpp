@@ -5,6 +5,7 @@
 #include "linker_symbols.h"
 #include "util/OS_utils.h"
 #include "util/kptrace.h"
+#include "util/kout.h"
 int VM_vaddr_cmp(VM_DESC *a, VM_DESC *b)
 {
     if(a->start < b->start&&a->end <= b->start)return -1;
@@ -538,7 +539,7 @@ void *KspaceMapMgr::pgs_remapp(KURD_t&kurd,
         GMlock.unlock();
         
         if(status==OS_OUT_OF_RESOURCE){
-            kputsSecure("KspaceMapMgr::pgs_remapp:VM_add entryies out of resource\n");
+            kio::bsp_kout << "KspaceMapMgr::pgs_remapp:VM_add entryies out of resource" << kio::kendl;
         }
         return nullptr;
     }

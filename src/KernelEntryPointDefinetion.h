@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include "memory/Memory.h"
-#include "core_hardwares/VideoDriver.h"
+#include "core_hardwares/primitive_gop.h"
 typedef struct {
     uint32_t signature;          // 标识符，例如 'BOOTINFO'
     uint32_t total_size;         // 整个数据结构的总大小

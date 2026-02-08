@@ -156,7 +156,7 @@ KURD_t phymemspace_mgr::pages_state_set(phyaddr_t base,
     {
         page_size2mb_t* sub2 = alloc_2mb_subtable();;//new失败里面自动panic,不用考虑空指针
 
-        setmem(sub2, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t), 0);
+        ksetmem_8(sub2, 0, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t));
 
         p1->sub2mbpages = sub2;
         p1->flags.is_sub_valid = 1;
@@ -175,7 +175,7 @@ KURD_t phymemspace_mgr::pages_state_set(phyaddr_t base,
         if (!p2.flags.is_sub_valid)
         {
             page_size4kb_t* sub4 = alloc_4kb_subtable();
-            setmem(sub4, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t), 0);
+            ksetmem_8(sub4, 0, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t));
             p2.sub_pages = sub4;
             p2.flags.is_sub_valid = 1;
             p2.flags.state = NOT_ATOM;
@@ -536,7 +536,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
             {
             page_size2mb_t* sub2 =alloc_2mb_subtable();//new失败里面自动panic,不用考虑空指针
 
-            setmem(sub2, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t), 0);
+            ksetmem_8(sub2, 0, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t));
             for(uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++){
                 sub2[i].flags.state = FREE;
                 sub2[i].flags.is_belonged_to_buddy = p1->flags.is_belonged_to_buddy;
@@ -550,7 +550,7 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
         if (!p2.flags.is_sub_valid)
         {
             page_size4kb_t* sub4 = alloc_4kb_subtable();
-            setmem(sub4, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t), 0);
+            ksetmem_8(sub4, 0, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t));
             for(uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++){
                 sub4[i].flags.state = FREE;
                 sub4[i].flags.is_belonged_to_buddy = p2.flags.is_belonged_to_buddy;

@@ -7,37 +7,9 @@
 #include "kintrin.h"
 #endif
 typedef uint64_t size_t;
-const uint8_t masks_entry1bit_width[8]={128,64,32,16,8,4,2,1};
-const uint8_t masks_entry2bits_width[4]={192,48,12,3};
-const uint8_t bit_reverse_table[256] = {
-        0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
-        0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8, 0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8,
-        0x04, 0x84, 0x44, 0xC4, 0x24, 0xA4, 0x64, 0xE4, 0x14, 0x94, 0x54, 0xD4, 0x34, 0xB4, 0x74, 0xF4,
-        0x0C, 0x8C, 0x4C, 0xCC, 0x2C, 0xAC, 0x6C, 0xEC, 0x1C, 0x9C, 0x5C, 0xDC, 0x3C, 0xBC, 0x7C, 0xFC,
-        0x02, 0x82, 0x42, 0xC2, 0x22, 0xA2, 0x62, 0xE2, 0x12, 0x92, 0x52, 0xD2, 0x32, 0xB2, 0x72, 0xF2,
-        0x0A, 0x8A, 0x4A, 0xCA, 0x2A, 0xAA, 0x6A, 0xEA, 0x1A, 0x9A, 0x5A, 0xDA, 0x3A, 0xBA, 0x7A, 0xFA,
-        0x06, 0x86, 0x46, 0xC6, 0x26, 0xA6, 0x66, 0xE6, 0x16, 0x96, 0x56, 0xD6, 0x36, 0xB6, 0x76, 0xF6,
-        0x0E, 0x8E, 0x4E, 0xCE, 0x2E, 0xAE, 0x6E, 0xEE, 0x1E, 0x9E, 0x5E, 0xDE, 0x3E, 0xBE, 0x7E, 0xFE,
-        0x01, 0x81, 0x41, 0xC1, 0x21, 0xA1, 0x61, 0xE1, 0x11, 0x91, 0x51, 0xD1, 0x31, 0xB1, 0x71, 0xF1,
-        0x09, 0x89, 0x49, 0xC9, 0x29, 0xA9, 0x69, 0xE9, 0x19, 0x99, 0x59, 0xD9, 0x39, 0xB9, 0x79, 0xF9,
-        0x05, 0x85, 0x45, 0xC5, 0x25, 0xA5, 0x65, 0xE5, 0x15, 0x95, 0x55, 0xD5, 0x35, 0xB5, 0x75, 0xF5,
-        0x0D, 0x8D, 0x4D, 0xCD, 0x2D, 0xAD, 0x6D, 0xED, 0x1D, 0x9D, 0x5D, 0xDD, 0x3D, 0xBD, 0x7D, 0xFD,
-        0x03, 0x83, 0x43, 0xC3, 0x23, 0xA3, 0x63, 0xE3, 0x13, 0x93, 0x53, 0xD3, 0x33, 0xB3, 0x73, 0xF3,
-        0x0B, 0x8B, 0x4B, 0xCB, 0x2B, 0xAB, 0x6B, 0xEB, 0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB,
-        0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
-        0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF
-    };
-uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
-uint64_t reverse_perbytes(uint64_t value) {
-    uint64_t result = 0;
-    uint8_t* p = (uint8_t*)&value;
-    uint8_t* q = (uint8_t*)&result;
-    for (int i = 0; i < 8; i++) {
-       q[i] = bit_reverse_table[p[i]];
-    }
-    return result;
-}
 
+
+uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
 int strcmp_in_kernel(const char *str1, const char *str2, uint32_t max_strlen)
 {
     for (uint32_t i = 0; i < max_strlen; i++) {
@@ -58,34 +30,7 @@ int strlen_in_kernel(const char *s)
         len++;
     return len;
 }
-int get_first_true_bit_index(bitset512_t *bitmap) {//记得用bitreserve改写
-    for (int i = 0; i < 8; i++) {
-        uint64_t chunk = (*bitmap)[i]; // 获取第i个64位块
-        if (chunk == 0) continue;      // 如果全0则跳过
-        
-        // 使用TZCNT找到最低位设置位的位置
-        unsigned long index = __builtin_ctzll(chunk);
-        
-        // 计算全局位置：块索引*64 + 块内位置
-        return (i << 6) + index&(~7)+(7-index&7);
-    }
-    return -1; // 没有找到任何设置位
-}
-int get_first_zero_bit_index(bitset512_t *bitmap) {
-    for (int i = 0; i < 8; i++) {
-        uint64_t chunk = (*bitmap)[i];
-        uint64_t inverted_chunk = ~chunk;  // 取反，0 变 1，1 变 0
-        
-        if (inverted_chunk == 0) continue; // 如果全 1（取反后全 0），跳过
-        
-        // 使用 TZCNT 找到最低位的 1（即原数据的最低位的 0）
-        unsigned long index = __builtin_ctzll(inverted_chunk);
-        
-        // 计算全局位置：块索引 * 64 + 块内位置
-          return (i << 6) + index&(~7)+(7-index&7);
-    }
-    return -1;  // 没有找到任何 0 位（所有位都是 1）
-}
+
 int strncmp(const char* str1, const char* str2, size_t n) { 
     while (n-- && *str1 && (*str1 == *str2)) {
         str1++;
@@ -95,7 +40,7 @@ int strncmp(const char* str1, const char* str2, size_t n) {
     return *(unsigned char*)str1 - *(unsigned char*)str2;
 }
 
-void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
+void ksetmem_8(void* ptr, uint8_t value, uint64_t size_in_byte) {
     if (size_in_byte == 0) return;
     
     uint8_t* p = static_cast<uint8_t*>(ptr);
@@ -108,6 +53,62 @@ void setmem(void* ptr, uint64_t size_in_byte, uint8_t value) {
         :                           // 无额外输入
         : "memory", "cc"           // 可能修改内存和标志寄存器
     );
+}
+
+void ksetmem_16(void* ptr, uint16_t value, uint64_t size_in_byte) {
+    if (size_in_byte == 0) return;
+    uint64_t count = size_in_byte / 2;
+    uint16_t* p = static_cast<uint16_t*>(ptr);
+    if (count) {
+        __asm__ volatile (
+            "cld\n\t"
+            "rep stosw\n\t"
+            : "+D" (p), "+c" (count), "+a" (value)
+            :
+            : "memory", "cc"
+        );
+    }
+    if (size_in_byte & 1) {
+        ksetmem_8(reinterpret_cast<uint8_t*>(p), static_cast<uint8_t>(value), 1);
+    }
+}
+
+void ksetmem_32(void* ptr, uint32_t value, uint64_t size_in_byte) {
+    if (size_in_byte == 0) return;
+    uint64_t count = size_in_byte / 4;
+    uint32_t* p = static_cast<uint32_t*>(ptr);
+    if (count) {
+        __asm__ volatile (
+            "cld\n\t"
+            "rep stosl\n\t"
+            : "+D" (p), "+c" (count), "+a" (value)
+            :
+            : "memory", "cc"
+        );
+    }
+    uint64_t tail = size_in_byte & 3;
+    if (tail) {
+        ksetmem_8(reinterpret_cast<uint8_t*>(p), static_cast<uint8_t>(value), tail);
+    }
+}
+
+void ksetmem_64(void* ptr, uint64_t value, uint64_t size_in_byte) {
+    if (size_in_byte == 0) return;
+    uint64_t count = size_in_byte / 8;
+    uint64_t* p = static_cast<uint64_t*>(ptr);
+    if (count) {
+        __asm__ volatile (
+            "cld\n\t"
+            "rep stosq\n\t"
+            : "+D" (p), "+c" (count), "+a" (value)
+            :
+            : "memory", "cc"
+        );
+    }
+    uint64_t tail = size_in_byte & 7;
+    if (tail) {
+        ksetmem_8(reinterpret_cast<uint8_t*>(p), static_cast<uint8_t>(value), tail);
+    }
 }
 void __kspace_stack_chk_fail(void)
 {
@@ -236,61 +237,7 @@ void linearTBSerialInsert(
     // 更新表项总数
     *TotalEntryCount += entryCount;
 }
-bool getbit_entry1bit_width(bitset512_t* bitmap,uint16_t index)
-{
-    uint8_t* map=(uint8_t*)bitmap;
-    return (map[index>>3]&masks_entry1bit_width[index&7])!=0;
-}
-void setbit_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t index)
-{
-    uint8_t* map=(uint8_t*)bitmap;
-    if(value)
-        map[index>>3]|=masks_entry1bit_width[index&7];
-    else
-        map[index>>3]&=~masks_entry1bit_width[index&7];
-}
-void setbits_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits)
-{
-    int bits_left=len_in_bits;
-    uint8_t * map_8bit=(uint8_t*)bitmap;
-    uint8_t fillcontent8=value?0xff:0;
-    uint64_t* map_64bit=(uint64_t*)bitmap;
-    uint64_t fillcontent64=value?0xffffffffffffffff:0;
-    for (int i = Start_index; i < Start_index+len_in_bits; )
-    {
-       if (i&63ULL)
-       {
-not_aligned_6bits:
-        if(i&7ULL)
-        {
-not_aligned_3bits:            
-            setbit_entry1bit_width(bitmap,value,i);
-            i++;
-            bits_left--;
-        }else{
-            if(bits_left>=8)
-            {
-                map_8bit[i>>3]=fillcontent8;
-                bits_left-=8;
-                i+=8;
-            }
-            else{
-                goto not_aligned_3bits;
-            }
-        }
-       }else{
-        if(bits_left>=64)
-        {
-            map_64bit[i>>6]=fillcontent64;  
-            bits_left-=64;
-            i+=64;
-        }
-        else{
-            goto not_aligned_6bits;
-        }
-       }  
-    }
-}
+
 // 获取2bit宽度位图中指定索引的值（返回0-3）
 uint64_t align_up(uint64_t value, uint64_t alignment) {
     // 检查alignment是否为2的幂

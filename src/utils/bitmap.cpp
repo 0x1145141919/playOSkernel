@@ -1,7 +1,10 @@
-#include "util/bitmap.h"
+#include "util/huge_bitmap.h"
+#include "util/OS_utils.h"
+#ifdef USER_MODE
 #include <cstdint>
 #include <cstring>
-
+#include <cstdlib>
+#endif
 // 添加__popcountdi2函数的实现（GCC内置函数）
 extern "C" int __popcountdi2(unsigned long x) {
     // 使用位运算实现汉明重量(Hamming Weight)计算
@@ -16,6 +19,7 @@ extern "C" int __popcountdi2(unsigned long x) {
 
 #include "util/Ktemplats.h"
 #ifdef KERNEL_MODE
+#include "memory/phygpsmemmgr.h"
 #include "memory/kpoolmemmgr.h"
 #endif
 void bitmap_t::bit_set(uint64_t bit_idx, bool value)
@@ -361,4 +365,38 @@ int bitmap_t::avaliable_bit_search(uint64_t& result_base_idx) {
     }
 
     return OS_OUT_OF_RESOURCE; // 没有找到空闲位
+}
+huge_bitmap::huge_bitmap(uint64_t bits_count)
+{
+    this->bitmap_size_in_64bit_units = (bits_count + 63) / 64;
+}
+KURD_t huge_bitmap::second_stage_init()
+{
+    KURD_t ret=KURD_t();
+    #ifdef KERNEL_MODE
+    
+    uint64_t pgs4kbcount=(bitmap_size_in_64bit_units+511-1)/512;
+    bitmap=(uint64_t*)__wrapped_pgs_valloc(&ret,pgs4kbcount,KERNEL,12);
+    #endif
+    #ifdef USER_MODE
+    bitmap=(uint64_t*)malloc(bitmap_size_in_64bit_units*sizeof(uint64_t));
+    #endif
+    if(!bitmap){
+        ksetmem_8(bitmap, 0, bitmap_size_in_64bit_units*sizeof(uint64_t));
+    }
+    return ret;
+}
+huge_bitmap::~huge_bitmap()
+{
+    #ifdef KERNEL_MODE
+    
+    uint64_t pgs4kbcount=(bitmap_size_in_64bit_units+511-1)/512;
+    KURD_t kurd=__wrapped_pgs_vfree(bitmap,pgs4kbcount);
+    if(!success_all_kurd(kurd)){
+
+    }
+    #endif
+    #ifdef USER_MODE
+    free(bitmap);
+    #endif
 }

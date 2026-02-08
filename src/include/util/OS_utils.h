@@ -7,7 +7,6 @@ extern "C" {
 #endif
 
 typedef uint64_t size_t;
-typedef uint8_t bitset512_t[64];
 void ksystemramcpy(void*src,void*dest,size_t length);
 void linearTBSerialDelete(//这是一个对于线性表删除一段连续项,起始索引a,结束索引b的函数
     uint64_t*TotalEntryCount,
@@ -27,12 +26,10 @@ void linearTBSerialInsert(
 
 int strcmp_in_kernel(const char *str1, const char *str2,uint32_t max_strlen=4096);
 int strlen_in_kernel(const char *s);
-int get_first_true_bit_index(bitset512_t* bitmap);
-int get_first_zero_bit_index(bitset512_t *bitmap) ;
-bool getbit_entry1bit_width(bitset512_t* bitmap,uint16_t index);
-void setbit_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t index);
-void setbits_entry1bit_width(bitset512_t*bitmap,bool value,uint16_t Start_index,uint16_t len_in_bits);
-void setmem(void* ptr, uint64_t size_in_byte, uint8_t value);
+void ksetmem_8(void* ptr, uint8_t value, uint64_t size_in_byte);
+void ksetmem_16(void* ptr, uint16_t value, uint64_t size_in_byte);
+void ksetmem_32(void* ptr, uint32_t value, uint64_t size_in_byte);
+void ksetmem_64(void* ptr, uint64_t value, uint64_t size_in_byte);
 extern "C" void __wrap___stack_chk_fail(void);
 uint64_t align_up(uint64_t value, uint64_t alignment);
 extern const uint8_t bit_reverse_table[256];

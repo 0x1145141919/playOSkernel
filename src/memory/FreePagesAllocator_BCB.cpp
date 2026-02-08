@@ -138,7 +138,7 @@ FreePagesAllocator::free_pages_in_seg_control_block::free_pages_in_seg_control_b
         order_bases[i]=0;
     }
     this->is_splited_bitmap_valid=is_splited_bitmap_valid;
-    setmem(&statistics,sizeof(statistics),0);
+    ksetmem_8(&statistics, 0, sizeof(statistics));
 }
 KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
 {

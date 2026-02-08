@@ -1107,7 +1107,7 @@ int kpnumSecure(void* numptr, int format, int len)//有符号十进制的情况�
     
 #endif
     SERIAL_PUTS(buf + buffer_index);
-    gkcirclebufflogMgr.putsk(buf + buffer_index);
+    DmesgRingBuffer::putsk(buf + buffer_index);
     return 0;
 }
 #endif

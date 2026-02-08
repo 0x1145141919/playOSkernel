@@ -53,7 +53,7 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
 #endif
     bitmap_size_in_64bit_units=bitmap_size_in_byte/8;
     byte_bitmap_base=(uint8_t*)this->bitmap;
-    setmem(this->bitmap,bitmap_size_in_byte,0);
+    ksetmem_8(this->bitmap, 0, bitmap_size_in_byte);
     bitmap_used_bit=0;
     return OS_SUCCESS;
 }
@@ -446,7 +446,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::clear(void *ptr)
 
     // 清零用户数据区域（不清 meta）
     // setmem 的原型假设为 setmem(void* addr, size_t size, int value)
-    setmem(ptr, meta->data_size, 0);
+    ksetmem_8(ptr, 0, meta->data_size);
 
     return success;
 }

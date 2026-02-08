@@ -3,7 +3,6 @@
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
 #include "util/kout.h"
-#include "core_hardwares/VideoDriver.h"
 #ifdef USER_MODE
 #include <stdio.h>  // 添加文件操作支持
 #include <string.h> // 添加字符串操作支持
@@ -329,7 +328,7 @@ void GlobalMemoryPGlevelMgr_t::fillMemoryHolesInEfiMap() {
             
             // 创建Reserved类型的描述符
             EFI_MEMORY_DESCRIPTORX64 holeDesc ;
-            setmem(&holeDesc,sizeof(EFI_MEMORY_DESCRIPTORX64),0);
+            ksetmem_8(&holeDesc, 0, sizeof(EFI_MEMORY_DESCRIPTORX64));
             holeDesc.Type = OS_MEMSEG_HOLE;
             holeDesc.PhysicalStart = currentEnd;
             holeDesc.NumberOfPages = holePages;

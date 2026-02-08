@@ -112,13 +112,14 @@ add_executable(kernel.elf
     src/core_hardwares/HPET.cpp
     src/time.cpp
     src/utils/kptrace.cpp
+    src/utils/textConsole.cpp
+    src/core_hardwares/primitive_gop.cpp
     src/firmware/acpimgr.cpp
     src/Processor/APs_bringup.cpp  
     src/Processor/early_bsp_resources.cpp  
     src/Processor/fixed_interrupt_resources.cpp  
     src/Processor/runtime_processor_regist.asm
     src/core_hardwares/PortDriver.cpp
-    src/core_hardwares/VideoDriver.cpp
     src/scheduler/per_processor_scheduler.cpp
     $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}

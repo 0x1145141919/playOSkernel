@@ -1,7 +1,7 @@
 #include "core_hardwares/PortDriver.h"
 #include "KernelEntryPointDefinetion.h"
 #include "os_error_definitions.h"
-#include "core_hardwares/VideoDriver.h"
+#include "core_hardwares/primitive_gop.h"
 #include "kcirclebufflogMgr.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "core_hardwares/HPET.h"
@@ -17,6 +17,7 @@
 #include "msr_offsets_definitions.h"
 #include "time.h"
 #include "util/kout.h"
+#include "util/textConsole.h"
 #include "firmware/UefiRunTimeServices.h"
 #include "panic.h"
 #include "firmware/gSTResloveAPIs.h"
@@ -56,48 +57,16 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     int  Status=0;
     KURD_t bsp_init_kurd=KURD_t();
     time::hardware_time::try_tsc();
-    ksymmanager::Init(transfer);    
+    ksymmanager::Init(transfer);  
+    kpoolmemmgr_t::Init();  
     global_gST=transfer->gST_ptr;
     efi_map_ver=transfer->mapversion;
     GlobalBasicGraphicInfoType* TFG=(GlobalBasicGraphicInfoType*)&transfer->graphic_metainfo;
-    Status = InitialGlobalBasicGraphicInfo(
-        TFG->horizentalResolution,
-        TFG->verticalResolution,
-        TFG->pixelFormat,
-        TFG->PixelsPerScanLine,
-        TFG->FrameBufferBase,
-        TFG->FrameBufferSize
-    );
-    serial_init_stage1();
-    gkcirclebufflogMgr.Init();
+    DmesgRingBuffer::Init();
     kio::bsp_kout.Init();
     kio::bsp_kout.shift_dec();
-    if (Status!=OS_SUCCESS)
-    {
-        serial_puts("InitialGlobalBasicGraphicInfo Failed\n");
-        return ;
-    }
-    kpoolmemmgr_t::Init();
-    Status =InitialGlobalCharacterSetBitmapControler(
-        32,
-        16,
-        0x00000000,
-        0x00FFFFFF,
-        (UINT8*)ter16x32_data[0][0],
-        FALSE,
-        NULL
-    );
-    Status=InitialKernelShellControler(
-        GlobalBasicGraphicInfo.verticalResolution,
-        GlobalBasicGraphicInfo.horizentalResolution,
-        ASCII,
-        0,0,0,0,
-        GlobalKernelShellInputBuffer,
-        GlobalKernelShellOutputBuffer,
-        4096,
-        &GlobalCharacterSetBitmapControler,
-        4096,0,0
-    );
+    
+    serial_init_stage1();
     if (Status!=OS_SUCCESS)
     {
         kio::bsp_kout<<"InitialKernelShellControler Failed\n";
@@ -151,6 +120,13 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
     GlobalKernelStatus=kernel_state::MM_READY;
     phymemspace_mgr::subtb_alloc_is_pool_way_flag_enable();
+    bsp_init_kurd=GfxPrim::Init(TFG);
+    if(error_kurd(bsp_init_kurd)){
+        kio::bsp_kout<<"GfxPrim Init Failed"<<kio::kendl;
+        asm volatile("hlt");
+    }
+    Vec2i font_vec={.x=16, .y=32};
+    bsp_init_kurd=textconsole_GoP::Init(&ter16x32_data[0][0][0],font_vec,0x00ffffffff,0);
     readonly_timer=new HPET_driver_only_read_time_stamp(
         (HPET::ACPItb::HPET_Table*)gAcpiVaddrSapceMgr.get_acpi_table((char*)"HPET")
     );
@@ -162,8 +138,8 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     time::hardware_time::inform_initialized_hpet();
     time::hardware_time::processor_regist();
     kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
-    if(time::hardware_time::get_tsc_reliable()){
-        kio::bsp_kout<<"TSC is reliable"<<kio::kendl;
+    if(error_kurd(bsp_init_kurd)){
+        
     }
     x86_smp_processors_container::template_idt_init();
     x86_smp_processors_container::regist_core(0);
@@ -173,11 +149,14 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kio::kendl;
     }
-    uint64_t*test=new uint64_t[1024];
+    time::time_interrupt_generator::bsp_init();
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kio::kendl;
     }
+    GfxPrim::Flush();
+    time::time_interrupt_generator::set_clock_by_offset(1000);
+    asm volatile("sti");
     //中断接管工作
     asm volatile("hlt");
     
@@ -191,6 +170,7 @@ extern "C" void ap_init(uint32_t processor_id)
     gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
     x86_smp_processors_container::regist_core(processor_id); 
     time::hardware_time::processor_regist();
+    time::time_interrupt_generator::ap_init();
     init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");
     asm volatile("sti");

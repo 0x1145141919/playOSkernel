@@ -1,5 +1,4 @@
 #include "panic.h"
-#include "core_hardwares/VideoDriver.h"
 #include "firmware/UefiRunTimeServices.h"
 #include "util/kout.h"
 #include "util/kptrace.h"
@@ -196,12 +195,6 @@ void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context:
     will.Whistleblower.arch_specify=x86_64_arch_spcify;
     will.Whistleblower.end_timestamp=rdtsc();
     if(behaviors.will_write_will)write_will();
-    if(behaviors.allow_broadcast){
-        
-        kio::bsp_kout.enable_gop_output();
-        kio::bsp_kout.enable_polling_uart_output();
-        
-    }
     kio::bsp_kout<<"PANIC: "<<kio::now<<kio::kendl;
     kio::bsp_kout<<kurd<<kio::kendl;
     if(message)kio::bsp_kout<<message<<kio::kendl;

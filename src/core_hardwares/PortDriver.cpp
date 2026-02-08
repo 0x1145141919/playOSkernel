@@ -1,5 +1,6 @@
 #include <efi.h>
 #include "core_hardwares/PortDriver.h"
+#include "util/kout.h"
 #define COM1_PORT 0x3F8
 static inline void outb(UINT16 port, UINT8 value) {
     asm volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
@@ -26,7 +27,14 @@ void serial_init_stage1() {
     
     // 启用FIFO，清除接收/发送FIFO缓冲区
     outb(COM1_PORT + 2, 0xC7);
-    
+    kio::kout_backend backend={
+        .name="COM1",
+        .is_masked=0,
+        .reserved=0,
+        .running_stage_write=nullptr,
+        .panic_write=serial_puts,
+        .early_write=serial_puts,
+    };
     // 启用中断(可选)
    //outb(COM1_PORT + 1, 0x0F);
 }
@@ -45,9 +53,10 @@ void serial_putc(char c) {
 }
 
 // 发送字符串
-void serial_puts(const char* str) {
-    while (*str) {
-        serial_putc(*str++);
+void serial_puts(const char* str,uint64_t len) {
+    for(uint64_t i=0;i<len;i++)
+    {
+        if(str[i])serial_putc(str[i]);
     }
 }
 // 端口输出函数(内联汇编)

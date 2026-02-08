@@ -358,7 +358,7 @@ void KspaceMapMgr::invalidate_seg()
                 break;
                 
             default:
-                kputsSecure("[KERNEL] invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info\n");
+                kio::bsp_kout << "[KERNEL] invalid_kspace_VMentry_handler: invalid page size in kspace_VMentry_info" << kio::kendl;
                 asm volatile("sti");
                 fatal.reason = MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INVALIDATE_TLB_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
                 Panic::panic(default_panic_behaviors_flags,

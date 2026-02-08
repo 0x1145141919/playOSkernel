@@ -136,7 +136,7 @@ union devide_reg_t
         uint8_t reserved1:1;
         uint8_t param_high1bit:1;
         uint8_t reserved2:4;
-        uint8_t reserved3[7];
+        uint64_t reserved3:56;
     };
     params param;
 };
@@ -183,7 +183,7 @@ constexpr x2apic_icr_t broadcast_exself_icr{
         .destination = {.raw = 0},
     }
 };
-    // ==================== LVT CMCI 寄存器 ====================
+    // ==================== LVT error 寄存器 ====================
 union lvt_error_entry {
     struct params {
         uint8_t vector;          // 位 7:0   - 中断向量
@@ -244,6 +244,13 @@ static_assert(sizeof(lvt_general_entry) == 4, "LVT General must be 4 bytes");
     static current_reg_t get_timer_current_count();
     static void raw_send_ipi(x2apic_icr_t icr);
     static void broadcast_exself_fixed_ipi(void(*ipi_handler)());
+    static void raw_error_lvt_config(lvt_error_entry entry);
+    static void raw_lint0_lvt_config(lvt_lint_entry entry);
+    static void raw_lint1_lvt_config(lvt_lint_entry entry);
+    static void raw_perf_lvt_config(lvt_general_entry entry);
+    static void raw_thermal_lvt_config(lvt_general_entry entry);
+    static void raw_cmci_lvt_config(lvt_general_entry entry);
+    
     /**
      * x2apic相关接口，操作时必须确认本核心
      * 使用头文件里写死的偏移量
@@ -263,5 +270,23 @@ static_assert(sizeof(lvt_general_entry) == 4, "LVT General must be 4 bytes");
      * 5.2 broadcast_exself_fixed_ipi(void(*)())
      * 6.自我ipi
      */
+    };
+    class lapic_timer_one_shot{
+        public:
+        static void processor_regist();
+        static void set_clock_by_stamp(uint64_t stamp_mius);
+        static void set_clock_by_offset(uint64_t offset_mius);
+        static uint32_t get_current_clock();//获得硬件计时器的值，在这里就是current_count 
+        static void cancel_clock();
+        static bool is_alarm_valid();  //传递硬件级别的是否关闭判据
+    };
+    class lapic_timer_tsc_ddline{
+        public:
+        static void processor_regist();
+        static void set_clock_by_stamp(uint64_t stamp_mius);
+        static void set_clock_by_offset(uint64_t offset_mius);
+        //static miusecond_time_stamp_t get_current_clock();,不需要，因为有rdtsc 
+        static void cancel_clock();
+        static bool is_alarm_valid(); 
     };
 }

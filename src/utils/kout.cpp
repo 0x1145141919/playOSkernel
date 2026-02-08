@@ -1,10 +1,10 @@
 #include "util/kout.h"
 #include "Interrupt_system/Interrupt.h"
 #include "kcirclebufflogMgr.h"
-#include "core_hardwares/VideoDriver.h"
 #include "core_hardwares/PortDriver.h"
 #include "util/OS_utils.h"
 #include "time.h"
+#include "panic.h"
 #ifdef USER_MODE
 #include <cstring> 
 #include <unistd.h>
@@ -27,7 +27,7 @@ void kio::kout::print_numer(
     bool is_signed)
 {
     char buf[70];          // 足够覆盖 64bit BIN + 符号
-    char tmp_uart_buffer[70];
+    char out[70];
     uint32_t idx = 0;
 
     uint64_t value = 0;
@@ -83,30 +83,15 @@ void kio::kout::print_numer(
     }
     
     // ===== 反向输出 =====
-    for (int i = idx - 1; i >= 0; --i) {
-        auto inner_putchar = [&](char c) {
-        #ifdef KERNEL_MODE    
-        gkcirclebufflogMgr.putsk(&c, 1);
-            
-            if (is_print_to_polling_uart) {
-                tmp_uart_buffer[idx-1-i]=c;
-            }
-            if (is_print_to_gop) {
-                kputchar(c);
-            }
-            #endif
-            #ifdef USER_MODE
-            if (is_print_to_stdout) write(1, &c, 1);
-            if (is_print_to_stderr) write(2, &c, 1);
-            #endif
-        };
-        inner_putchar(buf[i]);
+    for (uint32_t i = 0; i < idx; ++i) {
+        out[i] = buf[idx - 1 - i];
     }
-    tmp_uart_buffer[idx] = '\0';
     #ifdef KERNEL_MODE
-    if(is_print_to_polling_uart){
-        serial_puts(tmp_uart_buffer);
-    }
+    uniform_puts(out, idx);
+    #endif
+    #ifdef USER_MODE
+    if (is_print_to_stdout) write(1, out, idx);
+    if (is_print_to_stderr) write(2, out, idx);
     #endif
     statistics.total_printed_chars += idx;
 }
@@ -253,6 +238,49 @@ void kio::kout::__print_err_domain(KURD_t value)
     }
 }
 
+void kio::kout::uniform_puts(const char *str, uint64_t len)
+{
+    if (!str || len == 0) return;
+    switch(GlobalKernelStatus){
+        case ENTER:
+        break;//enter状态实质上什么也打印不了
+        case EARLY_BOOT:
+        case PANIC_WILL_ANALYZE:
+        case MM_READY:
+        //遍历所有backend选择非空指针并且没有被maked的early_write
+        {
+            for(uint64_t i = 0; i < MAX_BACKEND_COUNT; i++){
+                kout_backend* backend = backends[i];
+                if(!backend || backend->is_masked) continue;
+                if(backend->early_write) backend->early_write(str, len);
+            }
+        }
+        break;
+        case SCHEDUL_READY:
+        //遍历所有backend选择非空指针并且没有被maked的running_stage_write
+        {
+            for(uint64_t i = 0; i < MAX_BACKEND_COUNT; i++){
+                kout_backend* backend = backends[i];
+                if(!backend || backend->is_masked) continue;
+                if(backend->running_stage_write) backend->running_stage_write(str, len);
+            }
+        }
+        break;
+        case PANIC:
+        //遍历所有backend选择非空指针并且没有被maked的panic_write
+        {
+            for(uint64_t i = 0; i < MAX_BACKEND_COUNT; i++){
+                kout_backend* backend = backends[i];
+                if(!backend || backend->is_masked) continue;
+                if(backend->panic_write) backend->panic_write(str, len);
+            }
+        }
+        break;
+        
+    }
+
+}
+
 kio::kout &kio::kout::operator<<(KURD_t info)
 {
     __print_level_code(info);
@@ -265,44 +293,24 @@ kio::kout &kio::kout::operator<<(KURD_t info)
 kio::kout &kio::kout::operator<<(const char *str)
     
 {
+    int strlength = strlen_in_kernel(str);
     #ifdef KERNEL_MODE
-    gkcirclebufflogMgr.putsk((char *)str,MAX_STRING_LEN);
     
-    if (is_print_to_polling_uart) {
-        serial_puts(str);
-    }
-    if(is_print_to_gop) {
-        kputsascii(str);
-    }
+    uniform_puts(str, strlength);
     #endif
     #ifdef USER_MODE
-    int strlen = strlen_in_kernel(str);
-    if (is_print_to_stdout) write(1, str, strlen);
-
-    if (is_print_to_stderr) write(2, str, strlen);
+    if (is_print_to_stdout) write(1, str, strlength);
+    if (is_print_to_stderr) write(2, str, strlength);
     #endif
     statistics.calls_str++;
-    //别看这个写法很弱智，但是KERNEL_MODE和USER_MODE是用的两套strlen虽然长得一样但是无宏包裹下就不存在
-    #ifdef KERNEL_MODE
-    statistics.total_printed_chars += strlen_in_kernel(str);
-    #endif
-    #ifdef USER_MODE
-    statistics.total_printed_chars += strlen;
-    #endif
+    statistics.total_printed_chars += strlength;
     return *this;
 }
 
 kio::kout &kio::kout::operator<<(char c)
 {
     #ifdef KERNEL_MODE
-    gkcirclebufflogMgr.putsk(&c, 1);
-    
-    if (is_print_to_polling_uart) {
-        serial_putc(c);
-    }
-    if (is_print_to_gop) {
-        kputcharSecure(c);
-    }
+    uniform_puts(&c, 1);
     #endif
     #ifdef USER_MODE
     if (is_print_to_stdout) write(1, &c, 1);
@@ -315,14 +323,21 @@ kio::kout &kio::kout::operator<<(char c)
 
 void kio::kout::Init()
 {
-    setmem(&statistics,sizeof(statistics),0);
+    ksetmem_8(&statistics, 0, sizeof(statistics));
     for(int i = 0; i < 256; i++){
         top_module_KURD_interpreter[i]=defalut_KURD_module_interpator;
     }
-
+    
     #ifdef KERNEL_MODE
-    is_print_to_polling_uart = true;
-    is_print_to_gop = true;
+    kout_backend dmesg_buffer_handlers={
+        .name="dmesg_buffer",
+        .is_masked=0,
+        .reserved=0,        
+        .running_stage_write=nullptr,
+        .panic_write=&DmesgRingBuffer::putsk,
+        .early_write=&DmesgRingBuffer::putsk,
+    };
+    register_backend(dmesg_buffer_handlers);
     #endif
     #ifdef USER_MODE
     is_print_to_stdout = true;
@@ -332,14 +347,7 @@ void kio::kout::Init()
 kio::kout &kio::kout::operator<<(const void *ptr)
 {
     #ifdef KERNEL_MODE
-    gkcirclebufflogMgr.putsk("0x", 2);
-    
-    if (is_print_to_polling_uart) {
-        serial_puts("0x");
-    }
-    if (is_print_to_gop) {
-        kputsascii("0x");
-    }
+    uniform_puts("0x", 2);
     #endif
     #ifdef USER_MODE
     if (is_print_to_stdout) write(1, "0x", 2);
@@ -406,6 +414,23 @@ kio::kout &kio::kout::operator<<(int8_t num)
     return *this;
 }
 
+kio::kout &kio::kout::operator<<(radix_shift_t radix)
+{
+    switch (radix)
+    {
+        case BIN_shift:
+            shift_bin();
+            break;
+        case DEC_shift:
+            shift_dec();
+            break;
+        case HEX_shift:
+            shift_hex();
+            break;
+        default:shift_dec();
+    }
+    return *this;
+}
 void kio::kout::shift_bin()
 {
     curr_numer_system = BIN;
@@ -457,4 +482,35 @@ kio::kout &kio::kout::operator<<(endl end)
     statistics.explicit_endl++;
     *this<<'\n';
     return *this;
+}
+uint64_t kio::kout::register_backend(kout_backend backend)
+{
+    for(uint64_t i = 0; i < MAX_BACKEND_COUNT; i++){
+        if(!backends[i]){
+            backends[i]=new kout_backend;
+            *backends[i]=backend;
+            return i;
+        }
+    }
+    return ~0;
+}
+bool kio::kout::unregister_backend(uint64_t index)
+{
+    if(index>=MAX_BACKEND_COUNT)return false;
+    if(backends[index]){
+        delete backends[index];
+        return true;
+    }
+    return false;
+}
+bool kio::kout::mask_backend(uint64_t index)
+{
+    if(index>=MAX_BACKEND_COUNT)return false;
+    if(backends[index]){
+        if(backends[index]->is_masked){
+            backends[index]->is_masked=false;
+            return true;
+        }
+    }
+    return false;
 }

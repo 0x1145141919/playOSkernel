@@ -55,7 +55,7 @@ EFI_TIME EFI_RT_SVS::rt_time_get()
     status = efi_call2((void*)get_time, (UINT64)&time, (UINT64)NULL);
     if(status != EFI_SUCCESS)
     {
-        setmem(&time,sizeof(EFI_TIME),0);
+        ksetmem_8(&time, 0, sizeof(EFI_TIME));
     }
     return time;
 }

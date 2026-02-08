@@ -773,7 +773,7 @@ timer_bare_enter:
     push rcx
     push rbx
     push rax
-    mov rax, 0x20 
+    mov rax, 224 
     push rax
     mov rax, rsp
     add rax, GP_GPR_BYTES
@@ -831,7 +831,7 @@ ipi_bare_enter:
 
 
     ; magic
-    mov rax, 0x21          ;向量号|（是否有错误码<<32）
+    mov rax, 240          ;向量号|（是否有错误码<<32）
     push rax
 
     mov rax, rsp
@@ -871,7 +871,7 @@ ipi_bare_enter:
     add rsp, 8
     iretq
 
-    ; IPI中断处理入口（带错误码）
+    ; asm_panic中断处理入口（带错误码）
 global asm_panic_bare_enter
 extern asm_panic_cpp_enter
 
@@ -895,7 +895,7 @@ asm_panic_bare_enter:
 
 
     ; magic
-    mov rax, 0x22          ;向量号|（是否有错误码<<32）
+    mov rax, 225          ;向量号|（是否有错误码<<32）
     push rax
 
     mov rax, rsp

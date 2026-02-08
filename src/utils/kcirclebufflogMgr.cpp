@@ -5,18 +5,28 @@ extern "C"
     extern char* __klog_start;
     extern uint64_t __KLOG_SIZE;
 }
- kcirclebufflogMgr gkcirclebufflogMgr;
-void kcirclebufflogMgr::Init()
+char* DmesgRingBuffer::buff = nullptr;
+uint64_t DmesgRingBuffer::buffSize = 0;
+uint64_t DmesgRingBuffer::tailIndex = 0;
+spinrwlock_cpp_t DmesgRingBuffer::rwlock;
+void DmesgRingBuffer::Init()
 {
+    rwlock.write_lock();
     buff= __klog_start;
     buffSize=__KLOG_SIZE;
 
     tailIndex=0;
+    rwlock.write_unlock();
 }
 
 // 在文档2中更新putsk函数实现
-void kcirclebufflogMgr::putsk(char *str, uint64_t len_in_bytes) {
-    if (len_in_bytes == 0 || buffSize == 0) return;
+void DmesgRingBuffer::putsk(char *str, uint64_t len_in_bytes) {
+    if (str == nullptr || len_in_bytes == 0) return;
+    rwlock.write_lock();
+    if (buffSize == 0) {
+        rwlock.write_unlock();
+        return;
+    }
 
     // 处理超长数据（保留最后buffSize字节）
     if (len_in_bytes > buffSize) {
@@ -44,27 +54,5 @@ void kcirclebufflogMgr::putsk(char *str, uint64_t len_in_bytes) {
     if (tailIndex >= buffSize) {
         tailIndex = 0;
     }
-}
-// 在源文件(kcirclebufflogMgr.cpp)中实现重载函数
-void kcirclebufflogMgr::putsk(char *str) {
-    // 安全处理空指针
-    if (str == nullptr) return;
-    
-    // 手动计算字符串长度（不依赖标准库strlen）
-    uint64_t len = 0;
-    char *p = str;
-    
-    // 设置最大长度保护（防止无限循环）
-    const uint64_t maxLen = buffSize * 2; // 允许最多2倍缓冲区长度
-    
-    while (*p != '\0' && len < maxLen) {
-        len++;
-        p++;
-    }
-    
-    // 调用原始实现写入数据
-    putsk(str, len);
-}
-kcirclebufflogMgr::~kcirclebufflogMgr()
-{
+    rwlock.write_unlock();
 }

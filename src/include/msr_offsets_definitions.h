@@ -164,7 +164,7 @@ namespace msr {
         constexpr uint32_t IA32_SGXLEPUBKEYHASH3 = 0x8F;    // SGX Launch Enclave Public Key Hash 3 // SGX启动飞地公钥哈希3
     }
     namespace timer{
-        constexpr uint32_t IA32_TSC_DEADLINE = 0x8F; 
+        constexpr uint32_t IA32_TSC_DEADLINE = 0x6E0; 
     };
     // 系统调用相关寄存器
     namespace syscall {

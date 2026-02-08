@@ -85,6 +85,26 @@ enum task_state_t:uint8_t{
 enum task_blocked_reason_t:uint8_t{
     invalid
 };
+struct kthread_yield_raw_context{
+    uint64_t rsp;//注意这里的rsp是特指原来上下文的rsp
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t rbp;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+    uint64_t rflags;
+    uint64_t rip;
+};
 struct x64_basic_context{ //后续设计上只有这些寄存器被认为是属于内核上下文
     uint64_t rax;
     uint64_t rbx;
@@ -151,6 +171,9 @@ extern task_node null_task_node;
 class per_processor_scheduler { 
     private:
     trylock_cpp_t this_try_lock;
+    static constexpr uint32_t defual_scheduler_stack_size=1<<14;
+    //todo :  构造函数中栈空间分配，使用__wrapped_pgs_valloc,大小defual_scheduler_stack_size
+    uint64_t*scheduler_private_stack;
     public:
     
     class task_pool{
@@ -158,10 +181,12 @@ class per_processor_scheduler {
         KURD_t default_kurd();
         KURD_t default_success();
         KURD_t default_fail();
-        Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,task_node,8,8> task_pool_table;
+        static constexpr uint8_t toptable_len_log2=8;
+        static constexpr uint8_t leaftable_len_log2=8;
+        Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,task_node,toptable_len_log2,leaftable_len_log2> task_pool_table;
         huge_bitmap task_pool_bitmap;
         public:
-        task_pool():task_pool_bitmap(1<<(8+8)){
+        task_pool():task_pool_bitmap(1<<(toptable_len_log2+leaftable_len_log2)){
         }
         KURD_t second_state_init();
         uint32_t alloc(KURD_t&result_kurd);
@@ -209,7 +234,6 @@ class per_processor_scheduler {
     };
     static constexpr uint8_t max_ready_queue_count=8;
     tasks_dll ready_queue[max_ready_queue_count];
-    
     tasks_dll blocked_queue;
     tasks_dll dying_queue;
     uint32_t now_running_task_index;
@@ -224,3 +248,7 @@ class per_processor_scheduler {
      */
     void schedule_and_switch();
 };
+extern "C"{
+    void kthread_yield_true_enter(kthread_yield_raw_context* context);
+    void kthread_yield();
+}

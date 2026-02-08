@@ -104,7 +104,7 @@ public:
         root_entry& e = m_root[hi];
         if (!e.table){
             e.table=new sub_table();
-            setmem(e.table->entries,sizeof(ValueT)*SUB_ENTRIES,0);
+            ksetmem_8(e.table->entries, 0, sizeof(ValueT)*SUB_ENTRIES);
         }
         uint32_t low = low_index(idx);
         if (e.table->used_map.bit_get(low)==false){

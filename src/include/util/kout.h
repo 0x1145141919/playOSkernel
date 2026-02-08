@@ -12,7 +12,19 @@ class endl
     private:
     public:endl(){};
 };
-
+enum radix_shift_t:uint8_t {
+    BIN_shift=0,
+    DEC_shift=1,
+    HEX_shift=2
+};
+struct kout_backend {
+    char name[64];
+    uint64_t is_masked:1;
+    uint64_t reserved:63;
+    void (*running_stage_write)(const char* buf, uint64_t len);
+    void (*panic_write)(const char* buf, uint64_t len);
+    void (*early_write)(const char* buf, uint64_t len);
+};
 class kout
 {
     public:
@@ -47,12 +59,7 @@ class kout
     // ===== 未来预留 =====
     //uint64_t reserved[8];
     };
-    protected:
-    #ifdef KERNEL_MODE
-    bool is_print_to_polling_uart;
-    bool is_print_to_gop;
-    #endif
-    
+    protected:    
     #ifdef USER_MODE
     bool is_print_to_stdout;
     bool is_print_to_stderr;
@@ -93,6 +100,9 @@ class kout
         uint8_t len_in_bytes,
         bool is_signed);
     static constexpr uint16_t MAX_STRING_LEN=4096;
+    static constexpr uint16_t MAX_BACKEND_COUNT=64;
+    kout_backend*backends[MAX_BACKEND_COUNT]={0};
+    void uniform_puts(const char* str,uint64_t len);
     public:
     kout& operator<<(KURD_t info);
     kout& operator<<(const char* str);
@@ -108,18 +118,15 @@ class kout
     kout& operator<<(int16_t num);
     kout& operator<<(uint8_t num);
     kout& operator<<(int8_t num);
+    kout& operator<<(radix_shift_t radix);
+    uint64_t register_backend(kout_backend backend);//返回~0表示分配失败
+    bool unregister_backend(uint64_t index);
+    bool mask_backend(uint64_t index);
     void shift_bin();
     void shift_dec();
     void shift_hex();
     kout_statistics_t get_statistics();
     void Init();
-    
-    #ifdef KERNEL_MODE
-    void enable_polling_uart_output(){is_print_to_polling_uart=true;};
-    void disable_polling_uart_output(){is_print_to_polling_uart=false;};
-    void enable_gop_output(){is_print_to_gop=true;};
-    void disable_gop_output(){is_print_to_gop=false;};
-    #endif
     ~kout(){};
 };
 extern kout bsp_kout;
