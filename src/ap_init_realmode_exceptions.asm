@@ -1,6 +1,7 @@
 global realmode_interrupt_handlers
 global idt_descriptor_rm
 global idt_table_rm
+global ap_init_patch_idt_rm
 %include "checkpoint.inc"
 %define realmode_magic 0x15
 extern realmode_enter_checkpoint
@@ -359,77 +360,115 @@ bits 16
     mov byte [realmode_enter_checkpoint+check_point.failure_flags], 3
     hlt
 
+ap_init_patch_idt_rm:
+bits 64
+    push rax
+    push rbx
+    mov rbx, qword idt_table_rm
+
+    mov rax, qword realmode_interrupt_handlers.divide_by_zero
+    mov word [rbx + 0*4 + 0], ax
+    mov word [rbx + 0*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.debug
+    mov word [rbx + 1*4 + 0], ax
+    mov word [rbx + 1*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.nmi
+    mov word [rbx + 2*4 + 0], ax
+    mov word [rbx + 2*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.bp
+    mov word [rbx + 3*4 + 0], ax
+    mov word [rbx + 3*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.of
+    mov word [rbx + 4*4 + 0], ax
+    mov word [rbx + 4*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.br
+    mov word [rbx + 5*4 + 0], ax
+    mov word [rbx + 5*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.ud
+    mov word [rbx + 6*4 + 0], ax
+    mov word [rbx + 6*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.nm
+    mov word [rbx + 7*4 + 0], ax
+    mov word [rbx + 7*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.df
+    mov word [rbx + 8*4 + 0], ax
+    mov word [rbx + 8*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.cross
+    mov word [rbx + 9*4 + 0], ax
+    mov word [rbx + 9*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.tss
+    mov word [rbx + 10*4 + 0], ax
+    mov word [rbx + 10*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.NP
+    mov word [rbx + 11*4 + 0], ax
+    mov word [rbx + 11*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.SS
+    mov word [rbx + 12*4 + 0], ax
+    mov word [rbx + 12*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.GP
+    mov word [rbx + 13*4 + 0], ax
+    mov word [rbx + 13*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.PF
+    mov word [rbx + 14*4 + 0], ax
+    mov word [rbx + 14*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.vec15
+    mov word [rbx + 15*4 + 0], ax
+    mov word [rbx + 15*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.MF
+    mov word [rbx + 16*4 + 0], ax
+    mov word [rbx + 16*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.AC
+    mov word [rbx + 17*4 + 0], ax
+    mov word [rbx + 17*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.MC
+    mov word [rbx + 18*4 + 0], ax
+    mov word [rbx + 18*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.XM
+    mov word [rbx + 19*4 + 0], ax
+    mov word [rbx + 19*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.VE
+    mov word [rbx + 20*4 + 0], ax
+    mov word [rbx + 20*4 + 2], 0
+
+    mov rax, qword realmode_interrupt_handlers.CP
+    mov word [rbx + 21*4 + 0], ax
+    mov word [rbx + 21*4 + 2], 0
+
+    mov word [idt_descriptor_rm], idt_table_rm_end - idt_table_rm - 1
+    mov rax, qword idt_table_rm
+    mov dword [idt_descriptor_rm + 2], eax
+    pop rbx
+    pop rax
+    ret
+
 SECTION .init_rodata
 ; IDT定义 - 实模式16位下的前32个向量（实际上实模式使用向量跳转表，此处为模拟结构）
 idt_table_rm:
     ; 实模式下实际不使用IDT，而是使用向量跳转表
     ; 但为了保持一致性，这里仍定义类似结构
     ; 每个条目4字节: 偏移量(2字节) + 段地址(2字节)
-    dw realmode_interrupt_handlers.divide_by_zero     ; Vector 0 - Divide by Zero
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.debug             ; Vector 1 - Debug
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.nmi               ; Vector 2 - NMI
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.bp                ; Vector 3 - Breakpoint
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    e
-    dw realmode_interrupt_handlers.of                ; Vector 4 - Overflow
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.br                ; Vector 5 - Bound Range
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.ud                ; Vector 6 - Invalid Opcode
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.nm                ; Vector 7 - Device Not Available
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.df                ; Vector 8 - Double Fault
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.cross             ; Vector 9 - Coprocessor Segment Overrun
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.tss               ; Vector 10 - Invalid TSS
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.NP                ; Vector 11 - Segment Not Present
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.SS                ; Vector 12 - Stack Segment Fault
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.GP                ; Vector 13 - General Protection
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.PF                ; Vector 14 - Page Fault
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.vec15             ; Vector 15 - Reserved
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.MF                ; Vector 16 - x87 FPU Floating Point Error
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.AC                ; Vector 17 - Alignment Check
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.MC                ; Vector 18 - Machine Check
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.XM                ; Vector 19 - SIMD Floating Point Exception
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.VE                ; Vector 20 - Virtualization Exception
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
-    
-    dw realmode_interrupt_handlers.CP                ; Vector 21 - Control Protection Exception
-    dw 0x0000                                         ; Code segment selector for real mode (实模式下CS必须为0)
+    times 44 dw 0
+idt_table_rm_end:
 
 ; 实模式IDT描述符（实际上实模式使用中断向量表IVT，位于内存地址0x0000:0x0000-0x0000:0x03FF）
 idt_descriptor_rm:

@@ -39,9 +39,11 @@ extern bsp_init_gdt_entries
 extern bsp_init_gdt_descriptor
 extern bsp_init_idt_entries
 extern bsp_init_idtr
+extern ap_init_patch_idt_rm
 extern ap_init_patch_idt_pe
 extern ap_init_patch_idt_lm
 extern idt_table_rm
+extern idt_descriptor_rm
 extern idt_descriptor_pe
 global realmode_enter_checkpoint
 
@@ -77,7 +79,7 @@ cli
 
     ; 加载GDT
     lgdt [gdt_descriptor]
-    lidt [idt_table_rm]
+    lidt [idt_descriptor_rm]
     ; 设置CR0寄存器，启用保护模式
     mov eax, cr0
     or eax, 1                           ; Set PE (Protection Enable) bit
@@ -157,8 +159,12 @@ _kernel_Init:
 .jump_kernel:
     mov rax, bsp_init_idtr
     lidt [rax]
-    call ap_init_patch_idt_pe
-    call ap_init_patch_idt_lm
+    mov rax, ap_init_patch_idt_rm
+    call rax
+    mov rax, ap_init_patch_idt_pe
+    call rax
+    mov rax, ap_init_patch_idt_lm
+    call rax
     mov rax, kernel_start
     call  rax
     hlt
