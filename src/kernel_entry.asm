@@ -39,6 +39,8 @@ extern bsp_init_gdt_entries
 extern bsp_init_gdt_descriptor
 extern bsp_init_idt_entries
 extern bsp_init_idtr
+extern ap_init_patch_idt_pe
+extern ap_init_patch_idt_lm
 extern idt_table_rm
 extern idt_descriptor_pe
 global realmode_enter_checkpoint
@@ -155,6 +157,8 @@ _kernel_Init:
 .jump_kernel:
     mov rax, bsp_init_idtr
     lidt [rax]
+    call ap_init_patch_idt_pe
+    call ap_init_patch_idt_lm
     mov rax, kernel_start
     call  rax
     hlt

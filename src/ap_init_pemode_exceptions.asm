@@ -1,6 +1,7 @@
 global idt_descriptor_pe
 global idt_table_pe
 global pe_interrupt_vector
+global ap_init_patch_idt_pe
 %define PE_FINAL_STACK_NO_ERRCODE_TOP_MAGIC  0x11
 %define PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC  0x12
 %include "checkpoint.inc"
@@ -14,113 +15,113 @@ idt_table_pe:
     ; 保留位[4] - 必须为0
     ; 类型和属性[5] - 门类型描述符
     ; 偏移[6:7] - 偏移地址的高16位
-    dw pe_interrupt_handlers.divide_by_zero     ; Vector 0 - Divide by Zero
-    dw 0x18                                          ; Code segment selector
+    dw 0    ; Vector 0 - Divide by Zero
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0  ; Offset high bits
     
-    dw pe_interrupt_handlers.debug              ; Vector 1 - Debug
-    dw 0x18                                          ; Code segment selector
+    dw 0             ; Vector 1 - Debug
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0       ; Offset high bits
     
-    dw pe_interrupt_handlers.nmi                ; Vector 2 - NMI
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 2 - NMI
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0         ; Offset high bits
     
-    dw pe_interrupt_handlers.bp                 ; Vector 3 - Breakpoint
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 3 - Breakpoint
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.of                 ; Vector 4 - Overflow
-    dw 0x18                                          ; Code segment selector
+    dw 0                 ; Vector 4 - Overflow
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0        ; Offset high bits
     
-    dw pe_interrupt_handlers.br                 ; Vector 5 - Bound Range
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 5 - Bound Range
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.ud                 ; Vector 6 - Invalid Opcode
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 6 - Invalid Opcode
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.nm                 ; Vector 7 - Device Not Available
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 7 - Device Not Available
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.df                 ; Vector 8 - Double Fault
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 8 - Double Fault
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.cross              ; Vector 9 - Coprocessor Segment Overrun
-    dw 0x18                                          ; Code segment selector
+    dw 0              ; Vector 9 - Coprocessor Segment Overrun
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0       ; Offset high bits
     
-    dw pe_interrupt_handlers.tss                ; Vector 10 - Invalid TSS
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 10 - Invalid TSS
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0         ; Offset high bits
     
-    dw pe_interrupt_handlers.NP                 ; Vector 11 - Segment Not Present
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 11 - Segment Not Present
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.SS                 ; Vector 12 - Stack Segment Fault
-    dw 0x18                                          ; Code segment selector
+    dw 0                 ; Vector 12 - Stack Segment Fault
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.GP                 ; Vector 13 - General Protection
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 13 - General Protection
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.PF                 ; Vector 14 - Page Fault
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 14 - Page Fault
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.vec15              ; Vector 15 - Reserved
-    dw 0x18                                          ; Code segment selector
+    dw 0             ; Vector 15 - Reserved
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0       ; Offset high bits
     
-    dw pe_interrupt_handlers.MF                 ; Vector 16 - x87 FPU Floating Point Error
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 16 - x87 FPU Floating Point Error
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.AC                 ; Vector 17 - Alignment Check
-    dw 0x18                                          ; Code segment selector
+    dw 0                 ; Vector 17 - Alignment Check
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.MC                 ; Vector 18 - Machine Check
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 18 - Machine Check
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.XM                 ; Vector 19 - SIMD Floating Point Exception
-    dw 0x18                                          ; Code segment selector
+    dw 0               ; Vector 19 - SIMD Floating Point Exception
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
     
-    dw pe_interrupt_handlers.VE                 ; Vector 20 - Virtualization Exception
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 20 - Virtualization Exception
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0       ; Offset high bits
     
-    dw pe_interrupt_handlers.CP                 ; Vector 21 - Control Protection Exception
-    dw 0x18                                          ; Code segment selector
+    dw 0                ; Vector 21 - Control Protection Exception
+    dw 0x10                                          ; Code segment selector
     dw 0x8E00                                        ; Type and attributes (Interrupt Gate)
     dw 0          ; Offset high bits
 ; IDT描述符
@@ -717,3 +718,122 @@ bits 32
     sfence                   ; 确保内存写入对其他核心可见
     mov byte [pemode_enter_checkpoint+check_point.failure_flags], 0x3
     hlt                      ; 停机
+bits 64
+ap_init_patch_idt_pe:
+    push rax
+    push rbx
+    mov rbx, qword idt_table_pe
+
+    mov rax, qword pe_interrupt_handlers.divide_by_zero
+    mov word  [rbx + 0*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 0*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.debug
+    mov word  [rbx + 1*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 1*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.nmi
+    mov word  [rbx + 2*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 2*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.bp
+    mov word  [rbx + 3*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 3*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.of
+    mov word  [rbx + 4*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 4*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.br
+    mov word  [rbx + 5*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 5*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.ud
+    mov word  [rbx + 6*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 6*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.nm
+    mov word  [rbx + 7*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 7*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.df
+    mov word  [rbx + 8*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 8*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.cross
+    mov word  [rbx + 9*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 9*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.tss
+    mov word  [rbx + 10*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 10*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.NP
+    mov word  [rbx + 11*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 11*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.SS
+    mov word  [rbx + 12*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 12*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.GP
+    mov word  [rbx + 13*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 13*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.PF
+    mov word  [rbx + 14*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 14*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.vec15
+    mov word  [rbx + 15*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 15*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.MF
+    mov word  [rbx + 16*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 16*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.AC
+    mov word  [rbx + 17*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 17*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.MC
+    mov word  [rbx + 18*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 18*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.XM
+    mov word  [rbx + 19*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 19*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.VE
+    mov word  [rbx + 20*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 20*8 + 6], ax
+
+    mov rax, qword pe_interrupt_handlers.CP
+    mov word  [rbx + 21*8 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 21*8 + 6], ax
+
+    pop rbx
+    pop rax
+    ret

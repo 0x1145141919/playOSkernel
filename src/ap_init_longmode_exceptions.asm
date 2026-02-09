@@ -1,4 +1,5 @@
 global longmode_interrupt_handlers
+global ap_init_patch_idt_lm
 global idt_table_lm
 global idt_descriptor_lm
 %include "checkpoint.inc"
@@ -1088,6 +1089,190 @@ bits 64
     mov byte [rbx + check_point.failure_flags], 0x3
     hlt
 
+ap_init_patch_idt_lm:
+    push rax
+    push rbx
+    mov rbx, qword idt_table_lm
+
+    mov rax, qword longmode_interrupt_handlers.divide_by_zero
+    mov word  [rbx + 0*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 0*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 0*16 + 8], eax
+    mov dword [rbx + 0*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.debug
+    mov word  [rbx + 1*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 1*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 1*16 + 8], eax
+    mov dword [rbx + 1*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.nmi
+    mov word  [rbx + 2*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 2*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 2*16 + 8], eax
+    mov dword [rbx + 2*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.bp
+    mov word  [rbx + 3*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 3*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 3*16 + 8], eax
+    mov dword [rbx + 3*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.of
+    mov word  [rbx + 4*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 4*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 4*16 + 8], eax
+    mov dword [rbx + 4*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.br
+    mov word  [rbx + 5*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 5*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 5*16 + 8], eax
+    mov dword [rbx + 5*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.ud
+    mov word  [rbx + 6*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 6*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 6*16 + 8], eax
+    mov dword [rbx + 6*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.nm
+    mov word  [rbx + 7*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 7*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 7*16 + 8], eax
+    mov dword [rbx + 7*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.df
+    mov word  [rbx + 8*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 8*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 8*16 + 8], eax
+    mov dword [rbx + 8*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.cross
+    mov word  [rbx + 9*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 9*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 9*16 + 8], eax
+    mov dword [rbx + 9*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.tss
+    mov word  [rbx + 10*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 10*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 10*16 + 8], eax
+    mov dword [rbx + 10*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.NP
+    mov word  [rbx + 11*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 11*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 11*16 + 8], eax
+    mov dword [rbx + 11*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.SS
+    mov word  [rbx + 12*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 12*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 12*16 + 8], eax
+    mov dword [rbx + 12*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.GP
+    mov word  [rbx + 13*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 13*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 13*16 + 8], eax
+    mov dword [rbx + 13*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.PF
+    mov word  [rbx + 14*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 14*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 14*16 + 8], eax
+    mov dword [rbx + 14*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.vec15
+    mov word  [rbx + 15*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 15*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 15*16 + 8], eax
+    mov dword [rbx + 15*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.MF
+    mov word  [rbx + 16*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 16*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 16*16 + 8], eax
+    mov dword [rbx + 16*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.AC
+    mov word  [rbx + 17*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 17*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 17*16 + 8], eax
+    mov dword [rbx + 17*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.MC
+    mov word  [rbx + 18*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 18*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 18*16 + 8], eax
+    mov dword [rbx + 18*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.XM
+    mov word  [rbx + 19*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 19*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 19*16 + 8], eax
+    mov dword [rbx + 19*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.VE
+    mov word  [rbx + 20*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 20*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 20*16 + 8], eax
+    mov dword [rbx + 20*16 + 12], 0
+
+    mov rax, qword longmode_interrupt_handlers.CP
+    mov word  [rbx + 21*16 + 0], ax
+    shr rax, 16
+    mov word  [rbx + 21*16 + 6], ax
+    shr rax, 16
+    mov dword [rbx + 21*16 + 8], eax
+    mov dword [rbx + 21*16 + 12], 0
+
+    pop rbx
+    pop rax
+    ret
 SECTION .init_rodata
 idt_table_lm:
     ; IDT条目格式 (每个条目16字节):
@@ -1100,7 +1285,7 @@ idt_table_lm:
     ; 偏移[6:7] - 偏移地址的中间16位
     ; 偏移[8:11] - 偏移地址的高32位
     ; 保留[12:15] - 必须为0
-    dw longmode_interrupt_handlers.divide_by_zero     ; Vector 0 - Divide by Zero
+    dw 0                                             ; Vector 0 - Divide by Zero (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1108,7 +1293,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.debug             ; Vector 1 - Debug
+    dw 0                                             ; Vector 1 - Debug (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1116,7 +1301,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.nmi               ; Vector 2 - NMI
+    dw 0                                             ; Vector 2 - NMI (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1124,7 +1309,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.bp                ; Vector 3 - Breakpoint
+    dw 0                                             ; Vector 3 - Breakpoint (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1132,7 +1317,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.of                ; Vector 4 - Overflow
+    dw 0                                             ; Vector 4 - Overflow (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1140,7 +1325,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.br                ; Vector 5 - Bound Range
+    dw 0                                             ; Vector 5 - Bound Range (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1148,7 +1333,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.ud                ; Vector 6 - Invalid Opcode
+    dw 0                                             ; Vector 6 - Invalid Opcode (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1156,7 +1341,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.nm                ; Vector 7 - Device Not Available
+    dw 0                                             ; Vector 7 - Device Not Available (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1164,7 +1349,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.df                ; Vector 8 - Double Fault
+    dw 0                                             ; Vector 8 - Double Fault (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1172,7 +1357,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.cross             ; Vector 9 - Coprocessor Segment Overrun
+    dw 0                                             ; Vector 9 - Coprocessor Segment Overrun (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1180,7 +1365,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.tss               ; Vector 10 - Invalid TSS
+    dw 0                                             ; Vector 10 - Invalid TSS (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1188,7 +1373,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.NP                ; Vector 11 - Segment Not Present
+    dw 0                                             ; Vector 11 - Segment Not Present (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1196,7 +1381,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.SS                ; Vector 12 - Stack Segment Fault
+    dw 0                                             ; Vector 12 - Stack Segment Fault (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1204,7 +1389,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.GP                ; Vector 13 - General Protection
+    dw 0                                             ; Vector 13 - General Protection (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1212,7 +1397,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.PF                ; Vector 14 - Page Fault
+    dw 0                                             ; Vector 14 - Page Fault (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1220,7 +1405,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.vec15             ; Vector 15 - Reserved
+    dw 0                                             ; Vector 15 - Reserved (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1228,7 +1413,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.MF                ; Vector 16 - x87 FPU Floating Point Error
+    dw 0                                             ; Vector 16 - x87 FPU Floating Point Error (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1236,7 +1421,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.AC                ; Vector 17 - Alignment Check
+    dw 0                                             ; Vector 17 - Alignment Check (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1244,7 +1429,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.MC                ; Vector 18 - Machine Check
+    dw 0                                             ; Vector 18 - Machine Check (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1252,7 +1437,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.XM                ; Vector 19 - SIMD Floating Point Exception
+    dw 0                                             ; Vector 19 - SIMD Floating Point Exception (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1260,7 +1445,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.VE                ; Vector 20 - Virtualization Exception
+    dw 0                                             ; Vector 20 - Virtualization Exception (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
@@ -1268,7 +1453,7 @@ idt_table_lm:
     dd 0                                             ; Highest part of offset (bits 63:32)
     dd 0                                             ; Reserved
     
-    dw longmode_interrupt_handlers.CP                ; Vector 21 - Control Protection Exception
+    dw 0                                             ; Vector 21 - Control Protection Exception (offset low)
     dw 0x18                                          ; Code segment selector
     db 0                                             ; IST and reserved
     db 0x8E                                          ; Type and attributes (Interrupt Gate)
