@@ -8,8 +8,8 @@ extern pml5_table_init
 resources_shift:
 bits 64
     sub rsp, 8
-    mov rax, pml4_table_init
-    mov cr3, rax
+    ;mov rax, pml4_table_init
+    ;mov cr3, rax
     mov rax, bsp_init_gdt_descriptor
     lgdt [rax]
     mov rax, K_cs_idx

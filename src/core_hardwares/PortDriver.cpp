@@ -35,6 +35,7 @@ void serial_init_stage1() {
         .panic_write=serial_puts,
         .early_write=serial_puts,
     };
+    kio::bsp_kout.register_backend(backend);
     // 启用中断(可选)
    //outb(COM1_PORT + 1, 0x0F);
 }
