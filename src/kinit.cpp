@@ -127,17 +127,21 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     }
     Vec2i font_vec={.x=16, .y=32};
     bsp_init_kurd=textconsole_GoP::Init(&ter16x32_data[0][0][0],font_vec,0x00ffffffff,0);
-    readonly_timer=new HPET_driver_only_read_time_stamp(
-        (HPET::ACPItb::HPET_Table*)gAcpiVaddrSapceMgr.get_acpi_table((char*)"HPET")
-    );
+    
     bsp_init_kurd=readonly_timer->second_stage_init();
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"HPET Init Failed"<<kio::kendl;
         asm volatile("hlt");
     }
+    readonly_timer=new HPET_driver_only_read_time_stamp(
+        (HPET::ACPItb::HPET_Table*)gAcpiVaddrSapceMgr.get_acpi_table((char*)"HPET")
+    );
+    kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
+    GfxPrim::Flush();
+    asm volatile("hlt");
     time::hardware_time::inform_initialized_hpet();
     time::hardware_time::processor_regist();
-    kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
+    
     if(error_kurd(bsp_init_kurd)){
         
     }
@@ -149,16 +153,17 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kio::kendl;
     }
+    
     time::time_interrupt_generator::bsp_init();
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kio::kendl;
     }
-    GfxPrim::Flush();
+    
     time::time_interrupt_generator::set_clock_by_offset(1000);
     asm volatile("sti");
     //中断接管工作
-    asm volatile("hlt");
+    
     
 
 }

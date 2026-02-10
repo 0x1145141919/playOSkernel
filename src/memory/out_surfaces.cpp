@@ -47,11 +47,7 @@ KURD_t __wrapped_pgs_free(phyaddr_t phybase, uint64_t _4kbpgscount)
     if(!success_all_kurd(kurd)){
         return phymemspace_mgr::pages_recycle(phybase,_4kbpgscount);
     }
-    kurd=phymemspace_mgr::pages_dram_buddy_pages_set(
-            phybase,
-            _4kbpgscount,
-            FREE
-        );
+    kurd=phymemspace_mgr::pages_dram_buddy_pages_free(phybase,_4kbpgscount);
     return kurd;
 }
 

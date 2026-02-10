@@ -81,11 +81,7 @@ int phymemspace_mgr::phymemseg_to_pacage(
     seg_to_pages_info_package_t& pak)
 {
     // 清空
-    for (int i = 0; i < 5; i++) {
-        pak.entries[i].base = 0;
-        pak.entries[i].num_of_pages = 0;
-        pak.entries[i].page_size_in_byte = 0;
-    }
+    ksetmem_8(&pak,0,sizeof(pak));
 
     uint64_t start = base;
     uint64_t end   = base + num_of_4kbpgs * _4KB_PG_SIZE;

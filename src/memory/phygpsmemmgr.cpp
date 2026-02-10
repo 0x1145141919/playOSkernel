@@ -364,8 +364,6 @@ KURD_t phymemspace_mgr::Init()
         .state=KERNEL_PERSIST,
         .op=dram_pages_state_set_flags_t::normal,
         .params={
-            .expect_meet_atom_pages_free=true,
-            .expect_meet_buddy_pages=false,
             .if_init_ref_count=1,
         }
     };

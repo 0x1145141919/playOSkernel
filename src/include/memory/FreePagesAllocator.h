@@ -65,6 +65,17 @@ namespace MEMMODULE_LOCAIONS{
                 constexpr uint16_t FAIL_REASON_CODE_BASE_NOT_BELONG= 1;
             }
         }
+        constexpr uint8_t EVENT_CODE_REPLAY_VALIDATE=8;
+        namespace REPLAY_VALIDATE_RESULTS_CODE{
+            namespace FATAL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_CODE_INVALID_ORDER=1;
+                constexpr uint16_t FAIL_REASON_CODE_INVALID_INDEX=2;
+                constexpr uint16_t FAIL_REASON_CODE_INTERNAL_CONFLICT=3;
+                constexpr uint16_t FAIL_REASON_CODE_PARENT_FREE_CHILD_USED=4;
+                constexpr uint16_t FAIL_REASON_CODE_PARENT_USED_CHILD_USED=5;
+                constexpr uint16_t FAIL_REASON_CODE_INTERNAL_BITMAP_MISSING=6;
+            }
+        }
     }
     constexpr uint8_t LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP=33;
     namespace FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP{
@@ -92,6 +103,8 @@ class FreePagesAllocator{
         private:
         static constexpr uint64_t INVALID_INBCB_INDEX=~0;
         static constexpr uint8_t DESINGED_MAX_SUPPORT_ORDER=64;
+        static constexpr uint8_t PER_ORDER_CACHE_SUGGEST_COUNT=8;
+        using cache_order_suggest_t=uint64_t[PER_ORDER_CACHE_SUGGEST_COUNT];
         trylock_cpp_t lock;
         bool is_splited_bitmap_valid;
         uint8_t MAX_SUPPORT_ORDER;
@@ -100,7 +113,11 @@ class FreePagesAllocator{
         KURD_t default_success();
         KURD_t default_error();
         KURD_t default_fatal();
-        uint64_t suggest_order_free_page_index[DESINGED_MAX_SUPPORT_ORDER];//是基于BCB开始地址的引索
+        
+        cache_order_suggest_t suggest_order_free_page_index[DESINGED_MAX_SUPPORT_ORDER];//每个order多条缓存，基于BCB开始地址的索引
+        uint8_t suggest_order_cache_cursor[DESINGED_MAX_SUPPORT_ORDER];
+        void cache_insert(uint8_t order, uint64_t idx);
+        bool cache_pick(uint8_t order, uint64_t& out_idx);
         KURD_t conanico_free(
             uint64_t in_bcb_idx,
             uint8_t order
@@ -127,6 +144,14 @@ class FreePagesAllocator{
             );
             ~mixed_bitmap_t();
         };
+        #ifdef REPALY_MODE
+        void replay_internal_init();
+        void replay_internal_mark_split(uint8_t order, uint64_t idx);
+        void replay_internal_mark_free(uint8_t order, uint64_t idx);
+        KURD_t replay_validate_node(uint8_t order, uint64_t idx, const char* tag);
+        
+        Ktemplats::kernel_bitmap*order_Internal_bitmap[DESINGED_MAX_SUPPORT_ORDER];
+        #endif
         friend mixed_bitmap_t::mixed_bitmap_t(uint64_t entry_count);
         mixed_bitmap_t*order_freepage_existency_bitmaps;//这个位图编码为1表示这个order的对应引索的页面是存在的，反之不存在
         uint64_t order_bases[DESINGED_MAX_SUPPORT_ORDER];//在mixed_bitmap_t里面各order的引索基址    
@@ -137,6 +162,7 @@ class FreePagesAllocator{
         uint64_t suggest_miss[DESINGED_MAX_SUPPORT_ORDER];
         uint64_t alloc_times_success;
         uint64_t free_times_success;
+        uint64_t alloc_times_fail;
         uint64_t scan_count;
         uint64_t fold_count_success;
         uint64_t fold_count_fail;
@@ -172,6 +198,9 @@ class FreePagesAllocator{
             phyaddr_t base,
             uint64_t size
         );
+        #ifdef REPALY_MODE
+        KURD_t replay_validate_tree(const char* tag);
+        #endif
         bool is_addr_belong_to_this_BCB(phyaddr_t addr);
         ~free_pages_in_seg_control_block()=default;
          

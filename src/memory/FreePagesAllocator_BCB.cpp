@@ -26,9 +26,153 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_kurd()
 {
     return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK,0,0,err_domain::CORE_MODULE);
 }
+#ifdef REPALY_MODE
+static inline KURD_t replay_check_or_log(FreePagesAllocator::free_pages_in_seg_control_block* self, const char* tag)
+{
+    return self->replay_validate_tree(tag);
+}
+
+void FreePagesAllocator::free_pages_in_seg_control_block::replay_internal_init()
+{
+    for (uint8_t order = 0; order < DESINGED_MAX_SUPPORT_ORDER; ++order) {
+        order_Internal_bitmap[order] = nullptr;
+    }
+    for (uint8_t order = 1; order <= MAX_SUPPORT_ORDER && order < DESINGED_MAX_SUPPORT_ORDER; ++order) {
+        order_Internal_bitmap[order] = new Ktemplats::kernel_bitmap(1ULL << (MAX_SUPPORT_ORDER - order));
+    }
+}
+
+void FreePagesAllocator::free_pages_in_seg_control_block::replay_internal_mark_split(uint8_t order, uint64_t idx)
+{
+    if (order == 0 || order >= DESINGED_MAX_SUPPORT_ORDER) return;
+    if (order_Internal_bitmap[order]) {
+        order_Internal_bitmap[order]->bit_set(idx, true);
+    }
+}
+
+void FreePagesAllocator::free_pages_in_seg_control_block::replay_internal_mark_free(uint8_t order, uint64_t idx)
+{
+    if (order == 0 || order >= DESINGED_MAX_SUPPORT_ORDER) return;
+    if (order_Internal_bitmap[order]) {
+        order_Internal_bitmap[order]->bit_set(idx, false);
+    }
+}
+
+KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_node(uint8_t order, uint64_t idx, const char* tag)
+{
+    namespace REPLAY_FATAL = MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::REPLAY_VALIDATE_RESULTS_CODE::FATAL_REASONS_CODE;
+    auto make_success = [this]() {
+        KURD_t kurd = default_success();
+        kurd.event_code = MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_REPLAY_VALIDATE;
+        return kurd;
+    };
+    auto make_fatal = [this](uint16_t reason) {
+        KURD_t kurd = default_fatal();
+        kurd.event_code = MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_REPLAY_VALIDATE;
+        kurd.reason = reason;
+        return kurd;
+    };
+    if (order > MAX_SUPPORT_ORDER) {
+        kio::bsp_kout << "Replay validate invalid order at " << tag << kio::kendl;
+        return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INVALID_ORDER);
+    }
+    const uint64_t count = 1ULL << (MAX_SUPPORT_ORDER - order);
+    if (idx >= count) {
+        kio::bsp_kout << "Replay validate invalid index at " << tag << kio::kendl;
+        return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INVALID_INDEX);
+    }
+
+    bool parent_free = order_freepage_existency_bitmaps->bit_get(order_bases[order] + idx);
+    bool parent_internal = false;
+    if (order > 0) {
+        if (!order_Internal_bitmap[order]) {
+            kio::bsp_kout << "Replay validate missing internal bitmap at " << tag << kio::kendl;
+            return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INTERNAL_BITMAP_MISSING);
+        }
+        parent_internal = order_Internal_bitmap[order]->bit_get(idx);
+    }
+    if (parent_free && parent_internal) {
+        kio::bsp_kout << "Replay validate conflict parent free/internal at " << tag << kio::kendl;
+        return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INTERNAL_CONFLICT);
+    }
+    if (order == 0) {
+        return make_success();
+    }
+
+    const uint64_t left_idx = idx << 1;
+    const uint64_t right_idx = left_idx + 1;
+    bool left_free = order_freepage_existency_bitmaps->bit_get(order_bases[order - 1] + left_idx);
+    bool right_free = order_freepage_existency_bitmaps->bit_get(order_bases[order - 1] + right_idx);
+    bool left_internal = false;
+    bool right_internal = false;
+    if (order > 1) {
+        if (!order_Internal_bitmap[order - 1]) {
+            kio::bsp_kout << "Replay validate missing internal bitmap at " << tag << kio::kendl;
+            return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INTERNAL_BITMAP_MISSING);
+        }
+        left_internal = order_Internal_bitmap[order - 1]->bit_get(left_idx);
+        right_internal = order_Internal_bitmap[order - 1]->bit_get(right_idx);
+    }
+
+    if (parent_free) {
+        if (left_free || right_free || left_internal || right_internal) {
+            kio::bsp_kout << "Replay validate parent free but child used at " << tag << kio::kendl;
+            return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_PARENT_FREE_CHILD_USED);
+        }
+        return make_success();
+    }
+    if (!parent_internal) {
+        if (left_free || right_free || left_internal || right_internal) {
+            kio::bsp_kout << "Replay validate parent used but child used at " << tag << kio::kendl;
+            return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_PARENT_USED_CHILD_USED);
+        }
+        return make_success();
+    }
+
+    KURD_t left_res = replay_validate_node(order - 1, left_idx, tag);
+    if (!success_all_kurd(left_res)) return left_res;
+    KURD_t right_res = replay_validate_node(order - 1, right_idx, tag);
+    return right_res;
+}
+
+KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_tree(const char* tag)
+{
+    return replay_validate_node(MAX_SUPPORT_ORDER, 0, tag ? tag : "replay_validate_tree");
+}
+#endif
 uint8_t FreePagesAllocator::free_pages_in_seg_control_block::get_max_order()
 {
     return this->MAX_SUPPORT_ORDER;
+}
+
+void FreePagesAllocator::free_pages_in_seg_control_block::cache_insert(uint8_t order, uint64_t idx)
+{
+    if (order >= DESINGED_MAX_SUPPORT_ORDER) return;
+    for (uint8_t i = 0; i < PER_ORDER_CACHE_SUGGEST_COUNT; ++i) {
+        if (suggest_order_free_page_index[order][i] == INVALID_INBCB_INDEX) {
+            suggest_order_free_page_index[order][i] = idx;
+            return;
+        }
+    }
+    uint8_t& cursor = suggest_order_cache_cursor[order];
+    suggest_order_free_page_index[order][cursor] = idx;
+    cursor = (cursor + 1) % PER_ORDER_CACHE_SUGGEST_COUNT;
+}
+
+bool FreePagesAllocator::free_pages_in_seg_control_block::cache_pick(uint8_t order, uint64_t& out_idx)
+{
+    if (order >= DESINGED_MAX_SUPPORT_ORDER) return false;
+    for (uint8_t i = 0; i < PER_ORDER_CACHE_SUGGEST_COUNT; ++i) {
+        uint64_t idx = suggest_order_free_page_index[order][i];
+        if (idx == INVALID_INBCB_INDEX) continue;
+        if (order_freepage_existency_bitmaps->bit_get(order_bases[order] + idx)) {
+            out_idx = idx;
+            suggest_order_free_page_index[order][i] = INVALID_INBCB_INDEX;
+            return true;
+        }
+        suggest_order_free_page_index[order][i] = INVALID_INBCB_INDEX;
+    }
+    return false;
 }
 
 uint8_t FreePagesAllocator::free_pages_in_seg_control_block::size_to_order(uint64_t size)
@@ -69,7 +213,7 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
     error.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY;
     fatal.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY;
     uint8_t order=size_to_order(size);
-    if(order>=MAX_SUPPORT_ORDER){
+    if(order>MAX_SUPPORT_ORDER){
         error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::ALLOCATE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_ACQUIRE_SIZE_TO_BIG;
         result=error;
         return 0;
@@ -83,18 +227,27 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
             return 0;
     }
     for(uint8_t i=order;i<=MAX_SUPPORT_ORDER;i++){
-        if(suggest_order_free_page_index[i]!=INVALID_INBCB_INDEX&&order_freepage_existency_bitmaps->bit_get(order_bases[i]+suggest_order_free_page_index[i])){
+        uint64_t cached_idx = INVALID_INBCB_INDEX;
+        if(cache_pick(i, cached_idx)){
             statistics.suggest_hit[order]++;
             if(i>order){
-                kurd=split_page(suggest_order_free_page_index[i],i,order);
+                kurd=split_page(cached_idx,i,order);
                 if(!success_all_kurd(kurd)){
                     result=kurd;
                     return 0;
                 }
             }
-            order_freepage_existency_bitmaps->bit_set(order_bases[order]+(suggest_order_free_page_index[i]<<(i-order)),false);
+            order_freepage_existency_bitmaps->bit_set(order_bases[order]+(cached_idx<<(i-order)),false);
+            #ifdef REPALY_MODE
+            replay_internal_mark_free(order, (cached_idx << (i - order)));
+            KURD_t replay_kurd = replay_check_or_log(this, "allocate_buddy_way");
+            if (!success_all_kurd(replay_kurd)) {
+                result = replay_kurd;
+                return 0;
+            }
+            #endif
             statistics.free_count[order]--;
-            phyaddr_t res_addr=base+(suggest_order_free_page_index[i]<< (i+12));
+            phyaddr_t res_addr=base+(cached_idx<< (i+12));
             statistics.alloc_times_success++;
             result=success;
             return res_addr;
@@ -116,6 +269,14 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
                 }
             }
             order_freepage_existency_bitmaps->bit_set(order_bases[order]+(found_idx<<(i-order)),false);
+            #ifdef REPALY_MODE
+            replay_internal_mark_free(order, (found_idx << (i - order)));
+            KURD_t replay_kurd = replay_check_or_log(this, "allocate_buddy_way");
+            if (!success_all_kurd(replay_kurd)) {
+                result = replay_kurd;
+                return 0;
+            }
+            #endif
             statistics.free_count[order]--;
             statistics.alloc_times_success++;
             phyaddr_t res_addr=base+(found_idx<< (i+12));
@@ -123,8 +284,8 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
         }
     }
 
-    kio::bsp_kout<<"higher order free page found,validation start"<<kio::kendl;
-        
+    //kio::bsp_kout<<"higher order free page found,validation start"<<kio::kendl;
+    statistics.alloc_times_fail++;
     error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::ALLOCATE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_NO_AVALIABLE_BUDDY;
     result=error;
     return 0;
@@ -133,10 +294,18 @@ FreePagesAllocator::free_pages_in_seg_control_block::free_pages_in_seg_control_b
 {
     this->MAX_SUPPORT_ORDER=max_support_order;
     this->base=base;
-    for(uint8_t i=0;i<MAX_SUPPORT_ORDER;i++){
-        suggest_order_free_page_index[i]=~0;
+    for(uint8_t i=0;i<=MAX_SUPPORT_ORDER;i++){
+        for (uint8_t j = 0; j < PER_ORDER_CACHE_SUGGEST_COUNT; ++j) {
+            suggest_order_free_page_index[i][j]=~0;
+        }
+        suggest_order_cache_cursor[i]=0;
         order_bases[i]=0;
     }
+    #ifdef REPALY_MODE
+    for (uint8_t i = 0; i < DESINGED_MAX_SUPPORT_ORDER; ++i) {
+        order_Internal_bitmap[i] = nullptr;
+    }
+    #endif
     this->is_splited_bitmap_valid=is_splited_bitmap_valid;
     ksetmem_8(&statistics, 0, sizeof(statistics));
 }
@@ -156,16 +325,32 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
     for(uint8_t order=0;order<MAX_SUPPORT_ORDER;order++){
         order_bases[order+1]=order_bases[order]+(1ULL<<(MAX_SUPPORT_ORDER-order));
     }
+    #ifdef REPALY_MODE
+    replay_internal_init();
+    #endif
     free_page_without_merge(0,MAX_SUPPORT_ORDER);
+    #ifdef REPALY_MODE
+    KURD_t replay_kurd = replay_check_or_log(this, "second_stage_init");
+    if (!success_all_kurd(replay_kurd)) {
+        return replay_kurd;
+    }
+    #endif
     return success;
 }
 void FreePagesAllocator::free_pages_in_seg_control_block::free_page_without_merge(uint64_t in_bcb_idx, uint8_t order)
 {
     order_freepage_existency_bitmaps->bit_set(order_bases[order]+in_bcb_idx,true);
     statistics.free_count[order]++;
-    suggest_order_free_page_index[order]=in_bcb_idx;
+    cache_insert(order, in_bcb_idx);
+    #ifdef REPALY_MODE
+    /*replay_internal_mark_free(order, in_bcb_idx);
+    KURD_t replay_kurd = replay_check_or_log(this, "free_page_without_merge");
+    if (!success_all_kurd(replay_kurd)) {
+        return;
+    }*/
+    #endif
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t splited_idx, uint8_t splited_order, uint8_t target_order)
+KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t splited_idx, uint8_t splited_order, uint8_t target_order) 
 {//每一层递归固定被拆分层减少一个，拆分出来两个增加
     KURD_t success=default_success();
     KURD_t error=default_error();
@@ -179,6 +364,13 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t 
         return success;
     }
     order_freepage_existency_bitmaps->bit_set(order_bases[splited_order]+splited_idx,false);
+    #ifdef REPALY_MODE
+    replay_internal_mark_split(splited_order, splited_idx);
+    KURD_t replay_kurd = replay_check_or_log(this, "split_page");
+    if (!success_all_kurd(replay_kurd)) {
+        return replay_kurd;
+    }
+    #endif
     statistics.free_count[splited_order]--;
     free_page_without_merge(1+(splited_idx<<1),splited_order-1);
     statistics.free_count[splited_order-1]++;
@@ -206,6 +398,10 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
         return error;
     }
     order_freepage_existency_bitmaps->bit_set(order_bases[order]+in_bcb_idx,true);
+    #ifdef REPALY_MODE
+    replay_internal_mark_free(order, in_bcb_idx);
+    #endif
+    cache_insert(order, in_bcb_idx);
     statistics.free_count[order]++;
     uint8_t current_order=order;
     uint64_t current_idx=in_bcb_idx;
@@ -226,9 +422,19 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
             return fatal;
         }
         order_freepage_existency_bitmaps->bit_set(order_bases[current_order+1]+current_idx,true);
+        #ifdef REPALY_MODE
+        replay_internal_mark_free(current_order + 1, current_idx);
+        #endif
+        cache_insert(current_order + 1, current_idx);
         statistics.free_count[current_order+1]++;
     }
     statistics.free_times_success++;
+    #ifdef REPALY_MODE
+    KURD_t replay_kurd = replay_check_or_log(this, "conanico_free");
+    if (!success_all_kurd(replay_kurd)) {
+        return replay_kurd;
+    }
+    #endif
     return success;
 }
 bool FreePagesAllocator::free_pages_in_seg_control_block::is_addr_belong_to_this_BCB(phyaddr_t addr)
@@ -264,6 +470,10 @@ bool FreePagesAllocator::free_pages_in_seg_control_block::is_reclusive_fold_succ
     bool right=order_freepage_existency_bitmaps->bit_get(order_bases[order-1]+(idx<<1)+1);
     if(left&&right){
         order_freepage_existency_bitmaps->bit_set(order_bases[order]+idx,true);
+        #ifdef REPALY_MODE
+        replay_internal_mark_free(order, idx);
+        #endif
+        cache_insert(order, idx);
         statistics.free_count[order]++;
         order_freepage_existency_bitmaps->bit_set(order_bases[order-1]+(idx<<1),false);
         order_freepage_existency_bitmaps->bit_set(order_bases[order-1]+(idx<<1)+1,false);
@@ -281,6 +491,10 @@ bool FreePagesAllocator::free_pages_in_seg_control_block::is_reclusive_fold_succ
     }
     if(left_succeed&&right_succeed){
         order_freepage_existency_bitmaps->bit_set(order_bases[order]+idx,true);
+        #ifdef REPALY_MODE
+        replay_internal_mark_free(order, idx);
+        #endif
+        cache_insert(order, idx);
         statistics.free_count[order]++;
         order_freepage_existency_bitmaps->bit_set(order_bases[order-1]+(idx<<1),false);
         order_freepage_existency_bitmaps->bit_set(order_bases[order-1]+(idx<<1)+1,false);
@@ -308,13 +522,27 @@ void FreePagesAllocator::free_pages_in_seg_control_block::print_basic_info()
     kio::bsp_kout.shift_dec();  // 切换回十进制模式
     kio::bsp_kout << "Max Support Order: ";
     kio::bsp_kout << (uint32_t)MAX_SUPPORT_ORDER << kio::kendl;
-    kio::bsp_kout << "Suggest Order Free Page Index Array:" << kio::kendl;
-    
-    for (uint8_t i = 0; i <=MAX_SUPPORT_ORDER; i++) {
-        if (suggest_order_free_page_index[i] != INVALID_INBCB_INDEX) {
-            kio::bsp_kout << "  [" << (uint32_t)i << "] = " << suggest_order_free_page_index[i] << kio::kendl;
-        }
+    kio::bsp_kout << "Suggest Order Free Page Index Cache:" << kio::kendl;
+    for(uint8_t i = 0; i <=MAX_SUPPORT_ORDER; i++){
+        kio::bsp_kout<<"order "<<i<< " free_count:"<<statistics.free_count[i]<<kio::kendl;
     }
+    for (uint8_t i = 0; i <=MAX_SUPPORT_ORDER; i++) {
+        bool any=false;
+        for (uint8_t j = 0; j < PER_ORDER_CACHE_SUGGEST_COUNT; ++j) {
+            if (suggest_order_free_page_index[i][j] != INVALID_INBCB_INDEX) {
+                if (!any) {
+                    kio::bsp_kout << "  [" << (uint32_t)i << "] = ";
+                    any = true;
+                }
+                kio::bsp_kout << suggest_order_free_page_index[i][j] << " ";
+            }
+        }
+        if (any) {
+            kio::bsp_kout << kio::kendl;
+        }
+        
+    }
+
 }
 void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_info()
 {
@@ -406,9 +634,10 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush()
         if(actual_free_count!=statistics.free_count[i]){
             kio::bsp_kout << "FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush() violation" << kio::kendl;
             kio::bsp_kout << "Order " << (uint32_t)i << ": Expected free count: " << statistics.free_count[i] << ", Actual free count: " << actual_free_count << kio::kendl;
-            statistics.free_count[i]=actual_free_count;
+            //statistics.free_count[i]=actual_free_count;
             fatal.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FLUSH_FREE_COUNT_RESULTS_CODE::FATAL_REASONS_CODE::COSISTENCY_VIOLATION;
-            Panic::panic(default_panic_behaviors_flags,nullptr,nullptr,nullptr,fatal);
+            //Panic::panic(default_panic_behaviors_flags,nullptr,nullptr,nullptr,fatal);
+            break;
         }
     }
     if(fatal.reason)return fatal;

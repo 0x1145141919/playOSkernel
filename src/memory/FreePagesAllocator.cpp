@@ -11,7 +11,7 @@ KURD_t FreePagesAllocator::Init()
     if(error_kurd(kurd))return kurd;
     first_BCB=new free_pages_in_seg_control_block(
         0x100000000,
-        20
+        18
     );
     return first_BCB->second_stage_init();
 }

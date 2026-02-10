@@ -31,6 +31,11 @@ namespace MEMMODULE_LOCAIONS{
                 namespace FAIL_REASONS{
                     constexpr uint16_t REASON_CODE_PAGES_COUNT_ZERO=0x1;
                     constexpr uint16_t REASON_CODE_FAIL_TO_SPLIT_SEG=0x2;
+                    constexpr uint16_t REASON_CODE_DRAMSEG_NOT_EXIST=0x3;
+                    constexpr uint16_t REASON_CODE_INVALID_STATE=0x4;
+                    constexpr uint16_t REASON_CODE_FREE_STATE_NOT_ALLOWED=0x5;
+                    constexpr uint16_t REASON_CODE_FREE_REFCNT_NOT_ONE=0x6;
+                    constexpr uint16_t REASON_CODE_FREE_MAPCOUNT_NOT_ZERO=0x7;
                 }
                 namespace FATAL_REASONS{
                     constexpr uint16_t REASON_CODE_WHEN_BUDDY_UNREGIS_STATE_CONFILICT=0x1;
@@ -382,8 +387,6 @@ class phymemspace_mgr{
         }op;
         struct paras_t
         {
-        uint8_t expect_meet_atom_pages_free:1;
-        uint8_t expect_meet_buddy_pages:1;
         uint8_t if_init_ref_count:1;
         }params;
     };

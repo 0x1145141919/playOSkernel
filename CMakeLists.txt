@@ -141,6 +141,31 @@ target_compile_options(
     -DUSER_MODE
 )
 
+add_executable(test_set_dump
+    src/tests/test_set_dump.cpp
+)
+
+add_executable(operation_log_dump
+    src/tests/operation_log_dump.cpp
+)
+
+add_executable(bcb_replay
+    src/tests/bcb_replay.cpp
+     ${SRC_COMMON}
+    src/memory/mixed_bitmap.cpp
+    src/memory/FreePagesAllocator_BCB.cpp
+)
+target_include_directories(
+    bcb_replay PRIVATE
+    "/usr/include/efi"
+     "${CMAKE_SOURCE_DIR}/src/include"
+)
+target_compile_options(
+    bcb_replay PRIVATE
+    -DUSER_MODE
+    #-DREPALY_MODE
+)
+
 
 add_executable(test_mem
     src/tests/test_memmodule.cpp

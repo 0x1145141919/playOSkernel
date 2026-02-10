@@ -521,26 +521,27 @@ KURD_t phymemspace_mgr::pages_state_set(phyaddr_t base,
 
     return success;
 }
-/**
- * TODO:panic机制完善
- * TODO:KURD完善
- */
 KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_t base, uint64_t numof_4kbpgs, dram_pages_state_set_flags_t flags)
 {
-    auto ensure_1gb_subtable_lambda = [flags](uint64_t idx_1gb){
+    KURD_t success=default_success();
+    KURD_t fail=default_failure();
+    KURD_t fatal=default_fatal();
+    success.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM;
+    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM;
+    fatal.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM;
+
+    auto ensure_1gb_subtable_lambda = [flags, &fatal](uint64_t idx_1gb){
             page_size1gb_t *p1 = top_1gb_table->get(idx_1gb);
             if(p1==nullptr){
-                //panic,一致性违背
+                fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_TOP1GB_ENABLE_FAIL;
+                phymemspace_mgr::in_module_panic(fatal);
+                return;
             }
             if (!p1->flags.is_sub_valid)
             {
             page_size2mb_t* sub2 =alloc_2mb_subtable();//new失败里面自动panic,不用考虑空指针
 
             ksetmem_8(sub2, 0, PAGES_2MB_PER_1GB * sizeof(page_size2mb_t));
-            for(uint16_t i = 0; i < PAGES_2MB_PER_1GB; i++){
-                sub2[i].flags.state = FREE;
-                sub2[i].flags.is_belonged_to_buddy = p1->flags.is_belonged_to_buddy;
-            }
             p1->sub2mbpages = sub2;
             p1->flags.is_sub_valid = 1;
             p1->flags.state = NOT_ATOM;
@@ -551,10 +552,6 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
         {
             page_size4kb_t* sub4 = alloc_4kb_subtable();
             ksetmem_8(sub4, 0, PAGES_4KB_PER_2MB * sizeof(page_size4kb_t));
-            for(uint16_t i = 0; i < PAGES_4KB_PER_2MB; i++){
-                sub4[i].flags.state = FREE;
-                sub4[i].flags.is_belonged_to_buddy = p2.flags.is_belonged_to_buddy;
-            }
             p2.sub_pages = sub4;
             p2.flags.is_sub_valid = 1;
             p2.flags.state = NOT_ATOM;
@@ -659,12 +656,6 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
         p1.flags.state = NOT_ATOM;
         return NO_FOLDED;
     };
-    KURD_t success=default_success();
-    KURD_t fail=default_failure();
-    KURD_t fatal=default_fatal();
-    success.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM;
-    fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM;
-    fatal.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_PAGES_SET_DRAM;
     if(numof_4kbpgs==0){
         fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FAIL_REASONS::REASON_CODE_PAGES_COUNT_ZERO;
         return fail; // 返回失败而不是什么都不做
@@ -691,7 +682,9 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
                          page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
                         if(_1==nullptr){
-                            //panic,一致性违背
+                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_TOP1GB_ENABLE_FAIL;
+                            phymemspace_mgr::in_module_panic(fatal);
+                            return fatal;
                         }
                         if(_1->flags.state!=FREE||_1->flags.is_belonged_to_buddy==true){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_BUDDY_REGIST_STATE_CONFILICT;
@@ -710,7 +703,10 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
                     page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
-
+                        if((p2+j)->flags.state==RESERVED){
+                            (p2+j)->flags.state=FREE;
+                            (p2+j)->flags.is_belonged_to_buddy=p1->flags.is_belonged_to_buddy;
+                        }
                         if((p2+j)->flags.state!=FREE||(p2+j)->flags.is_belonged_to_buddy==true){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_BUDDY_REGIST_STATE_CONFILICT;
                             phymemspace_mgr::in_module_panic(fatal);
@@ -732,7 +728,10 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     ensure_2mb_subtable_lambda(*p2);
                     page_size4kb_t* p4 = p2->sub_pages+_4kb_off_idx;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
-
+                        if((p4+j)->flags.state==RESERVED){
+                            (p4+j)->flags.state=FREE;
+                            (p4+j)->flags.is_belonged_to_buddy=p2->flags.is_belonged_to_buddy;
+                        }
                         if((p4+j)->flags.state!=FREE||(p4+j)->flags.is_belonged_to_buddy==true){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_BUDDY_REGIST_STATE_CONFILICT;
                             phymemspace_mgr::in_module_panic(fatal);
@@ -789,7 +788,10 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     }
                     page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
-
+                        if((p2+j)->flags.state==RESERVED){
+                            (p2+j)->flags.state=FREE;
+                            (p2+j)->flags.is_belonged_to_buddy=p1->flags.is_belonged_to_buddy;
+                        }
                         if((p2+j)->flags.state!=FREE||(p2+j)->flags.is_belonged_to_buddy==false){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_BUDDY_UNREGIS_STATE_CONFILICT;
                             phymemspace_mgr::in_module_panic(fatal);
@@ -822,7 +824,10 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     }
                     page_size4kb_t* p4 = p2->sub_pages+_4kb_off_idx;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
-
+                        if((p4+j)->flags.state==RESERVED){
+                            (p4+j)->flags.state=FREE;
+                            (p4+j)->flags.is_belonged_to_buddy=p2->flags.is_belonged_to_buddy;
+                        }
                         if((p4+j)->flags.state!=FREE||(p4+j)->flags.is_belonged_to_buddy==false){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_BUDDY_UNREGIS_STATE_CONFILICT;
                             phymemspace_mgr::in_module_panic(fatal);
@@ -853,23 +858,16 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
                          page_size1gb_t* _1 = top_1gb_table->get(entry_base_idx + j); // 修正这里应该是+j而不是+i
                         if(_1==nullptr){
-                            //panic,一致性违背
+                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_TOP1GB_ENABLE_FAIL;
+                            phymemspace_mgr::in_module_panic(fatal);
+                            return fatal;
                         }
                         if(_1->flags.is_sub_valid){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_ATOM_EXPECTION_VIOLATION;
                             phymemspace_mgr::in_module_panic(fatal);
                             return fatal;
                         }
-                        if(flags.params.expect_meet_atom_pages_free)if(_1->flags.state!=FREE){
-                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_FREE_EXPECTION_VIOLATION;
-                            phymemspace_mgr::in_module_panic(fatal);
-                            return fatal;
-                        }
-                        if(flags.params.expect_meet_buddy_pages)if(_1->flags.is_belonged_to_buddy==false){
-                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_BUDDY_EXPECTION_VIOLATION;
-                            phymemspace_mgr::in_module_panic(fatal);
-                            return fatal;
-                        }
+                        if(flags.params.if_init_ref_count)_1->ref_count=1;
                         _1->flags.state=flags.state;
                     }
                 }
@@ -881,25 +879,20 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
                     uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
                     page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    bool buddy_belong=p1->flags.is_belonged_to_buddy;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
                         if((p2+j)->flags.is_sub_valid){
                             fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_ATOM_EXPECTION_VIOLATION;
                             phymemspace_mgr::in_module_panic(fatal);
                             return fatal;
                         }
-                        if(flags.params.expect_meet_atom_pages_free)if((p2+j)->flags.state!=FREE){
-                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_FREE_EXPECTION_VIOLATION;
-                            phymemspace_mgr::in_module_panic(fatal);
-                            return fatal;
+                        (p2+j)->flags.is_belonged_to_buddy = buddy_belong;
+                        if((p2+j)->flags.state==RESERVED){
+                            (p2+j)->flags.state=FREE;
                         }
-                        if(flags.params.expect_meet_buddy_pages)if((p2+j)->flags.is_belonged_to_buddy==false){
-                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_BUDDY_EXPECTION_VIOLATION;
-                            phymemspace_mgr::in_module_panic(fatal);
-                            return fatal;
-                        }
+                        if(flags.params.if_init_ref_count)(p2+j)->ref_count=1;
                         (p2+j)->flags.state=flags.state;
                     }
-                    if(!flags.params.expect_meet_atom_pages_free)try_fold_1gb_lambda(*p1);
                 }
                 break; // 添加break语句
                 case _4KB_PG_SIZE:{
@@ -909,9 +902,11 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                     page_size1gb_t *p1 = top_1gb_table->get(entry_base_idx);
                     uint16_t _2mb_off_idx=(ent.base>>21)&(PAGES_2MB_PER_1GB-1);
                     page_size2mb_t* p2 = p1->sub2mbpages+_2mb_off_idx;
+                    p2->flags.is_belonged_to_buddy = p1->flags.is_belonged_to_buddy;
                     uint16_t _4kb_off_idx=(ent.base>>12)&(PAGES_4KB_PER_2MB-1);
                     ensure_2mb_subtable_lambda(*p2);
                     page_size4kb_t* p4 = p2->sub_pages+_4kb_off_idx;
+                    bool buddy_belong=p2->flags.is_belonged_to_buddy;
                     for(uint64_t j=0;j<ent.num_of_pages;j++){
 
                         if((p4+j)->flags.is_sub_valid){
@@ -919,20 +914,13 @@ KURD_t phymemspace_mgr::dram_pages_state_set(const PHYSEG &current_seg, phyaddr_
                             phymemspace_mgr::in_module_panic(fatal);
                             return fatal;
                         }
-                        if(flags.params.expect_meet_atom_pages_free)if((p4+j)->flags.state!=FREE){
-                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_FREE_EXPECTION_VIOLATION;
-                            phymemspace_mgr::in_module_panic(fatal);
-                            return fatal;
+                        (p4+j)->flags.is_belonged_to_buddy = buddy_belong;
+                        if((p4+j)->flags.state==RESERVED){
+                            (p4+j)->flags.state=FREE;
                         }
-                        if(flags.params.expect_meet_buddy_pages)if((p4+j)->flags.is_belonged_to_buddy==false){
-                            fatal.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FATAL_REASONS::REASON_CODE_WHEN_NORMAL_BUDDY_EXPECTION_VIOLATION;
-                            phymemspace_mgr::in_module_panic(fatal);
-                            return fatal;
-                        }
+                        if(flags.params.if_init_ref_count)(p4+j)->ref_count=1;
                     (p4+j)->flags.state=flags.state;
                     }
-                    if(!flags.params.expect_meet_atom_pages_free)try_fold_2mb_lambda(*p2);
-                    if(!flags.params.expect_meet_atom_pages_free)try_fold_1gb_lambda(*p1);
                 }
                 break; // 添加break语句
                 case 0:{

@@ -44,29 +44,69 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::mixed_bitmap_t::seco
 //返回0xFFFFFFFFFFFFFFFF表示没有找到
 //标记为1的才认为是空闲，返回的引索是基于参数start_idx的偏移
 //如果区间超过bitmap范围，则只在能搜索到的范围内搜索，不提前报错
-uint64_t FreePagesAllocator::free_pages_in_seg_control_block::mixed_bitmap_t::find_free_in_interval(uint64_t start_idx, uint64_t interval_length)
+uint64_t
+FreePagesAllocator::free_pages_in_seg_control_block::mixed_bitmap_t::find_free_in_interval(uint64_t start_idx,
+                                      uint64_t interval_length)
 {
+    constexpr uint64_t NOT_FOUND = 0xFFFFFFFFFFFFFFFF;
 
-    
-    uint64_t end_idx = (start_idx + interval_length)> this->entry_count * 64 ? this->entry_count : (start_idx + interval_length);
-    uint64_t u64_begin = align_up(start_idx, 64);
-    uint64_t u64_end = align_down(end_idx, 64);
-    for(uint64_t i = start_idx; i < u64_begin && i < end_idx; ++i) {
-        if(this->bit_get(i)){
-            return i-start_idx;
+    uint64_t bit_cap = entry_count * 64;
+    if (start_idx >= bit_cap || interval_length == 0)
+        return NOT_FOUND;
+
+    uint64_t end_idx = start_idx + interval_length;
+    if (end_idx > bit_cap)
+        end_idx = bit_cap;
+
+    uint64_t start_u64 = start_idx / 64;
+    uint64_t end_u64   = (end_idx - 1) / 64;
+
+    /* ---------- 情况 1：完全在同一个 u64 ---------- */
+    if (start_u64 == end_u64) {
+        uint64_t mask =
+            (~0ULL << (start_idx & 63)) &
+            (~0ULL >> (63 - ((end_idx - 1) & 63)));
+
+        uint64_t bits = bitmap[start_u64] & mask;
+        if (bits) {
+            return start_u64 * 64
+                 + __builtin_ctzll(bits)
+                 - start_idx;
+        }
+        return NOT_FOUND;
+    }
+
+    /* ---------- 情况 2.1：起始残段 ---------- */
+    {
+        uint64_t mask = ~0ULL << (start_idx & 63);
+        uint64_t bits = bitmap[start_u64] & mask;
+        if (bits) {
+            return start_u64 * 64
+                 + __builtin_ctzll(bits)
+                 - start_idx;
         }
     }
-    for(uint64_t i = u64_begin/64; i < u64_end/64; i++) {
-        uint64_t u64_idx = i;
-        if(this->bitmap[u64_idx]) {
-            uint64_t unit_base=i*64;
-            return unit_base+__builtin_ctz(this->bitmap[u64_idx])-start_idx;
+
+    /* ---------- 情况 2.2：完整 u64 ---------- */
+    for (uint64_t u = start_u64 + 1; u < end_u64; ++u) {
+        uint64_t bits = bitmap[u];
+        if (bits) {
+            return u * 64
+                 + __builtin_ctzll(bits)
+                 - start_idx;
         }
     }
-    for(uint64_t i = u64_end; i < end_idx; ++i) {
-        if(this->bit_get(i)){
-            return i-start_idx;
+
+    /* ---------- 情况 2.3：结尾残段 ---------- */
+    {
+        uint64_t mask = ~0ULL >> (63 - ((end_idx - 1) & 63));
+        uint64_t bits = bitmap[end_u64] & mask;
+        if (bits) {
+            return end_u64 * 64
+                 + __builtin_ctzll(bits)
+                 - start_idx;
         }
     }
-    return 0xFFFFFFFFFFFFFFFF;  // 表示没有找到
+
+    return NOT_FOUND;
 }

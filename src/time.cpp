@@ -10,7 +10,6 @@ bool time::hardware_time::is_hpet_initialized = false;
 bool time::hardware_time::is_bsp_registed;
 int time::hardware_time::try_tsc()
 {
-    
     uint32_t eax=0x1, ebx=0, ecx=0, edx=0;
     cpuid(&eax, &ebx, &ecx, &edx);
     is_bsp_registed=false;
