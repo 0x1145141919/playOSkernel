@@ -147,8 +147,8 @@ int main() {
     }
     
     // 打印初始状态
-    phymemspace_mgr::print_all_atom_table();
-    phymemspace_mgr::print_allseg();
-    
+    //phymemspace_mgr::print_all_atom_table();
+    //phymemspace_mgr::print_allseg();
+    FreePagesAllocator::first_BCB->print_basic_info();
     return 0;
 }

@@ -121,6 +121,7 @@ add_executable(kernel.elf
     src/Processor/runtime_processor_regist.asm
     src/core_hardwares/PortDriver.cpp
     src/scheduler/per_processor_scheduler.cpp
+    src/scheduler/yield.asm
     $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )

@@ -72,6 +72,10 @@ void x2apic::x2apic_driver::raw_cmci_lvt_config(lvt_general_entry entry)
 {
     wrmsr(msr::apic::IA32_X2APIC_LVT_CMCI, entry.raw);
 }
+void x2apic::x2apic_driver::write_eoi()
+{
+    wrmsr(msr::apic::IA32_X2APIC_EOI,0);
+}
 void x2apic::lapic_timer_one_shot::processor_regist()
 {
     timer_lvt_entry timer_config={

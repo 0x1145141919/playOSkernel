@@ -767,6 +767,7 @@ timer_bare_enter:
     push r11
     push r10
     push r9
+    push r8
     push rdi
     push rsi
     push rdx

@@ -45,7 +45,9 @@ int x86_smp_processors_container::regist_core(uint32_t processor_id)
         local_processor_interrupt_mgr_array[0]=new x64_local_processor(0);
         return OS_SUCCESS;
     }else{
-        local_processor_interrupt_mgr_array[processor_id]=new x64_local_processor(processor_id);
+        alloc_flags_t flags=default_flags;
+        flags.force_first_linekd_heap=true;
+        local_processor_interrupt_mgr_array[processor_id]=new(flags) x64_local_processor(processor_id);
         return OS_SUCCESS;
     }
     return OS_RESOURCE_CONFILICT;
@@ -151,9 +153,9 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
         .TSS_selector=tss_selector
     };
     runtime_processor_regist(&resources);
-    fs_slot[L_PROCESSOR_GS_IDX]=(uint64_t)this;
+    fs_slot[STACK_PROTECTOR_CANARY_IDX]=0xDEADBEEF;
     wrmsr(msr::syscall::IA32_FS_BASE,(uint64_t)&fs_slot);
-    gs_slot[STACK_PROTECTOR_CANARY_IDX]=0x2345676543;//应该用rdrand搞一个随机值
+    gs_slot[L_PROCESSOR_GS_IDX]=(uint64_t)this;//应该用rdrand搞一个随机值
     wrmsr(msr::syscall::IA32_GS_BASE,(uint64_t)&gs_slot);
     if(is_x2apic_supported()){
         uint64_t ia32_apic_base=rdmsr(msr::apic::IA32_APIC_BASE);

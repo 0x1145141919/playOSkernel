@@ -250,7 +250,7 @@ static_assert(sizeof(lvt_general_entry) == 4, "LVT General must be 4 bytes");
     static void raw_perf_lvt_config(lvt_general_entry entry);
     static void raw_thermal_lvt_config(lvt_general_entry entry);
     static void raw_cmci_lvt_config(lvt_general_entry entry);
-    
+    static void write_eoi();
     /**
      * x2apic相关接口，操作时必须确认本核心
      * 使用头文件里写死的偏移量

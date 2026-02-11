@@ -382,22 +382,22 @@ KURD_t phymemspace_mgr::Init()
     };
     status=low1mb_mgr->regist_seg(trampoile);
     if(!success_all_kurd(status)) return status;
-    PHYSEG seg=physeg_list->get_seg_by_addr((phyaddr_t)&KImgphybase,status);
-    if(!success_all_kurd(status)){
+    PHYSEG*seg=physeg_list->get_seg_by_addr((phyaddr_t)&KImgphybase,status);
+    if(!success_all_kurd(status) || !seg){
         return status;
     }
-    status=dram_pages_state_set(seg,(phyaddr_t)&KImgphybase,(phyaddr_t)(&text_end-&text_begin)/_4KB_PG_SIZE, dram_set);
+    status=dram_pages_state_set(*seg,(phyaddr_t)&KImgphybase,(phyaddr_t)(&text_end-&text_begin)/_4KB_PG_SIZE, dram_set);
     if(!success_all_kurd(status)) return status;
     
-    status=dram_pages_state_set(seg,(phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE, dram_set);
+    status=dram_pages_state_set(*seg,(phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE, dram_set);
     if(!success_all_kurd(status)) return status;
     
-    status=dram_pages_state_set(seg,(phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE, dram_set);
+    status=dram_pages_state_set(*seg,(phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE, dram_set);
     if(!success_all_kurd(status)) return status;
     
-    status=dram_pages_state_set(seg,(phyaddr_t)&_stack_lma,(&__klog_end-&_stack_bottom)/_4KB_PG_SIZE, dram_set);
+    status=dram_pages_state_set(*seg,(phyaddr_t)&_stack_lma,(&__klog_end-&_stack_bottom)/_4KB_PG_SIZE, dram_set);
     if(!success_all_kurd(status)) return status;
-    seg.statistics.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
+    seg->statistics.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
     statisitcs.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
 #endif
 #ifdef USER_MODE
@@ -443,8 +443,8 @@ KURD_t phymemspace_mgr::Init()
 
     // 遍历程序头表，模拟内核段注册
     pages_state_set_flags_t Kimage_regist_flags = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
-    PHYSEG&seg=physeg_list->get_seg_by_addr((phyaddr_t)phdr[4].p_paddr,status);
-    if(!success_all_kurd(status)){
+    PHYSEG*seg=physeg_list->get_seg_by_addr((phyaddr_t)phdr[4].p_paddr,status);
+    if(!success_all_kurd(status) || !seg){
         return status;
     }
     
@@ -457,13 +457,13 @@ KURD_t phymemspace_mgr::Init()
             page_state_t page_type = KERNEL_PERSIST; // 默认为内核持久段
             
             // 使用pages_state_set注册内存段
-            status = dram_pages_state_set(seg,phdr[i].p_paddr, page_count, dram_set);
+            status = dram_pages_state_set(*seg,phdr[i].p_paddr, page_count, dram_set);
             if(!success_all_kurd(status)) {
                 munmap(elf_mapped, sb.st_size);
                 close(fd);
                 return status;
             }
-            seg.statistics.kernel_persisit+=page_count;
+            seg->statistics.kernel_persisit+=page_count;
             statisitcs.kernel_persisit+=page_count;
         }
     }

@@ -244,8 +244,9 @@ KURD_t phymemspace_mgr::pages_mmio_regist(phyaddr_t phybase, uint64_t numof_4kbp
     KURD_t fail_result=default_failure();
     fail_result.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_MMIO_REGIST;
     module_global_lock.lock();
-    PHYSEG seg=get_physeg_by_addr(phybase);
-    if(seg.type!=MMIO_SEG){
+    KURD_t contain=KURD_t();
+    PHYSEG*seg=physeg_list->get_seg_by_addr(phybase,contain);
+    if(!seg || seg->type!=MMIO_SEG){
         fail_result.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::MMIO_REGIST_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MMIOSEG_NOT_EXIST;
         module_global_lock.unlock();
         return fail_result;
@@ -281,8 +282,10 @@ const phymemspace_mgr::PHYSEG phymemspace_mgr::NULL_SEG={
 phymemspace_mgr::PHYSEG phymemspace_mgr::get_physeg_by_addr(phyaddr_t addr)
 {
     KURD_t kurd;
-    PHYSEG&result=physeg_list->get_seg_by_addr(addr,kurd);
-    return result;
+    module_global_lock.lock();
+    PHYSEG*result=physeg_list->get_seg_by_addr(addr,kurd);
+    module_global_lock.unlock();
+    return result ? *result : NULL_SEG;
 }
 KURD_t phymemspace_mgr::blackhole_acclaim(phyaddr_t base, uint64_t numof_4kbpgs, seg_type_t type, blackhole_acclaim_flags_t flags)
 {
@@ -350,21 +353,21 @@ KURD_t phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
         return fail;
     }KURD_t status;
     module_global_lock.lock();
-    PHYSEG&seg=physeg_list->get_seg_by_base(base,status);
-    if(status.result!=result_code::SUCCESS)
+    PHYSEG*seg=physeg_list->get_seg_by_base(base,status);
+    if(status.result!=result_code::SUCCESS || !seg)
     {
         module_global_lock.unlock();
         return status;
     }
     
-    if(seg.type!=DRAM_SEG&&seg.type!=MMIO_SEG){
+    if(seg->type!=DRAM_SEG&&seg->type!=MMIO_SEG){
         module_global_lock.unlock();
         fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::BLACK_HOLE_DECCLAIM_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_FOUND;
         return fail;
     }
-    bool is_mmio=(seg.type==MMIO_SEG);
-    if(is_mmio)statisitcs.total_mmio-=seg.statistics.total_pages;
-    else statisitcs.total_allocatable-=seg.statistics.total_pages;  
+    bool is_mmio=(seg->type==MMIO_SEG);
+    if(is_mmio)statisitcs.total_mmio-=seg->statistics.total_pages;
+    else statisitcs.total_allocatable-=seg->statistics.total_pages;  
     pages_state_set_flags_t flag_set_page={
         .op=pages_state_set_flags_t::declaim_blackhole,//撤销成黑洞，但是非1GB原子页不能处理
         .params={
@@ -372,7 +375,7 @@ KURD_t phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
             .if_mmio=is_mmio
         }
     };
-    status=pages_state_set(base,seg.seg_size,RESERVED,flag_set_page);//这个函数里面负责撤销1GB原子页和其它级别的原子页
+    status=pages_state_set(base,seg->seg_size,RESERVED,flag_set_page);//这个函数里面负责撤销1GB原子页和其它级别的原子页
     if(status.result!=result_code::SUCCESS){
         module_global_lock.unlock();
         return status;
@@ -384,7 +387,7 @@ KURD_t phymemspace_mgr::blackhole_decclaim(phyaddr_t base)
     }
 
     // 检查并删除可能悬空的1GB页表项
-    phyaddr_t end = base + seg.seg_size;
+    phyaddr_t end = base + seg->seg_size;
     phyaddr_t align_down_base = align_down(base, _1GB_PG_SIZE);
     phyaddr_t align_up_end = align_up(end, _1GB_PG_SIZE);
     if((align_up_end-align_down_base)==_1GB_PG_SIZE){

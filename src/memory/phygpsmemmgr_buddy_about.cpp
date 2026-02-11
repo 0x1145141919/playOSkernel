@@ -12,8 +12,9 @@ KURD_t phymemspace_mgr::pages_dram_buddy_regist(phyaddr_t phybase, uint64_t numo
 {
     KURD_t fail=default_failure();
     module_global_lock.lock();
-    PHYSEG seg=get_physeg_by_addr(phybase);
-    if(seg.type!=DRAM_SEG){
+    KURD_t contain=KURD_t();
+    PHYSEG*seg=physeg_list->get_seg_by_addr(phybase,contain);
+    if(seg->type!=DRAM_SEG){
         module_global_lock.unlock();
         //fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_RESULTS_CODE::FAIL_REASONS::REASON_CODE_DRAMSEG_NOT_EXIST;
     }
@@ -25,7 +26,7 @@ KURD_t phymemspace_mgr::pages_dram_buddy_regist(phyaddr_t phybase, uint64_t numo
         }
     };
     KURD_t status= dram_pages_state_set(
-        seg,phybase,numof_4kbpgs,flags
+        *seg,phybase,numof_4kbpgs,flags
     );
     module_global_lock.unlock();
     return status;
@@ -34,8 +35,9 @@ KURD_t phymemspace_mgr::pages_dram_buddy_unregist(phyaddr_t phybase, uint64_t nu
 {
     KURD_t fail=default_failure();
     module_global_lock.lock();
-    PHYSEG seg=get_physeg_by_addr(phybase);
-    if(seg.type!=DRAM_SEG){
+    KURD_t contain=KURD_t();
+    PHYSEG*seg=physeg_list->get_seg_by_addr(phybase,contain);
+    if(!seg || seg->type!=DRAM_SEG){
         module_global_lock.unlock();
         //fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_RECYCLE_RESULTS_CODE::FAIL_REASONS::REASON_CODE_DRAMSEG_NOT_EXIST;
     }
@@ -48,7 +50,7 @@ KURD_t phymemspace_mgr::pages_dram_buddy_unregist(phyaddr_t phybase, uint64_t nu
         
     };
     KURD_t status= dram_pages_state_set(
-        seg,phybase,numof_4kbpgs,flags
+        *seg,phybase,numof_4kbpgs,flags
     );
     module_global_lock.unlock();
     return status;
@@ -67,8 +69,9 @@ KURD_t phymemspace_mgr::pages_dram_buddy_pages_set(phyaddr_t phybase, uint64_t n
         return fail;
     }
     module_global_lock.lock();
-    PHYSEG seg=get_physeg_by_addr(phybase);
-    if(seg.type!=DRAM_SEG){
+    KURD_t contain=KURD_t();
+    PHYSEG*seg=physeg_list->get_seg_by_addr(phybase,contain);
+    if(!seg || seg->type!=DRAM_SEG){
         module_global_lock.unlock();
         fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FAIL_REASONS::REASON_CODE_DRAMSEG_NOT_EXIST;
         return fail;
@@ -84,7 +87,7 @@ KURD_t phymemspace_mgr::pages_dram_buddy_pages_set(phyaddr_t phybase, uint64_t n
         
     };
     status= dram_pages_state_set(
-        seg,phybase,numof_4kbpgs,flags
+        *seg,phybase,numof_4kbpgs,flags
     );
     module_global_lock.unlock();
     if(status.event_code==0){
@@ -114,13 +117,14 @@ KURD_t phymemspace_mgr::pages_dram_buddy_pages_free(phyaddr_t phybase, uint64_t 
         return fail;
     }
     module_global_lock.lock();
-    PHYSEG seg=get_physeg_by_addr(phybase);
-    if(seg.type!=DRAM_SEG){
+    KURD_t contain=KURD_t();
+    PHYSEG*seg=physeg_list->get_seg_by_addr(phybase,contain);
+    if(!seg || seg->type!=DRAM_SEG){
         module_global_lock.unlock();
         fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FAIL_REASONS::REASON_CODE_DRAMSEG_NOT_EXIST;
         return fail;
     }
-    if(seg.base>phybase||(seg.base+seg.seg_size)<(phybase+numof_4kbpgs*_4KB_PG_SIZE)){
+    if(seg->base>phybase||(seg->base+seg->seg_size)<(phybase+numof_4kbpgs*_4KB_PG_SIZE)){
         module_global_lock.unlock();
         fail.reason=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::PAGES_SET_DRAM_RESULTS_CODE::FAIL_REASONS::REASON_CODE_FAIL_TO_SPLIT_SEG;
         return fail;

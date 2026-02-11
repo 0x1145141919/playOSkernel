@@ -304,8 +304,8 @@ class phymemspace_mgr{
     using Ktemplats::list_doubly<PHYSEG>::empty;
         KURD_t add_seg(PHYSEG& seg);
         KURD_t del_seg(phyaddr_t base);
-        PHYSEG& get_seg_by_base(phyaddr_t base,KURD_t& kurd);
-        PHYSEG& get_seg_by_addr(phyaddr_t addr,KURD_t& kurd);
+        PHYSEG* get_seg_by_base(phyaddr_t base,KURD_t& kurd);
+        PHYSEG* get_seg_by_addr(phyaddr_t addr,KURD_t& kurd);
         bool is_seg_have_cover(phyaddr_t base,uint64_t size);
     };
     static PHYSEG_LIST_ITEM*physeg_list;

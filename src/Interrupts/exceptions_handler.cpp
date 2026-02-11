@@ -159,6 +159,9 @@ void page_fault_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_mem_corruption=1,
             .is_escalated=0
         };
+        symbol_entry*lastest_rip =ksymmanager::get_entry_near_addr(frame->rip);
+        kio::bsp_kout<<"lastest_rip: 0x"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kio::kendl;
+        else_trace((void*)frame->rbp);
         panic_context::x64_context panic_context = Panic::convert_to_panic_context(frame, 0xE);
         Panic::panic(default_panic_behaviors_flags,"kernel_context cause #PF(Page Fault)", &panic_context,&inshort,KURD_t());
     }

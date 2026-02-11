@@ -24,6 +24,7 @@
 #include "util/kptrace.h"
 #include "firmware/ACPI_APIC.h"
 #include "Interrupt_system/AP_Init_error_observing_protocol.h"
+#include "Scheduler/per_processor_scheduler.h"
 #undef __stack_chk_fail
 extern  void __wrap___stack_chk_fail(void);
 // 定义C++运行时需要的符号
@@ -47,6 +48,45 @@ extern "C" void delay(unsigned int milliseconds) {
 }
 EFI_TIME global_time;
 uint32_t efi_map_ver;
+uint64_t p[5];
+
+extern "C" void second_kthread(void*unused) {
+    uint64_t id=(uint64_t)unused;
+    p[id]=0;
+    while(1){
+        p[id]++;
+    }
+}/*
+uint64_t p;
+extern "C" void second_kthread(void*unused) { 
+    p=0;
+    while(1){
+        p++;
+    }
+}*/
+
+extern "C" void first_kthread(void*unused) { 
+    per_processor_scheduler* scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
+    per_processor_scheduler::create_kthread_param param=per_processor_scheduler::default_kthread_param;
+    scheduler->create_kthread(second_kthread,0,&param);
+    //scheduler->create_kthread(second_kthread,(void*)1,&param);
+    //scheduler->create_kthread(second_kthread,(void*)2,&param);
+    while(1){
+        kio::bsp_kout<<kio::now<<"p[0] = "<<p[0]<<kio::kendl;
+        //kio::bsp_kout<<kio::now<<"p[1] = "<<p[1]<<kio::kendl;
+        //kio::bsp_kout<<kio::now<<"p[2] = "<<p[2]<<kio::kendl;
+        kthread_yield();
+    }
+}
+
+void create_first_kthread(){
+    per_processor_scheduler* scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
+    per_processor_scheduler::create_kthread_param param=per_processor_scheduler::default_kthread_param;
+    scheduler->create_kthread(first_kthread,0,&param);
+    time::time_interrupt_generator::set_clock_by_offset(20000);
+    scheduler->schedule_and_switch();
+}
+
 /*
 注意，这个函数刚进入时还使用的是bootloader的栈
 在特定几个函数初始化好后才能使用切换到映像的栈
@@ -127,26 +167,25 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     }
     Vec2i font_vec={.x=16, .y=32};
     bsp_init_kurd=textconsole_GoP::Init(&ter16x32_data[0][0][0],font_vec,0x00ffffffff,0);
-    
-    bsp_init_kurd=readonly_timer->second_stage_init();
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"HPET Init Failed"<<kio::kendl;
+        kio::bsp_kout<<"textconsole_GoP Init Failed"<<kio::kendl;
         asm volatile("hlt");
     }
     readonly_timer=new HPET_driver_only_read_time_stamp(
         (HPET::ACPItb::HPET_Table*)gAcpiVaddrSapceMgr.get_acpi_table((char*)"HPET")
     );
-    kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
-    GfxPrim::Flush();
-    asm volatile("hlt");
+    x86_smp_processors_container::template_idt_init();
+    x86_smp_processors_container::regist_core(0);
+    bsp_init_kurd=readonly_timer->second_stage_init();
+    if(error_kurd(bsp_init_kurd)){
+        kio::bsp_kout<<"HPET Init Failed"<<kio::kendl;
+        asm volatile("hlt");
+    }
     time::hardware_time::inform_initialized_hpet();
     time::hardware_time::processor_regist();
     
-    if(error_kurd(bsp_init_kurd)){
-        
-    }
-    x86_smp_processors_container::template_idt_init();
-    x86_smp_processors_container::regist_core(0);
+    
+    kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
     kio::bsp_kout<<kio::now<<"BSP online"<<kio::kendl;
     gAnalyzer=new APIC_table_analyzer((MADT_Table*)gAcpiVaddrSapceMgr.get_acpi_table("APIC"));
     bsp_init_kurd=kpoolmemmgr_t::multi_heap_enable();
@@ -158,12 +197,12 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kio::kendl;
-    }
-    
-    time::time_interrupt_generator::set_clock_by_offset(1000);
+    }    
     asm volatile("sti");
     //中断接管工作
-    
+    per_processor_scheduler* scheduler=new per_processor_scheduler;
+    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)scheduler);
+    create_first_kthread();
     
 
 }
@@ -176,6 +215,8 @@ extern "C" void ap_init(uint32_t processor_id)
     x86_smp_processors_container::regist_core(processor_id); 
     time::hardware_time::processor_regist();
     time::time_interrupt_generator::ap_init();
+    per_processor_scheduler* scheduler=new per_processor_scheduler;
+    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)scheduler);
     init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");
     asm volatile("sti");

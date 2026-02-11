@@ -42,7 +42,7 @@ bool time::hardware_time::get_if_hpet_initialized()
 }
 void time::hardware_time::processor_regist()
 {
-    if(!is_tsc_reliable|| !is_hpet_initialized)
+    if(!is_hpet_initialized)
     {
 
     }else{

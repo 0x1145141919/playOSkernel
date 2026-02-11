@@ -976,10 +976,10 @@ KURD_t AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
         return fail;
     }
     VM_DESC identity_desc={
-        .start=0,
+        .start=0x4000,
         .end=0x1000000000,
         .map_type=VM_DESC::map_type_t::MAP_PHYSICAL,
-        .phys_start=0,
+        .phys_start=0x4000,
         .access={
             .is_kernel=1,
             .is_writeable=1,

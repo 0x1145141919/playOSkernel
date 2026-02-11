@@ -334,9 +334,35 @@ dq pml4_table_pdpt_lowmem_rigon+0x3
 times 255 dq 0
 
 pml4_table_pdpt_lowmem_rigon:
-%assign i 0
-%rep 512
+; PDPT[0]: use 4KB pages for fine-grained low memory hole.
+dq pml4_table_pd_lowmem_0_1g+0x3
+; PDPT[1..511]: keep 1GB identity map.
+%assign i 1
+%rep 511
 dq i*PAGE_SIZE_IN_LV_2+3+PS_MASK
+%assign i  i+1
+%endrep
+%undef i
+
+; 0..1GB mapping split to support unmapped low 64KB.
+pml4_table_pd_lowmem_0_1g:
+; PD[0]: first 2MB mapped by PT.
+dq pml4_table_pt_lowmem_0_2m+0x3
+; PD[1..511]: 2MB identity map.
+%assign i 1
+%rep 511
+dq i*PAGE_SIZE_IN_LV_1+3+PS_MASK
+%assign i  i+1
+%endrep
+%undef i
+
+pml4_table_pt_lowmem_0_2m:
+; PT[0..15] (0..64KB): not present, used to catch null pointer accesses.
+times 4 dq 0
+; PT[16..511]: 4KB identity map from 64KB to 2MB.
+%assign i 4
+%rep 508
+dq i*PAGE_SIZE_IN_LV_0+3
 %assign i  i+1
 %endrep
 %undef i
@@ -386,3 +412,10 @@ SECTION .init_stack
 align 0x1000
 times 2048 dq 0
 init_stack_end:                         ; 为AP初始栈分配空间
+SECTION .text
+bits 64
+global secure_hlt
+secure_hlt:
+    sti 
+    hlt
+    jmp secure_hlt

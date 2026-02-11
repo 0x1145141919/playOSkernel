@@ -381,7 +381,7 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
             kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one finish stage timeout for processor "<<proc.apicid<<kio::kendl;
             goto stage_fail;
         }
-
+        processor_id++;
 
     }
     if(ipi_fai_count){
