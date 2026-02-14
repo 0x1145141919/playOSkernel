@@ -143,4 +143,3 @@ typedef struct {
 - 现有 `InitialGlobalBasicGraphicInfo` 可被替换或由 `GfxPrim::Init` 进行包装。
 - `KspaceMapMgr::Init()` 之后进行 framebuffer 映射与 backbuffer 分配。
 - console/text 层应渲染到 backbuffer，再调用 `GfxPrim::Flush()`。
-

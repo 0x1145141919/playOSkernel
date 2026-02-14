@@ -1,4 +1,5 @@
 #include "Interrupt_system/Interrupt.h"
+#include "core_hardwares/lapic.h"
 #include "util/kout.h"
 #include "util/OS_utils.h"
 #include "panic.h"
@@ -223,6 +224,7 @@ void Control_Protection_cpp_enter(x64_Interrupt_saved_context *frame)
 
 void ipi_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
 {
+    x2apic::x2apic_driver::write_eoi();   
     global_ipi_handler();
 }
 

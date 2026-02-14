@@ -1,4 +1,5 @@
 #include "util/OS_utils.h"
+#include "GS_Slots_index_definitions.h"
 #include "stdint.h"
 #ifdef USER_MODE
 #include <x86intrin.h>
@@ -10,6 +11,63 @@ typedef uint64_t size_t;
 
 
 uint64_t align_down(uint64_t x, uint64_t a){ return x & ~(a-1); }
+uint64_t format_num_to_buffer(char* out, uint64_t raw, num_format_t format, numer_system_select radix)
+{
+    if (!out) return 0;
+
+    uint8_t len_in_bytes = 8;
+    bool is_signed = false;
+    switch (format) {
+        case num_format_t::u8:  len_in_bytes = 1; is_signed = false; break;
+        case num_format_t::s8:  len_in_bytes = 1; is_signed = true;  break;
+        case num_format_t::u16: len_in_bytes = 2; is_signed = false; break;
+        case num_format_t::s16: len_in_bytes = 2; is_signed = true;  break;
+        case num_format_t::u32: len_in_bytes = 4; is_signed = false; break;
+        case num_format_t::s32: len_in_bytes = 4; is_signed = true;  break;
+        case num_format_t::u64: len_in_bytes = 8; is_signed = false; break;
+        case num_format_t::s64: len_in_bytes = 8; is_signed = true;  break;
+        default: break;
+    }
+
+    uint64_t mask = ~0ULL;
+    if (len_in_bytes < 8) {
+        mask = (1ULL << (len_in_bytes * 8)) - 1;
+    }
+    uint64_t value = raw & mask;
+    bool negative = false;
+    if (radix == numer_system_select::DEC && is_signed) {
+        const bool sign_bit_set = (value >> (len_in_bytes * 8 - 1)) & 1;
+        if (sign_bit_set) {
+            negative = true;
+            value = (~value + 1) & mask;
+        }
+    }
+
+    uint32_t base = 10;
+    if (radix == numer_system_select::BIN) base = 2;
+    else if (radix == numer_system_select::HEX) base = 16;
+
+    char rev[70];
+    uint32_t idx = 0;
+    if (value == 0) {
+        rev[idx++] = '0';
+    } else {
+        while (value > 0) {
+            const uint32_t digit = value % base;
+            value /= base;
+            rev[idx++] = (digit < 10) ? static_cast<char>('0' + digit)
+                                      : static_cast<char>('A' + (digit - 10));
+        }
+    }
+    if (negative) {
+        rev[idx++] = '-';
+    }
+    for (uint32_t i = 0; i < idx; ++i) {
+        out[i] = rev[idx - 1 - i];
+    }
+    return idx;
+}
+
 int strcmp_in_kernel(const char *str1, const char *str2, uint32_t max_strlen)
 {
     for (uint32_t i = 0; i < max_strlen; i++) {
@@ -421,4 +479,9 @@ void gs_u64_write(uint32_t index, uint64_t value)
           [val] "r" (value)
         : "memory"
     );
+}
+
+uint32_t fast_get_processor_id()
+{
+    return static_cast<uint32_t>(read_gs_u64(PROCESSOR_ID_GS_INDEX));
 }

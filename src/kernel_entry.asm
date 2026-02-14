@@ -415,7 +415,32 @@ init_stack_end:                         ; 为AP初始栈分配空间
 SECTION .text
 bits 64
 global secure_hlt
+global ap_final_work
+extern get_current_processor_rsp0
 secure_hlt:
     sti 
     hlt
     jmp secure_hlt
+
+; AP final parking work:
+; 1) read current x64_local_processor* from GS slot 0
+; 2) use struct offset to load tss.rsp0
+; 3) switch to rsp0 and halt with interrupts enabled
+ap_final_work:
+    cli
+
+    ; reserve 256 bytes first, then align stack for C ABI call
+    sub rsp, 256
+    mov rdx, rsp
+    and rdx, -16
+    mov rsp, rdx
+    mov rax, get_current_processor_rsp0
+    call rax
+    test rax, rax
+    jz .ap_final_halt_loop
+    mov rsp, rax
+
+.ap_final_halt_loop:
+    sti
+    hlt
+    jmp .ap_final_halt_loop

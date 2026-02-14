@@ -103,6 +103,67 @@ namespace Scheduler{
                 constexpr uint16_t null_task_ptr=2;
             }
         }
+        constexpr uint8_t task_set_ready=3;
+        namespace task_set_ready_results{
+            namespace fail_reasons{
+                constexpr uint16_t null_task_ptr=1;
+                constexpr uint16_t owner_scheduler_not_found=2;
+                constexpr uint16_t wrong_owner_scheduler=3;
+                constexpr uint16_t task_node_invalid=4;
+                constexpr uint16_t state_transition_invalid=5;
+                constexpr uint16_t queue_op_failed=6;
+                constexpr uint16_t running_index_mismatch=7;
+            }
+        }
+        constexpr uint8_t task_set_blocked=4;
+        namespace task_set_blocked_results{
+            namespace fail_reasons{
+                constexpr uint16_t null_task_ptr=1;
+                constexpr uint16_t owner_scheduler_not_found=2;
+                constexpr uint16_t wrong_owner_scheduler=3;
+                constexpr uint16_t task_node_invalid=4;
+                constexpr uint16_t state_transition_invalid=5;
+                constexpr uint16_t queue_op_failed=6;
+                constexpr uint16_t running_index_mismatch=7;
+                constexpr uint16_t invalid_block_reason=8;
+            }
+        }
+        constexpr uint8_t task_set_zombie=5;
+        namespace task_set_zombie_results{
+            namespace fail_reasons{
+                constexpr uint16_t null_task_ptr=1;
+                constexpr uint16_t owner_scheduler_not_found=2;
+                constexpr uint16_t wrong_owner_scheduler=3;
+                constexpr uint16_t task_node_invalid=4;
+                constexpr uint16_t state_transition_invalid=5;
+                constexpr uint16_t queue_op_failed=6;
+                constexpr uint16_t running_index_mismatch=7;
+            }
+        }
+        constexpr uint8_t task_set_dead=6;
+        namespace task_set_dead_results{
+            namespace fail_reasons{
+                constexpr uint16_t null_task_ptr=1;
+                constexpr uint16_t owner_scheduler_not_found=2;
+                constexpr uint16_t wrong_owner_scheduler=3;
+                constexpr uint16_t task_node_invalid=4;
+                constexpr uint16_t state_transition_invalid=5;
+                constexpr uint16_t queue_op_failed=6;
+            }
+        }
+        constexpr uint8_t get_now_running_task=7;
+        namespace get_now_running_task_results{
+            namespace fail_reasons{
+                constexpr uint16_t not_running=1;
+            }
+            namespace fatal_reasons{
+                constexpr uint16_t task_node_invalid=1;
+                constexpr uint16_t task_ptr_null=2;
+                constexpr uint16_t location_pool_mismatch=3;
+                constexpr uint16_t location_owner_mismatch=4;
+                constexpr uint16_t state_not_running=5;
+            }
+        }
     }
 };
 enum task_type_t:uint8_t{
@@ -115,11 +176,14 @@ enum task_state_t:uint8_t{
     ready,
     running,
     blocked,
-    dying,
+    zombie,
     dead
 };
 enum task_blocked_reason_t:uint8_t{
-    invalid
+    invalid,
+    sleeping,
+    mutex,
+    no_job
 };
 struct kthread_yield_raw_context{
     uint64_t rsp;//这里的rsp是最后push的rsp,然后后面就是结构体指针入rdi,切换栈
@@ -178,11 +242,23 @@ constexpr miusecond_time_stamp_t DEFALUT_TIMER_SPAN_MIUS=20000;
 constexpr uint64_t INIT_DEFAULT_RFLAGS=0x202;
 extern "C" void secure_hlt();
 class task{
-    public:
-    task_type_t task_type;
-    uint64_t task_id;
+    private:
     task_state_t task_state;
     task_blocked_reason_t blocked_reason;
+    task_type_t task_type;
+    uint64_t tid;
+    struct {
+        uint32_t processor_id;
+        uint32_t in_pool_index;
+    }location;
+    task(task_type_t task_type,uint64_t tid,void*context);//原子性初始化一个task
+    void atomic_load();//原子性状态切换到running并且加载对应的上下文（必然会切换到上下文制定的rsp与rip）
+    bool set_ready();//成功返回true,但是必须从init/blocked切换到才合法/成功，非法不会改状态字段
+    bool set_blocked();//成功返回true,但是必须从running切换到才合法/成功，非法不会改状态字段
+    bool set_dead();//成功返回true,只能由zombie切换到才合法/成功，非法不会改状态字段
+    bool set_zombie();//合法前驱仅限running,blocked,ready
+    public:
+    ~task();//析构函数,原本是想只有dead才能运行，但是受abi制约，行为是无条件折构，只不过非dead状态会warning记录到日志
     miusecond_time_stamp_t accumulated_time;
     miusecond_time_stamp_t lastest_run_stamp;
     miusecond_time_stamp_t lastest_span_length;
@@ -191,14 +267,10 @@ class task{
         userthread_context*userthread;
         vCPU_context*vCPU;
     }context;
-    task(task_type_t task_type,uint64_t task_id,void*context);//原子性初始化一个task
-    void atomic_load();//原子性状态切换到running并且加载对应的上下文（必然会切换到上下文制定的rsp与rip）
-    bool set_ready();//成功返回true,但是必须从init/blocked切换到才合法/成功，非法不会改状态字段
-    bool set_blocked();//成功返回true,但是必须从running切换到才合法/成功，非法不会改状态字段
-    bool set_dead();//成功返回true,只能由dying切换到才合法/成功，非法不会改状态字段
-    bool set_dying();//合法前驱仅限running,blocked,ready
-    ~task();//析构函数,原本是想只有dead才能运行，但是受abi制约，行为是无条件折构，只不过非dead状态会warning记录到日志
-
+    friend class per_processor_scheduler;
+    uint64_t get_tid();
+    task_type_t get_task_type();
+    uint32_t get_belonged_processor_id();
 };
 constexpr uint32_t INVALID_NODE_INDEX=~0;
 struct task_node{
@@ -210,11 +282,15 @@ extern task_node null_task_node;
 
 class per_processor_scheduler { 
     private:
-    trylock_cpp_t this_try_lock;
+    spintrylock_cpp_t lock;
     static constexpr uint32_t defual_scheduler_stack_size=1<<14;
     uint64_t*scheduler_private_stack;
-    public:
-    uint64_t* get_scheduler_private_stack_top() const { return scheduler_private_stack; }
+    KURD_t default_kurd();
+    KURD_t default_success();
+    KURD_t default_fail();
+    KURD_t default_fatal();
+    
+    
     
     class task_pool{
         private: 
@@ -275,9 +351,13 @@ class per_processor_scheduler {
     static constexpr uint8_t max_ready_queue_count=8;
     tasks_dll ready_queue[max_ready_queue_count];
     tasks_dll blocked_queue;
-    tasks_dll dying_queue;
+    tasks_dll zombie_queue;
     uint32_t now_running_task_index;
     uint32_t idle_kthread_index;
+    public:
+    //todo 对于get_now_running_task，create_kthread，task_set_blocked，task_set_ready，task_set_zombie，task_set_dead，schedule_and_switch这些公开接口对this指针下的内部数据结构结构操作时加自旋锁
+    uint64_t* get_scheduler_private_stack_top() const { return scheduler_private_stack; }
+    task* get_now_running_task(KURD_t&result_kurd);
     struct create_kthread_param{
         KURD_t result_kurd;
         uint16_t kthread_stack_size;
@@ -288,7 +368,11 @@ class per_processor_scheduler {
         .kthread_stack_size=4*4096,
         .is_soon_ready=1  
     };
-    uint32_t create_kthread(void (*func)(void* data),void*data,create_kthread_param*param);
+    task* create_kthread(void (*func)(void* data),void*data,create_kthread_param*param);
+    KURD_t task_set_blocked(task*task_ptr,task_blocked_reason_t reason);
+    KURD_t task_set_ready(task*task_ptr);
+    KURD_t task_set_zombie(task*task_ptr);
+    KURD_t task_set_dead(task*task_ptr);
     per_processor_scheduler();
     /**
      * 此函数是在ready_queue中选择一个task（调度），
@@ -300,10 +384,15 @@ class per_processor_scheduler {
      */
     void schedule_and_switch();
 };
+extern per_processor_scheduler** all_scheduler_ptr;
 extern "C"{
     void kthread_yield_true_enter(kthread_yield_raw_context* context);
     void kthread_yield();
-    void exit_kthread();
     uint64_t* get_scheduler_private_stack_top(per_processor_scheduler* scheduler);
-
+    void kthread_exit(uint64_t will);
+    void kthread_dead_exit();
+    void kthread_dead_exit_cppenter();
+    void kthread_true_exit(uint64_t will);
+    void kthread_self_blocked(task_blocked_reason_t reason);
+    void kthread_self_blocked_cppenter(kthread_yield_raw_context* context);
 }

@@ -48,43 +48,20 @@ extern "C" void delay(unsigned int milliseconds) {
 }
 EFI_TIME global_time;
 uint32_t efi_map_ver;
-uint64_t p[5];
-
-extern "C" void second_kthread(void*unused) {
-    uint64_t id=(uint64_t)unused;
-    p[id]=0;
-    while(1){
-        p[id]++;
-    }
-}/*
-uint64_t p;
-extern "C" void second_kthread(void*unused) { 
-    p=0;
-    while(1){
-        p++;
-    }
-}*/
-
-extern "C" void first_kthread(void*unused) { 
-    per_processor_scheduler* scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
-    per_processor_scheduler::create_kthread_param param=per_processor_scheduler::default_kthread_param;
-    scheduler->create_kthread(second_kthread,0,&param);
-    //scheduler->create_kthread(second_kthread,(void*)1,&param);
-    //scheduler->create_kthread(second_kthread,(void*)2,&param);
-    while(1){
-        kio::bsp_kout<<kio::now<<"p[0] = "<<p[0]<<kio::kendl;
-        //kio::bsp_kout<<kio::now<<"p[1] = "<<p[1]<<kio::kendl;
-        //kio::bsp_kout<<kio::now<<"p[2] = "<<p[2]<<kio::kendl;
-        kthread_yield();
-    }
+void ipi_test(){
+    uint32_t self_processor_id=fast_get_processor_id();
+    kio::bsp_kout<<"processor id "<< self_processor_id<<kio::kendl;
+    asm volatile("hlt");
 }
 
 void create_first_kthread(){
-    per_processor_scheduler* scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
-    per_processor_scheduler::create_kthread_param param=per_processor_scheduler::default_kthread_param;
-    scheduler->create_kthread(first_kthread,0,&param);
     time::time_interrupt_generator::set_clock_by_offset(20000);
+    textconsole_GoP::RuntimeInitServiceThread();
+    GlobalKernelStatus=SCHEDUL_READY;
+    x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
+    per_processor_scheduler*scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
     scheduler->schedule_and_switch();
+
 }
 
 /*
@@ -194,19 +171,18 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     }
     
     time::time_interrupt_generator::bsp_init();
+    all_scheduler_ptr=new per_processor_scheduler*[gAnalyzer->processor_x64_list->size()];
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
         kio::bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kio::kendl;
     }    
-    asm volatile("sti");
+    asm volatile("sti");   
     //中断接管工作
-    per_processor_scheduler* scheduler=new per_processor_scheduler;
-    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)scheduler);
+    all_scheduler_ptr[0]=new per_processor_scheduler;
+    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)all_scheduler_ptr[0]);
     create_first_kthread();
-    
-
 }
-
+extern "C" void ap_final_work();
 extern "C" void ap_init(uint32_t processor_id)
 {
     longmode_enter_checkpoint.success_word=~processor_id;
@@ -215,10 +191,10 @@ extern "C" void ap_init(uint32_t processor_id)
     x86_smp_processors_container::regist_core(processor_id); 
     time::hardware_time::processor_regist();
     time::time_interrupt_generator::ap_init();
-    per_processor_scheduler* scheduler=new per_processor_scheduler;
-    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)scheduler);
+    all_scheduler_ptr[processor_id]=new per_processor_scheduler;
+    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)all_scheduler_ptr[processor_id]);
+    x2apic::x2apic_driver::write_eoi();
     init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");
-    asm volatile("sti");
-    asm volatile("hlt");
+    ap_final_work();
 }

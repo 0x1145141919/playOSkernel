@@ -11,7 +11,7 @@ static void secure_hlt_wrapper(void* unused) {
     (void)unused;  // 忽略未使用的参数
     secure_hlt();  // 返回值不会被使用，但满足函数签名要求
 }
-
+per_processor_scheduler** all_scheduler_ptr;
 namespace {
 constexpr uint64_t kthread_yield_saved_stack_delta = 16 * sizeof(uint64_t);
 constexpr uint32_t invalid_task_id = ~0u;
@@ -128,6 +128,30 @@ task_node null_task_node={
     .next_node=0,
     .task_ptr=nullptr
 };
+
+KURD_t per_processor_scheduler::default_kurd()
+{
+    return KURD_t(0,0,module_code::SCHEDULER,Scheduler::self_scheduler,0,0,err_domain::CORE_MODULE);
+}
+
+KURD_t per_processor_scheduler::default_success()
+{
+    KURD_t kurd = default_kurd();
+    kurd.result = result_code::SUCCESS;
+    kurd.level = level_code::INFO;
+    return kurd;
+}
+
+KURD_t per_processor_scheduler::default_fail()
+{
+    return set_result_fail_and_error_level(default_kurd());
+}
+
+KURD_t per_processor_scheduler::default_fatal()
+{
+    return set_fatal_result_level(default_kurd());
+}
+
 KURD_t per_processor_scheduler::task_pool::default_kurd()
 {
     return KURD_t(0,0,module_code::SCHEDULER,Scheduler::scheduler_task_pool,0,0,err_domain::CORE_MODULE);
@@ -159,7 +183,7 @@ per_processor_scheduler::per_processor_scheduler(){
         new (&ready_queue[i]) tasks_dll(&processor_self_task_pool);
     }
     new (&blocked_queue) tasks_dll(&processor_self_task_pool);
-    new (&dying_queue) tasks_dll(&processor_self_task_pool);
+    new (&zombie_queue) tasks_dll(&processor_self_task_pool);
     kurd=processor_self_task_pool.second_state_init();
     if(!success_all_kurd(kurd)){
         panic_with_kurd(kurd);
@@ -169,12 +193,13 @@ per_processor_scheduler::per_processor_scheduler(){
         .kthread_stack_size=4096,
         .is_soon_ready=false
     };
-    idle_kthread_index=create_kthread(
+    task* idle_task = create_kthread(
         secure_hlt_wrapper,nullptr,&param
     );
-    if(idle_kthread_index==~0||!success_all_kurd(param.result_kurd)){
+    if(!idle_task || !success_all_kurd(param.result_kurd)){
         panic_with_kurd(param.result_kurd);
     }
+    idle_kthread_index=static_cast<uint32_t>(idle_task->location.in_pool_index);
 }
 
 extern "C" uint64_t* get_scheduler_private_stack_top(per_processor_scheduler* scheduler)
@@ -182,20 +207,40 @@ extern "C" uint64_t* get_scheduler_private_stack_top(per_processor_scheduler* sc
     return scheduler ? scheduler->get_scheduler_private_stack_top() : nullptr;
 }
 
-task::task(task_type_t task_type, uint64_t task_id, void *context)
+task::task(task_type_t task_type, uint64_t tid, void *context)
 {
     this->task_type=task_type;
-    this->task_id=task_id;
+    this->tid=tid;
+    this->location.processor_id=0;
+    this->location.in_pool_index=INVALID_NODE_INDEX;
     this->task_state=init;
     this->blocked_reason=invalid;
     this->context.kthread=(kthread_context*)context;
 }
 
+uint64_t task::get_tid()
+{
+    return tid;
+}
+
+task_type_t task::get_task_type()
+{
+    return task_type;
+}
+
+uint32_t task::get_belonged_processor_id()
+{
+    return location.processor_id;
+}
+
 extern "C" void atoimc_kthread_load(x64_basic_context* context);
 bool task::set_ready()
 {
-    if(task_state==task_state_t::init || task_state==task_state_t::blocked){
+    if(task_state==task_state_t::init ||
+       task_state==task_state_t::blocked ||
+       task_state==task_state_t::running){
         task_state=task_state_t::ready;
+        blocked_reason=task_blocked_reason_t::invalid;
         return true;
     }
     return false;
@@ -210,16 +255,16 @@ bool task::set_blocked()
 }
 bool task::set_dead()
 {
-    if(task_state==task_state_t::dying){
+    if(task_state==task_state_t::zombie){
         task_state=task_state_t::dead;
         return true;
     }
     return false;
 }
-bool task::set_dying()
+bool task::set_zombie()
 {
     if(task_state==task_state_t::running || task_state==task_state_t::blocked || task_state==task_state_t::ready){
-        task_state=task_state_t::dying;
+        task_state=task_state_t::zombie;
         return true;
     }
     return false;
@@ -685,174 +730,368 @@ bool per_processor_scheduler::tasks_dll::iterator::operator!=(const iterator& ot
 bool per_processor_scheduler::tasks_dll::iterator::operator==(const iterator& other) {
     return index == other.index && pool_ptr == other.pool_ptr;
 }
-void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
-{
-    asm volatile("cli");
-    x64_basic_context basic_ctx{};
-    KURD_t kurd=KURD_t();
-    convert_interrupt_no_err_to_basic(frame, &basic_ctx);
-    per_processor_scheduler*scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
-    if(!scheduler){
-        panic_with_kurd(frame, make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::timer_cpp_enter,
-            Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::null_scheduler
-        ));
-    }
-    uint32_t task_id=scheduler->now_running_task_index;
-    if(task_id==invalid_task_id){
-        panic_with_kurd(frame, make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::timer_cpp_enter,
-            Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::invalid_running_task_id
-        ));
-    }
-    task_node* interrupted_task_node=scheduler->processor_self_task_pool.get_task_node(task_id);
-    task* interrupted_task=interrupted_task_node ? interrupted_task_node->task_ptr : nullptr;
-    if(!interrupted_task){
-        panic_with_kurd(frame, make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::timer_cpp_enter,
-            Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::null_task_ptr
-        ));
-    }
-    interrupted_task->lastest_span_length=time::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
-    interrupted_task->accumulated_time+=interrupted_task->lastest_span_length;
-    switch(interrupted_task->task_type){
-        case task_type_t::kthreadm:
-        if((frame->cs&3)!=0){
-            panic_with_kurd(frame, make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::timer_cpp_enter,
-                Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::invalid_cs
-            ));
-        }
-        if(!interrupted_task->context.kthread){
-            panic_with_kurd(frame, make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::timer_cpp_enter,
-                Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::null_kthread_context
-            ));
-        }
-        interrupted_task->context.kthread->regs=basic_ctx;
-        if(interrupted_task->context.kthread->stacksize==0){
-            panic_with_kurd(frame, make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::timer_cpp_enter,
-                Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::invalid_stack_size
-            ));
-        }
-        {
-            vaddr_t stack_top = interrupted_task->context.kthread->stack_top;
-            vaddr_t stack_bottom = stack_top + interrupted_task->context.kthread->stacksize;
-            if(basic_ctx.rsp < stack_top || basic_ctx.rsp >= stack_bottom){
-                panic_with_kurd(frame, make_self_scheduler_fatal(
-                    Scheduler::self_scheduler_events::timer_cpp_enter,
-                    Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::rsp_out_of_range
-                ));
-            }
-        }
-            break;
-        case task_type_t::userthread:
-        if((frame->cs&3)!=3){
-            panic_with_kurd(frame, make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::timer_cpp_enter,
-                Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::invalid_cs
-            ));
-        }
-        if(!interrupted_task->context.userthread){
-            panic_with_kurd(frame, make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::timer_cpp_enter,
-                Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::null_userthread_context
-            ));
-        }
 
+task* per_processor_scheduler::get_now_running_task(KURD_t& result_kurd)
+{
+    lock.lock();
+    auto return_with_unlock = [&](task* value) -> task* {
+        lock.unlock();
+        return value;
+    };
+    KURD_t success = default_success();
+    KURD_t fail = default_fail();
+    success.event_code = Scheduler::self_scheduler_events::get_now_running_task;
+    fail.event_code = Scheduler::self_scheduler_events::get_now_running_task;
+
+    if (now_running_task_index == INVALID_NODE_INDEX) {
+        fail.reason = Scheduler::self_scheduler_events::get_now_running_task_results::fail_reasons::not_running;
+        result_kurd = fail;
+        return return_with_unlock(nullptr);
+    }
+
+    auto panic_inconsistency = [&](uint16_t fatal_reason) -> task* {
+        KURD_t fatal = default_fatal();
+        fatal.event_code = Scheduler::self_scheduler_events::get_now_running_task;
+        fatal.reason = fatal_reason;
+        panic_with_kurd(fatal);
+        return return_with_unlock(nullptr);
+    };
+
+    task_node* node = processor_self_task_pool.get_task_node(now_running_task_index);
+    if (!node) {
+        return panic_inconsistency(
+            Scheduler::self_scheduler_events::get_now_running_task_results::fatal_reasons::task_node_invalid
+        );
+    }
+    task* task_ptr = node->task_ptr;
+    if (!task_ptr) {
+        return panic_inconsistency(
+            Scheduler::self_scheduler_events::get_now_running_task_results::fatal_reasons::task_ptr_null
+        );
+    }
+    if (task_ptr->location.in_pool_index != now_running_task_index) {
+        return panic_inconsistency(
+            Scheduler::self_scheduler_events::get_now_running_task_results::fatal_reasons::location_pool_mismatch
+        );
+    }
+    if (all_scheduler_ptr == nullptr ||
+        all_scheduler_ptr[task_ptr->location.processor_id] != this) {
+        return panic_inconsistency(
+            Scheduler::self_scheduler_events::get_now_running_task_results::fatal_reasons::location_owner_mismatch
+        );
+    }
+    if (task_ptr->task_state != task_state_t::running) {
+        return panic_inconsistency(
+            Scheduler::self_scheduler_events::get_now_running_task_results::fatal_reasons::state_not_running
+        );
+    }
+
+    result_kurd = success;
+    return return_with_unlock(task_ptr);
+}
+
+KURD_t per_processor_scheduler::task_set_ready(task* task_ptr)
+{
+    lock.lock();
+    auto return_with_unlock = [&](KURD_t value) -> KURD_t {
+        lock.unlock();
+        return value;
+    };
+    KURD_t success = default_success();
+    KURD_t fail = default_fail();
+    success.event_code = Scheduler::self_scheduler_events::task_set_ready;
+    fail.event_code = Scheduler::self_scheduler_events::task_set_ready;
+
+    if (!task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::null_task_ptr;
+        return return_with_unlock(fail);
+    }
+
+    const uint32_t owner_processor_id = task_ptr->location.processor_id;
+    if (all_scheduler_ptr == nullptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
+    }
+
+    per_processor_scheduler* owner_scheduler = all_scheduler_ptr[owner_processor_id];
+    if (!owner_scheduler) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
+    }
+    if (owner_scheduler != this) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::wrong_owner_scheduler;
+        return return_with_unlock(fail);
+    }
+
+    const uint32_t pool_index = task_ptr->location.in_pool_index;
+    task_node* node = processor_self_task_pool.get_task_node(pool_index);
+    if (!node || node->task_ptr != task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::task_node_invalid;
+        return return_with_unlock(fail);
+    }
+
+    KURD_t queue_kurd = KURD_t();
+    switch (task_ptr->task_state) {
+        case task_state_t::init:
+            if (!task_ptr->set_ready()) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::state_transition_invalid;
+                return return_with_unlock(fail);
+            }
+            break;
+        case task_state_t::blocked:
+            queue_kurd = blocked_queue.remove(pool_index);
+            if (!success_all_kurd(queue_kurd)) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::queue_op_failed;
+                return return_with_unlock(fail);
+            }
+            if (!task_ptr->set_ready()) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::state_transition_invalid;
+                return return_with_unlock(fail);
+            }
+            break;
+        case task_state_t::running:
+            if (now_running_task_index != pool_index) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::running_index_mismatch;
+                return return_with_unlock(fail);
+            }
+            if (!task_ptr->set_ready()) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::state_transition_invalid;
+                return return_with_unlock(fail);
+            }
+            now_running_task_index = INVALID_NODE_INDEX;
             break;
         default:
-            panic_with_kurd(frame, make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::timer_cpp_enter,
-                Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::invalid_task_type
-            ));
-            break;
+            fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::state_transition_invalid;
+            return return_with_unlock(fail);
     }
-    interrupted_task->set_ready();
-    scheduler->now_running_task_index=~0;
-    kurd=scheduler->ready_queue[0].push_tail(task_id);
-    if(!success_all_kurd(kurd)){
-        panic_with_kurd(frame, kurd);
+
+    queue_kurd = ready_queue[0].push_tail(pool_index);
+    if (!success_all_kurd(queue_kurd)) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_ready_results::fail_reasons::queue_op_failed;
+        return return_with_unlock(fail);
     }
-    x2apic::x2apic_driver::write_eoi();
-    asm volatile("sti");
-    time::time_interrupt_generator::set_clock_by_offset(DEFALUT_TIMER_SPAN_MIUS);
-    scheduler->schedule_and_switch();
+    return return_with_unlock(success);
 }
-void kthread_yield_true_enter(kthread_yield_raw_context *context)
+
+KURD_t per_processor_scheduler::task_set_blocked(task* task_ptr, task_blocked_reason_t reason)
 {
-    x64_basic_context basic_ctx{};
-    convert_kthread_yield_raw_to_basic(context, &basic_ctx);
-    per_processor_scheduler*scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
-    if(!scheduler){
-        panic_with_kurd(make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::kthread_yield_enter,
-            Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::null_scheduler
-        ));
+    lock.lock();
+    auto return_with_unlock = [&](KURD_t value) -> KURD_t {
+        lock.unlock();
+        return value;
+    };
+    KURD_t success = default_success();
+    KURD_t fail = default_fail();
+    success.event_code = Scheduler::self_scheduler_events::task_set_blocked;
+    fail.event_code = Scheduler::self_scheduler_events::task_set_blocked;
+
+    if (!task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::null_task_ptr;
+        return return_with_unlock(fail);
     }
-    uint32_t task_id=scheduler->now_running_task_index;
-    if(task_id==invalid_task_id){
-        panic_with_kurd(make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::kthread_yield_enter,
-            Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::invalid_running_task_id
-        ));
+    if (reason == task_blocked_reason_t::invalid) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::invalid_block_reason;
+        return return_with_unlock(fail);
     }
-    task_node* interrupted_task_node=scheduler->processor_self_task_pool.get_task_node(task_id);
-    task* interrupted_task=interrupted_task_node ? interrupted_task_node->task_ptr : nullptr;
-    if(!interrupted_task){
-        panic_with_kurd(make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::kthread_yield_enter,
-            Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::null_task_ptr
-        ));
+
+    const uint32_t owner_processor_id = task_ptr->location.processor_id;
+    if (all_scheduler_ptr == nullptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
     }
-    interrupted_task->lastest_span_length=time::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
-    interrupted_task->accumulated_time+=interrupted_task->lastest_span_length;
-    if(interrupted_task->task_type!=task_type_t::kthreadm){
-        panic_with_kurd(make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::kthread_yield_enter,
-            Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::invalid_task_type
-        ));
+    per_processor_scheduler* owner_scheduler = all_scheduler_ptr[owner_processor_id];
+    if (!owner_scheduler) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
     }
-    if(!interrupted_task->context.kthread){
-        panic_with_kurd(make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::kthread_yield_enter,
-            Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::null_kthread_context
-        ));
+    if (owner_scheduler != this) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::wrong_owner_scheduler;
+        return return_with_unlock(fail);
     }
-    interrupted_task->context.kthread->regs=basic_ctx;
-    if(interrupted_task->context.kthread->stacksize==0){
-        panic_with_kurd(make_self_scheduler_fatal(
-            Scheduler::self_scheduler_events::kthread_yield_enter,
-            Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::invalid_stack_size
-        ));
+
+    const uint32_t pool_index = task_ptr->location.in_pool_index;
+    task_node* node = processor_self_task_pool.get_task_node(pool_index);
+    if (!node || node->task_ptr != task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::task_node_invalid;
+        return return_with_unlock(fail);
     }
-    {
-        vaddr_t stack_top = interrupted_task->context.kthread->stack_top;
-        vaddr_t stack_bottom = stack_top + interrupted_task->context.kthread->stacksize;
-        if(basic_ctx.rsp < stack_top || basic_ctx.rsp >= stack_bottom){
-            panic_with_kurd(make_self_scheduler_fatal(
-                Scheduler::self_scheduler_events::kthread_yield_enter,
-                Scheduler::self_scheduler_events::kthread_yield_enter_results::fatal_reasons::rsp_out_of_range
-            ));
-        }
+
+    if (task_ptr->task_state != task_state_t::running) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::state_transition_invalid;
+        return return_with_unlock(fail);
     }
-    interrupted_task->set_ready();
-    scheduler->now_running_task_index=~0;
-    KURD_t kurd=scheduler->ready_queue[0].push_tail(task_id);
-    if(!success_all_kurd(kurd)){
-        panic_with_kurd(kurd);
+    if (now_running_task_index != pool_index) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::running_index_mismatch;
+        return return_with_unlock(fail);
     }
-    scheduler->schedule_and_switch();
+
+    now_running_task_index = INVALID_NODE_INDEX;
+    if (!task_ptr->set_blocked()) {
+        now_running_task_index = pool_index;
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::state_transition_invalid;
+        return return_with_unlock(fail);
+    }
+    task_ptr->blocked_reason = reason;
+
+    KURD_t queue_kurd = blocked_queue.push_tail(pool_index);
+    if (!success_all_kurd(queue_kurd)) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_blocked_results::fail_reasons::queue_op_failed;
+        return return_with_unlock(fail);
+    }
+    return return_with_unlock(success);
 }
+
+KURD_t per_processor_scheduler::task_set_zombie(task* task_ptr)
+{
+    lock.lock();
+    auto return_with_unlock = [&](KURD_t value) -> KURD_t {
+        lock.unlock();
+        return value;
+    };
+    KURD_t success = default_success();
+    KURD_t fail = default_fail();
+    success.event_code = Scheduler::self_scheduler_events::task_set_zombie;
+    fail.event_code = Scheduler::self_scheduler_events::task_set_zombie;
+
+    if (!task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::null_task_ptr;
+        return return_with_unlock(fail);
+    }
+
+    const uint32_t owner_processor_id = task_ptr->location.processor_id;
+    if (all_scheduler_ptr == nullptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
+    }
+    per_processor_scheduler* owner_scheduler = all_scheduler_ptr[owner_processor_id];
+    if (!owner_scheduler) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
+    }
+    if (owner_scheduler != this) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::wrong_owner_scheduler;
+        return return_with_unlock(fail);
+    }
+
+    const uint32_t pool_index = task_ptr->location.in_pool_index;
+    task_node* node = processor_self_task_pool.get_task_node(pool_index);
+    if (!node || node->task_ptr != task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::task_node_invalid;
+        return return_with_unlock(fail);
+    }
+
+    KURD_t queue_kurd = KURD_t();
+    switch (task_ptr->task_state) {
+        case task_state_t::running:
+            if (now_running_task_index != pool_index) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::running_index_mismatch;
+                return return_with_unlock(fail);
+            }
+            now_running_task_index = INVALID_NODE_INDEX;
+            break;
+        case task_state_t::blocked:
+            queue_kurd = blocked_queue.remove(pool_index);
+            if (!success_all_kurd(queue_kurd)) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::queue_op_failed;
+                return return_with_unlock(fail);
+            }
+            break;
+        case task_state_t::ready:
+            queue_kurd = ready_queue[0].remove(pool_index);
+            if (!success_all_kurd(queue_kurd)) {
+                fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::queue_op_failed;
+                return return_with_unlock(fail);
+            }
+            break;
+        default:
+            fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::state_transition_invalid;
+            return return_with_unlock(fail);
+    }
+
+    if (!task_ptr->set_zombie()) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::state_transition_invalid;
+        return return_with_unlock(fail);
+    }
+    task_ptr->blocked_reason = task_blocked_reason_t::invalid;
+
+    queue_kurd = zombie_queue.push_tail(pool_index);
+    if (!success_all_kurd(queue_kurd)) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_zombie_results::fail_reasons::queue_op_failed;
+        return return_with_unlock(fail);
+    }
+    return return_with_unlock(success);
+}
+
+KURD_t per_processor_scheduler::task_set_dead(task* task_ptr)//会释放对应槽位
+{
+    lock.lock();
+    auto return_with_unlock = [&](KURD_t value) -> KURD_t {
+        lock.unlock();
+        return value;
+    };
+    KURD_t success = default_success();
+    KURD_t fail = default_fail();
+    success.event_code = Scheduler::self_scheduler_events::task_set_dead;
+    fail.event_code = Scheduler::self_scheduler_events::task_set_dead;
+
+    if (!task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::null_task_ptr;
+        return return_with_unlock(fail);
+    }
+
+    const uint32_t owner_processor_id = task_ptr->location.processor_id;
+    if (all_scheduler_ptr == nullptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
+    }
+    per_processor_scheduler* owner_scheduler = all_scheduler_ptr[owner_processor_id];
+    if (!owner_scheduler) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::owner_scheduler_not_found;
+        return return_with_unlock(fail);
+    }
+    if (owner_scheduler != this) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::wrong_owner_scheduler;
+        return return_with_unlock(fail);
+    }
+
+    const uint32_t pool_index = task_ptr->location.in_pool_index;
+    task_node* node = processor_self_task_pool.get_task_node(pool_index);
+    if (!node || node->task_ptr != task_ptr) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::task_node_invalid;
+        return return_with_unlock(fail);
+    }
+
+    if (task_ptr->task_state != task_state_t::zombie) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::state_transition_invalid;
+        return return_with_unlock(fail);
+    }
+
+    KURD_t queue_kurd = zombie_queue.remove(pool_index);
+    if (!success_all_kurd(queue_kurd)) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::queue_op_failed;
+        return return_with_unlock(fail);
+    }
+
+    if (!task_ptr->set_dead()) {
+        fail.reason = Scheduler::self_scheduler_events::task_set_dead_results::fail_reasons::state_transition_invalid;
+        return return_with_unlock(fail);
+    }
+    task_ptr->blocked_reason = task_blocked_reason_t::invalid;
+    queue_kurd=this->processor_self_task_pool.free(pool_index);
+    if(error_kurd(queue_kurd))return return_with_unlock(queue_kurd);
+    return return_with_unlock(success);
+}
+
 void per_processor_scheduler::schedule_and_switch()
 {//先暂时只考虑单队列,但是此函数不返回
+    lock.lock();
 
     KURD_t kurd=ready_queue[0].pop_head(now_running_task_index);
     if(!success_all_kurd(kurd)){
         if(kurd.event_code==Scheduler::scheduler_task_dll_events::pop_head
         &&kurd.reason==Scheduler::scheduler_task_dll_events::pop_head_results::fail_reasons::empty){
             if(idle_kthread_index==invalid_task_id){
+                lock.unlock();
                 panic_with_kurd(make_self_scheduler_fatal(
                     Scheduler::self_scheduler_events::schedule_and_switch,
                     Scheduler::self_scheduler_events::schedule_and_switch_results::fatal_reasons::empty_no_idle
@@ -860,49 +1099,18 @@ void per_processor_scheduler::schedule_and_switch()
             }
             now_running_task_index=idle_kthread_index;
         }else{
+            lock.unlock();
             panic_with_kurd(kurd);
         }
     }
     task_node* node=processor_self_task_pool.get_task_node(now_running_task_index);
     if(!node || !node->task_ptr){
+        lock.unlock();
         panic_with_kurd(make_self_scheduler_fatal(
             Scheduler::self_scheduler_events::schedule_and_switch,
             Scheduler::self_scheduler_events::schedule_and_switch_results::fatal_reasons::null_task_ptr
         ));
     }
+    lock.unlock();
     node->task_ptr->atomic_load();
-}
-uint32_t per_processor_scheduler::create_kthread(void (*func)(void *data), void *data, create_kthread_param *param)
-{
-    uint32_t result_task_idx=processor_self_task_pool.alloc(param->result_kurd);
-    if(!success_all_kurd(param->result_kurd)){
-        return ~0;
-    }
-    task_node* node=processor_self_task_pool.get_task_node(result_task_idx);
-    if(!node){
-        param->result_kurd=set_fatal_result_level(param->result_kurd);
-        return ~0;
-    }
-    kthread_context*context=new kthread_context();
-    ksetmem_8(context,0,sizeof(kthread_context));
-    context->regs.rip=(uint64_t)func;
-    context->regs.rdi=(uint64_t)data;
-    node->task_ptr=new task(task_type_t::kthreadm,result_task_idx,context);
-
-    context->stacksize=param->kthread_stack_size;
-    vaddr_t stack_base=(vaddr_t)__wrapped_pgs_valloc(&param->result_kurd,param->kthread_stack_size/4096,KERNEL,12);
-    context->stack_top=stack_base;
-    if(!success_all_kurd(param->result_kurd)){
-        delete context;
-        delete node->task_ptr;
-        processor_self_task_pool.free(result_task_idx);
-        return ~0;
-    }
-    if(param->is_soon_ready){
-        node->task_ptr->set_ready();
-        ready_queue[0].push_tail(result_task_idx);
-    }
-    context->regs.rsp=context->stack_top+context->stacksize;
-    context->regs.rflags=INIT_DEFAULT_RFLAGS;
-    return result_task_idx;
 }

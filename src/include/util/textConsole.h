@@ -1,6 +1,9 @@
 #pragma once
 #include "stdint.h"
 #include "core_hardwares/primitive_gop.h"
+#include "util/kout.h"
+#include "util/lock.h"
+class task;
 struct TextViewport {
     Vec2i pos;      // 文字区域左上角（像素）
     Vec2i size;     // 文字区域大小（像素）
@@ -25,6 +28,43 @@ namespace infrastructure_location_code{ //bitmap和Ktemplate系列不能也不�
         }
     }
 }
+enum class tc_msg_type : uint8_t { string,single_character,num, flush };
+enum tc_msg_flags : uint16_t {
+    tc_msg_flag_none = 0,
+    tc_msg_flag_urgent = 1u << 0,
+};
+struct tc_msg_frame_head{
+    tc_msg_type type;
+    uint8_t reserved;
+    uint16_t flags; 
+    uint32_t producer_cpu;
+    uint64_t seq;
+};
+constexpr uint32_t TC_RING_CAP = 1024;
+constexpr uint32_t TC_SERVICE_POP_BATCH = 64;
+struct tc_slot {
+    tc_msg_frame_head head;
+    union {
+        struct { const char* string; uint64_t len; } s;
+        struct { char ch; } c;
+        struct { uint64_t num_raw; num_format_t format; numer_system_select radix; } n;
+    } payload;
+};
+struct tc_ring {
+    spintrylock_cpp_t lock;
+    tc_slot slots[TC_RING_CAP];
+    uint32_t head;
+    uint32_t tail;
+    uint64_t seq_gen;
+    uint64_t drop_count;
+    uint64_t push_count;
+    uint64_t pop_count;
+    bool service_thread_sleeping;
+};
+struct tc_service_local_batch {
+    uint32_t count;
+    tc_slot items[TC_SERVICE_POP_BATCH];
+};
 struct TextCursor {
     int m;          // 列
     int n;          // 行
@@ -43,11 +83,15 @@ public:
     static void PutChar(char ch);
     static void PutString(const char* s);
     static void Clear();
+    static bool RuntimeInitServiceThread();
+    static bool RuntimeSubmitString(const char* s, uint64_t len, bool urgent = false);
+    static bool RuntimeSubmitChar(char ch, bool urgent = false);
+    static bool RuntimeSubmitNum(uint64_t raw, num_format_t format, numer_system_select radix, bool urgent = false);
+    static bool RuntimeSubmitFlush(bool urgent = true);
 
-    static void PutChar_runtime(char ch);
-    static void PutString_runtime(const char* s);
-    static void Clear_runtime();
 private:
+    static void RuntimeServiceThreadMain(void* data);
+    static void RuntimeWakeServiceThread();
     static GfxImage template_character;
     static TextViewport view;
     static TextCursor cursor;
@@ -55,6 +99,9 @@ private:
     static uint32_t font_color;
     static uint32_t background_color;
     static void* glyph_cache;
+    static task* runtime_service_task;
+    static spintrylock_cpp_t runtime_service_create_lock;
+    static tc_ring runtime_ring;
     static bool ready;
     static uint16_t glyph_index[256];
     static KURD_t default_kurd();

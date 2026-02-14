@@ -18,8 +18,6 @@
 #include <util/kptrace.h>
 #include "time.h"
 
-
-
 x64_local_processor *x86_smp_processors_container::local_processor_interrupt_mgr_array[x86_smp_processors_container::max_processor_count];
 constexpr TSSDescriptorEntry kspace_TSS_entry = {
     .limit = sizeof(TSSentry) ,
@@ -156,25 +154,15 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
     fs_slot[STACK_PROTECTOR_CANARY_IDX]=0xDEADBEEF;
     wrmsr(msr::syscall::IA32_FS_BASE,(uint64_t)&fs_slot);
     gs_slot[L_PROCESSOR_GS_IDX]=(uint64_t)this;//应该用rdrand搞一个随机值
+    gs_slot[PROCESSOR_ID_GS_INDEX]=static_cast<uint64_t>(this->processor_id);
     wrmsr(msr::syscall::IA32_GS_BASE,(uint64_t)&gs_slot);
     if(is_x2apic_supported()){
         uint64_t ia32_apic_base=rdmsr(msr::apic::IA32_APIC_BASE);
         ia32_apic_base|=(1<<11);
         ia32_apic_base|=(1<<10);
-        wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);
-        ia32_apic_base=rdmsr(msr::apic::IA32_APIC_BASE);
-        //kio::bsp_kout<<(void*)ia32_apic_base<<kio::kendl;
-        if(!(ia32_apic_base&(1<<10))){
-            panic_info_inshort inshort={
-            .is_bug=false,
-            .is_policy=true,
-            .is_hw_fault=false,
-            .is_mem_corruption=false,
-            .is_escalated=false        
-            };
-            Panic::panic(default_panic_behaviors_flags,
-                "[x64_local_processor]x2apic enable failed",nullptr,&inshort,KURD_t());
-        }
+        uint64_t tpr = 1;
+        asm volatile("mov  %0,%%cr8" : "=r"(tpr));
+        wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);        
     }else{
         panic_info_inshort inshort={
             .is_bug=false,
@@ -287,6 +275,18 @@ uint32_t x64_local_processor::get_apic_id()
 uint32_t x64_local_processor::get_processor_id()
 {
     return processor_id;
+}
+uint64_t x64_local_processor::get_tss_rsp0()
+{
+    return tss.rsp0;
+}
+extern "C" uint64_t get_current_processor_rsp0()
+{
+    x64_local_processor* curr = (x64_local_processor*)read_gs_u64(PROCESSOR_SELF_RESOURCES_COMPELX_GS_INDEX);
+    if (!curr) {
+        return 0;
+    }
+    return curr->get_tss_rsp0();
 }
 x64_local_processor *x86_smp_processors_container::get_processor_mgr_by_processor_id(prcessor_id_t id)
 {

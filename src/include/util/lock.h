@@ -36,6 +36,22 @@ public:
     
     void unlock();
 };
+class spintrylock_cpp_t {
+    uint8_t status;
+    static constexpr uint8_t LOCKED = 1;
+    static constexpr uint8_t UNLOCKED = 0;
+
+public:
+    spintrylock_cpp_t() : status(UNLOCKED) {}
+
+    // 阻塞式获取：失败时自旋直到成功
+    void lock();
+
+    // 非阻塞尝试：失败立即返回false
+    bool try_lock();
+
+    void unlock();
+};
 class trywritelock_cpp_t:public trylock_cpp_t {
     uint8_t status;
     static constexpr uint8_t LOCKED = 1;

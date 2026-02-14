@@ -121,6 +121,7 @@ add_executable(kernel.elf
     src/Processor/runtime_processor_regist.asm
     src/core_hardwares/PortDriver.cpp
     src/scheduler/per_processor_scheduler.cpp
+    src/scheduler/kthread_interfaces.cpp
     src/scheduler/yield.asm
     $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
@@ -250,8 +251,10 @@ endif()
 
 # 应用编译选项
 target_compile_options(kernel.elf PRIVATE 
-    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra  -mgeneral-regs-only
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra  
+    -mgeneral-regs-only
     -ffreestanding
+    -mno-red-zone
     -fno-stack-protector 
     -fno-exceptions
     -fno-builtin

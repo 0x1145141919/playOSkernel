@@ -26,13 +26,12 @@ namespace INTERRUPT_SUB_MODULES_LOCATIONS{
         }
     }
 }
-typedef uint16_t u16;
 typedef uint32_t x2apicid_t;
 struct x64_gdtentry {
-	u16	limit0;
-	u16	base0;
-	u16	base1: 8, type: 4, s: 1, dpl: 2, p: 1;
-	u16	limit1: 4, avl: 1, l: 1, d: 1, g: 1, base2: 8;
+	uint16_t	limit0;
+	uint16_t	base0;
+	uint16_t	base1: 8, type: 4, s: 1, dpl: 2, p: 1;
+	uint16_t	limit1: 4, avl: 1, l: 1, d: 1, g: 1, base2: 8;
 } __attribute__((packed));
 static constexpr x64_gdtentry kspace_DS_SS_entry = {
     .limit0 = 0xFFFF,
@@ -212,6 +211,7 @@ class x64_local_processor {//承担部分当前核心状态机切换维护的语
 
     uint32_t get_apic_id();
     uint32_t get_processor_id();
+    uint64_t get_tss_rsp0();
 };
 /**
  * 全局单例作为所有cpu的资源管理器，主要行为靠各个核心的Local_processor_Interrupt_mgr_t实现
@@ -245,3 +245,4 @@ class  x86_smp_processors_container {
     static int unregist_core();
 };
 extern uint64_t ap_hlt_word;
+extern "C" uint64_t get_current_processor_rsp0();

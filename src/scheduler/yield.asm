@@ -76,5 +76,59 @@ kthread_yield:
     mov rdi, r12
     sti
     call kthread_yield_true_enter
+global exit_kthread
+extern kthread_true_exit
 exit_kthread:
-    
+    cli
+    mov r12, rdi
+    mov rbx, qword [gs:24]
+    ; 读取该 scheduler 的私有栈顶
+    mov rdi, rbx
+    call get_scheduler_private_stack_top
+    mov rsp, rax
+    mov rdi, r12
+    sti
+    call kthread_true_exit
+global kthread_dead_exit
+extern kthread_dead_exit_cppenter
+kthread_dead_exit:
+    cli
+    mov r12, rdi
+    mov rbx, qword [gs:24]
+    ; 读取该 scheduler 的私有栈顶
+    mov rdi, rbx
+    call get_scheduler_private_stack_top
+    mov rsp, rax
+    mov rdi, r12
+    sti
+    call kthread_dead_exit_cppenter
+
+global kthread_self_blocked
+extern kthread_self_blocked_cppenter
+kthread_self_blocked:
+    pushfq
+    cli
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rbp
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
+    push rax
+    push rsp
+    mov r12, rsp
+    mov rbx, qword [gs:24]
+    mov rdi, rbx
+    call get_scheduler_private_stack_top
+    mov rsp, rax
+    mov rdi, r12
+    sti
+    call kthread_self_blocked_cppenter

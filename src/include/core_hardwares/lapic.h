@@ -175,12 +175,12 @@ constexpr x2apic_icr_t broadcast_exself_icr{
         .delivery_mode = LAPIC_PARAMS_ENUM::DELIVERY_MODE_T::FIXED,
         .destination_mode = LAPIC_PARAMS_ENUM::DESTINATION_T::PHYSICAL,
         .reserved1 = 0,
-        .level = LAPIC_PARAMS_ENUM::INTERUPT_LEVEL::ASSERT,
-        .trigger_mode=LAPIC_PARAMS_ENUM::TRIGGER_MODE_T::EDGE,
+        .level = 0,
+        .trigger_mode=0,
         .reserved2 = 0,
         .destination_shorthand=LAPIC_PARAMS_ENUM::DESTINATION_SHORTHAND_T::ALL_EXCLUDING_SELF,
         .reserved3 = 0,
-        .destination = {.raw = 0},
+        .destination = {.raw = 0xffffffff},
     }
 };
     // ==================== LVT error 寄存器 ====================

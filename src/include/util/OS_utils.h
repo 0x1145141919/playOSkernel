@@ -3,6 +3,25 @@
 #include "stddef.h"
 
 #ifdef __cplusplus
+enum numer_system_select : uint8_t
+{
+    BIN,
+    DEC,
+    HEX
+};
+enum num_format_t : uint8_t {
+    u8,
+    s8,
+    u16,
+    s16,
+    u32,
+    s32,
+    u64,
+    s64,
+};
+#endif
+
+#ifdef __cplusplus
 extern "C" {
 #endif
 
@@ -52,6 +71,8 @@ void wrmsr(uint32_t offset,uint64_t value);
 uint64_t rdtsc();
 uint64_t read_gs_u64(size_t index);
 void gs_u64_write(uint32_t index, uint64_t value);
+uint32_t fast_get_processor_id();
+uint64_t format_num_to_buffer(char* out, uint64_t raw, num_format_t format, numer_system_select radix);
 #ifdef USER_MODE
 // 将内存描述符表从文本格式转换为gBaseMemMgr.Init函数所需的格式
 void print_memory_descriptor_for_gbasememmgr(const char* input_file_path);

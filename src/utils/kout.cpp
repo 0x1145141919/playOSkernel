@@ -87,7 +87,51 @@ void kio::kout::print_numer(
         out[i] = buf[idx - 1 - i];
     }
     #ifdef KERNEL_MODE
-    uniform_puts(out, idx);
+    if (GlobalKernelStatus >= SCHEDUL_READY && GlobalKernelStatus != PANIC) {
+        num_format_t format = num_format_t::u64;
+        if (is_signed) {
+            switch (len_in_bytes) {
+                case 1: format = num_format_t::s8; break;
+                case 2: format = num_format_t::s16; break;
+                case 4: format = num_format_t::s32; break;
+                default: format = num_format_t::s64; break;
+            }
+        } else {
+            switch (len_in_bytes) {
+                case 1: format = num_format_t::u8; break;
+                case 2: format = num_format_t::u16; break;
+                case 4: format = num_format_t::u32; break;
+                default: format = num_format_t::u64; break;
+            }
+        }
+
+        uint64_t raw = 0;
+        switch (len_in_bytes) {
+            case 1: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int8_t*>(num_ptr))
+                : static_cast<uint64_t>(*reinterpret_cast<uint8_t*>(num_ptr)); break;
+            case 2: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int16_t*>(num_ptr))
+                : static_cast<uint64_t>(*reinterpret_cast<uint16_t*>(num_ptr)); break;
+            case 4: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int32_t*>(num_ptr))
+                : static_cast<uint64_t>(*reinterpret_cast<uint32_t*>(num_ptr)); break;
+            default: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int64_t*>(num_ptr))
+                : *reinterpret_cast<uint64_t*>(num_ptr); break;
+        }
+
+        for (uint64_t i = 0; i < MAX_BACKEND_COUNT; i++) {
+            kout_backend* backend = backends[i];
+            if (!backend || backend->is_masked) continue;
+            if (backend->running_stage_num) {
+                backend->running_stage_num(raw, format, numer_system);
+            }
+        }
+    } else {
+        // EARLY/MM_READY/PANIC 统一走字符串路径并按状态机后端分发。
+        uniform_puts(out, idx);
+    }
     #endif
     #ifdef USER_MODE
     if (is_print_to_stdout) write(1, out, idx);

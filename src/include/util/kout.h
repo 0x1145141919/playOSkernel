@@ -1,5 +1,6 @@
 #pragma once
 #include "os_error_definitions.h"
+#include "util/OS_utils.h"
 namespace kio
 {
 class now_time
@@ -22,6 +23,7 @@ struct kout_backend {
     uint64_t is_masked:1;
     uint64_t reserved:63;
     void (*running_stage_write)(const char* buf, uint64_t len);
+    void (*running_stage_num)(uint64_t raw,num_format_t format,numer_system_select radix);
     void (*panic_write)(const char* buf, uint64_t len);
     void (*early_write)(const char* buf, uint64_t len);
 };
@@ -65,12 +67,7 @@ class kout
     bool is_print_to_stderr;
     #endif
     kout_statistics_t statistics;
-    enum numer_system_select : uint8_t
-    {
-        BIN,
-        DEC,
-        HEX
-    };
+    
     numer_system_select curr_numer_system;
     static constexpr char hex_chars[16]={
         '0','1','2','3','4','5','6','7',

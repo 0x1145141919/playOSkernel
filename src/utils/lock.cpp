@@ -56,6 +56,49 @@ bool trylock_cpp_t::try_lock()
             : "memory"
         );
     }
+
+void spintrylock_cpp_t::lock()
+{
+    __asm__ __volatile__ (
+        "1:\n\t"
+        "movb $1, %%al\n\t"
+        "xchgb %%al, %0\n\t"
+        "testb %%al, %%al\n\t"
+        "jz 3f\n\t"
+        "2:\n\t"
+        "pause\n\t"
+        "cmpb $0, %0\n\t"
+        "je 1b\n\t"
+        "jmp 2b\n\t"
+        "3:\n\t"
+        : "+m" (status)
+        :
+        : "memory", "al"
+    );
+}
+
+bool spintrylock_cpp_t::try_lock()
+{
+    uint8_t old_status = UNLOCKED;
+    __asm__ __volatile__ (
+        "lock; xchgb %0, %1\n\t"
+        : "=a" (old_status)
+        : "m" (status), "0" (LOCKED)
+        : "memory"
+    );
+    return (old_status == UNLOCKED);
+}
+
+void spintrylock_cpp_t::unlock()
+{
+    __asm__ __volatile__ (
+        "movb %1, %0\n\t"
+        "mfence\n\t"
+        : "=m" (status)
+        : "r" (UNLOCKED)
+        : "memory"
+    );
+}
 // 读锁实现
 void spinrwlock_cpp_t::read_lock() {
     readlock.lock();      // 保护readers计数器
