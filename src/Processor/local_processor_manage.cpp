@@ -162,7 +162,8 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
         ia32_apic_base|=(1<<10);
         uint64_t tpr = 1;
         asm volatile("mov  %0,%%cr8" : "=r"(tpr));
-        wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);        
+        wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);
+        wrmsr(msr::apic::IA32_X2APIC_SVR,0x1ff);
     }else{
         panic_info_inshort inshort={
             .is_bug=false,

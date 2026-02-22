@@ -439,8 +439,8 @@ ap_final_work:
     test rax, rax
     jz .ap_final_halt_loop
     mov rsp, rax
-
+    sti 
 .ap_final_halt_loop:
-    sti
     hlt
     jmp .ap_final_halt_loop
+;todo 这里改成跳入一个extern "C" 入口 ap_norm_start

@@ -850,10 +850,6 @@ ipi_bare_enter:
 
     pop rsp ;栈自动回落
     add rsp, 8
-
-    ; 回收 magic + interrupt_context_specify_magic
-    add rsp, 16
-
     pop rax
     pop rbx
     pop rcx

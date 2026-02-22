@@ -51,9 +51,11 @@ uint32_t efi_map_ver;
 void ipi_test(){
     uint32_t self_processor_id=fast_get_processor_id();
     kio::bsp_kout<<"processor id "<< self_processor_id<<kio::kendl;
-    asm volatile("hlt");
+    //asm volatile("hlt");
 }
+extern "C" void ap_norm_start( ){
 
+}
 void create_first_kthread(){
     time::time_interrupt_generator::set_clock_by_offset(20000);
     textconsole_GoP::RuntimeInitServiceThread();
@@ -193,7 +195,7 @@ extern "C" void ap_init(uint32_t processor_id)
     time::time_interrupt_generator::ap_init();
     all_scheduler_ptr[processor_id]=new per_processor_scheduler;
     gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)all_scheduler_ptr[processor_id]);
-    x2apic::x2apic_driver::write_eoi();
+    //x2apic::x2apic_driver::write_eoi();
     init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");
     ap_final_work();

@@ -51,7 +51,7 @@ public:
 
     // 唯一入口
     static KURD_t Init(GlobalBasicGraphicInfoType* metainf);
-
+    static KURD_t Init(const char* fb_path);//用户空间通过linux的fb模拟
     static bool Ready();
     static const Info GetInfo();
     static void* BackBuffer();
