@@ -57,7 +57,7 @@ extern "C" void ap_norm_start( ){
 
 }
 void create_first_kthread(){
-    time::time_interrupt_generator::set_clock_by_offset(20000);
+    ktime::time_interrupt_generator::set_clock_by_offset(20000);
     textconsole_GoP::RuntimeInitServiceThread();
     GlobalKernelStatus=SCHEDUL_READY;
     x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
@@ -75,7 +75,7 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
     GlobalKernelStatus=kernel_state::ENTER;
     int  Status=0;
     KURD_t bsp_init_kurd=KURD_t();
-    time::hardware_time::try_tsc();
+    ktime::hardware_time::try_tsc();
     ksymmanager::Init(transfer);  
     kpoolmemmgr_t::Init();  
     global_gST=transfer->gST_ptr;
@@ -160,8 +160,8 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
         kio::bsp_kout<<"HPET Init Failed"<<kio::kendl;
         asm volatile("hlt");
     }
-    time::hardware_time::inform_initialized_hpet();
-    time::hardware_time::processor_regist();
+    ktime::hardware_time::inform_initialized_hpet();
+    ktime::hardware_time::processor_regist();
     
     
     kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
@@ -172,7 +172,7 @@ extern "C" void kernel_start(BootInfoHeader* transfer)
         kio::bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kio::kendl;
     }
     
-    time::time_interrupt_generator::bsp_init();
+    ktime::time_interrupt_generator::bsp_init();
     all_scheduler_ptr=new per_processor_scheduler*[gAnalyzer->processor_x64_list->size()];
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
@@ -191,8 +191,8 @@ extern "C" void ap_init(uint32_t processor_id)
     asm volatile("sfence");
     gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
     x86_smp_processors_container::regist_core(processor_id); 
-    time::hardware_time::processor_regist();
-    time::time_interrupt_generator::ap_init();
+    ktime::hardware_time::processor_regist();
+    ktime::time_interrupt_generator::ap_init();
     all_scheduler_ptr[processor_id]=new per_processor_scheduler;
     gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)all_scheduler_ptr[processor_id]);
     //x2apic::x2apic_driver::write_eoi();

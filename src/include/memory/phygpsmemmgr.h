@@ -529,7 +529,7 @@ class phymemspace_mgr{
         };
         entry_t*entries;
     };
-    static free_segs_t*free_segs_get();//慎用，此函数会锁住整个模块扫描整个模块的表汇报内容
+    static free_segs_t*free_segs_get();//慎用，此函数会锁住整个模块扫描整个模块的表汇报内容，用于FreePagesAllocator的伙伴系统初始化内存段
     static KURD_t blackhole_acclaim(
         phyaddr_t base,
         uint64_t numof_4kbpgs,

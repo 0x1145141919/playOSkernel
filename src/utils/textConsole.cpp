@@ -3,6 +3,7 @@
 #include "memory/phygpsmemmgr.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "util/kout.h"
+#include "Scheduler/per_processor_scheduler.h"
 #include "panic.h"
 namespace {
 static void textconsole_backend_write(const char* buf, uint64_t len)
@@ -12,6 +13,26 @@ static void textconsole_backend_write(const char* buf, uint64_t len)
         textconsole_GoP::PutChar(buf[i]);
     }
     //if(GlobalKernelStatus==kernel_state::PANIC)GfxPrim::Flush();
+}
+
+static void textconsole_backend_running_write(const char* buf, uint64_t len)
+{
+    if (!buf || len == 0) return;
+    if (!textconsole_GoP::RuntimeSubmitString(buf, len, false)) {
+        textconsole_backend_write(buf, len);
+    }
+}
+
+static void textconsole_backend_running_num(uint64_t raw, num_format_t format, numer_system_select radix)
+{
+    if (textconsole_GoP::RuntimeSubmitNum(raw, format, radix, false)) {
+        return;
+    }
+    char out[70];
+    uint64_t n = format_num_to_buffer(out, raw, format, radix);
+    if (n > 0) {
+        textconsole_backend_write(out, n);
+    }
 }
     
 } // namespace
@@ -23,6 +44,9 @@ const unsigned char* textconsole_GoP::font_bitmap = nullptr;
 uint32_t textconsole_GoP::font_color = 0;
 uint32_t textconsole_GoP::background_color = 0;
 void* textconsole_GoP::glyph_cache = nullptr;
+task* textconsole_GoP::runtime_service_task = nullptr;
+spintrylock_cpp_t textconsole_GoP::runtime_service_create_lock = {};
+tc_ring textconsole_GoP::runtime_ring = {};
 bool textconsole_GoP::ready = false;
 uint16_t textconsole_GoP::glyph_index[256] = {};
 
@@ -94,7 +118,8 @@ KURD_t textconsole_GoP::Init(
         .name = "textconsole_gop",
         .is_masked = 0,
         .reserved = 0,
-        .running_stage_write = nullptr,
+        .running_stage_write = &textconsole_backend_running_write,
+        .running_stage_num = &textconsole_backend_running_num,
         .panic_write = &textconsole_backend_write,
         .early_write = &textconsole_backend_write,
     };
@@ -181,6 +206,14 @@ KURD_t textconsole_GoP::Init(
     }
 
     cursor = {0, 0};
+    runtime_ring.head = 0;
+    runtime_ring.tail = 0;
+    runtime_ring.seq_gen = 0;
+    runtime_ring.drop_count = 0;
+    runtime_ring.push_count = 0;
+    runtime_ring.pop_count = 0;
+    runtime_ring.service_thread_sleeping = false;
+    runtime_service_task = nullptr;
     ready = true;
     return success;
 }
@@ -269,4 +302,223 @@ void textconsole_GoP::Clear()
     cursor.m = 0;
     cursor.n = 0;
     GfxPrim::Flush();
+}
+
+bool textconsole_GoP::RuntimeInitServiceThread()
+{
+    if (!ready) return false;
+    runtime_service_create_lock.lock();
+    if (runtime_service_task) {
+        runtime_service_create_lock.unlock();
+        return true;
+    }
+
+    auto* scheduler = reinterpret_cast<per_processor_scheduler*>(read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX));
+    if (!scheduler) {
+        runtime_service_create_lock.unlock();
+        return false;
+    }
+    per_processor_scheduler::create_kthread_param param = per_processor_scheduler::default_kthread_param;
+    param.is_soon_ready = 1;
+    task* created = scheduler->create_kthread(&textconsole_GoP::RuntimeServiceThreadMain, nullptr, &param);
+    if (!created || !success_all_kurd(param.result_kurd)) {
+        runtime_service_create_lock.unlock();
+        return false;
+    }
+    runtime_service_task = created;
+    runtime_service_create_lock.unlock();
+    return true;
+}
+
+void textconsole_GoP::RuntimeWakeServiceThread()
+{
+    if (!runtime_service_task || !all_scheduler_ptr) return;
+    uint32_t owner = runtime_service_task->get_belonged_processor_id();
+    per_processor_scheduler* owner_scheduler = all_scheduler_ptr[owner];
+    if (!owner_scheduler) return;
+    KURD_t kurd = owner_scheduler->task_set_ready(runtime_service_task);
+    (void)kurd;
+}
+
+bool textconsole_GoP::RuntimeSubmitString(const char* s, uint64_t len, bool urgent)
+{
+    if (!ready || !runtime_service_task || !s || len == 0) return false;
+
+    runtime_ring.lock.lock();
+    const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
+    if (next_tail == runtime_ring.head) {
+        runtime_ring.drop_count++;
+        runtime_ring.lock.unlock();
+        return false;
+    }
+    tc_slot& slot = runtime_ring.slots[runtime_ring.tail];
+    slot.head.type = tc_msg_type::string;
+    slot.head.reserved = 0;
+    slot.head.flags = urgent ? tc_msg_flag_urgent : tc_msg_flag_none;
+    slot.head.producer_cpu = fast_get_processor_id();
+    slot.head.seq = runtime_ring.seq_gen++;
+    slot.payload.s.string = s;
+    slot.payload.s.len = len;
+    runtime_ring.tail = next_tail;
+    runtime_ring.push_count++;
+    const bool should_wake = runtime_ring.service_thread_sleeping;
+    runtime_ring.service_thread_sleeping = false;
+    runtime_ring.lock.unlock();
+
+    if (should_wake) RuntimeWakeServiceThread();
+    return true;
+}
+
+bool textconsole_GoP::RuntimeSubmitChar(char ch, bool urgent)
+{
+    if (!ready || !runtime_service_task) return false;
+
+    runtime_ring.lock.lock();
+    const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
+    if (next_tail == runtime_ring.head) {
+        runtime_ring.drop_count++;
+        runtime_ring.lock.unlock();
+        return false;
+    }
+    tc_slot& slot = runtime_ring.slots[runtime_ring.tail];
+    slot.head.type = tc_msg_type::single_character;
+    slot.head.reserved = 0;
+    slot.head.flags = urgent ? tc_msg_flag_urgent : tc_msg_flag_none;
+    slot.head.producer_cpu = fast_get_processor_id();
+    slot.head.seq = runtime_ring.seq_gen++;
+    slot.payload.c.ch = ch;
+    runtime_ring.tail = next_tail;
+    runtime_ring.push_count++;
+    const bool should_wake = runtime_ring.service_thread_sleeping;
+    runtime_ring.service_thread_sleeping = false;
+    runtime_ring.lock.unlock();
+
+    if (should_wake) RuntimeWakeServiceThread();
+    return true;
+}
+
+bool textconsole_GoP::RuntimeSubmitNum(uint64_t raw, num_format_t format, numer_system_select radix, bool urgent)
+{
+    if (!ready || !runtime_service_task) return false;
+
+    runtime_ring.lock.lock();
+    const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
+    if (next_tail == runtime_ring.head) {
+        runtime_ring.drop_count++;
+        runtime_ring.lock.unlock();
+        return false;
+    }
+    tc_slot& slot = runtime_ring.slots[runtime_ring.tail];
+    slot.head.type = tc_msg_type::num;
+    slot.head.reserved = 0;
+    slot.head.flags = urgent ? tc_msg_flag_urgent : tc_msg_flag_none;
+    slot.head.producer_cpu = fast_get_processor_id();
+    slot.head.seq = runtime_ring.seq_gen++;
+    slot.payload.n.num_raw = raw;
+    slot.payload.n.format = format;
+    slot.payload.n.radix = radix;
+    runtime_ring.tail = next_tail;
+    runtime_ring.push_count++;
+    const bool should_wake = runtime_ring.service_thread_sleeping;
+    runtime_ring.service_thread_sleeping = false;
+    runtime_ring.lock.unlock();
+
+    if (should_wake) RuntimeWakeServiceThread();
+    return true;
+}
+
+bool textconsole_GoP::RuntimeSubmitFlush(bool urgent)
+{
+    if (!ready || !runtime_service_task) return false;
+
+    runtime_ring.lock.lock();
+    const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
+    if (next_tail == runtime_ring.head) {
+        runtime_ring.drop_count++;
+        runtime_ring.lock.unlock();
+        return false;
+    }
+    tc_slot& slot = runtime_ring.slots[runtime_ring.tail];
+    slot.head.type = tc_msg_type::flush;
+    slot.head.reserved = 0;
+    slot.head.flags = urgent ? tc_msg_flag_urgent : tc_msg_flag_none;
+    slot.head.producer_cpu = fast_get_processor_id();
+    slot.head.seq = runtime_ring.seq_gen++;
+    runtime_ring.tail = next_tail;
+    runtime_ring.push_count++;
+    const bool should_wake = runtime_ring.service_thread_sleeping;
+    runtime_ring.service_thread_sleeping = false;
+    runtime_ring.lock.unlock();
+
+    if (should_wake) RuntimeWakeServiceThread();
+    return true;
+}
+
+void textconsole_GoP::RuntimeServiceThreadMain(void* data)
+{
+    (void)data;
+    tc_service_local_batch local_batch{};
+    char num_buf[70];
+
+    auto next_index = [](uint32_t idx) -> uint32_t {
+        return (idx + 1) & (TC_RING_CAP - 1);
+    };
+    for (;;) {
+        local_batch.count = 0;
+        runtime_ring.lock.lock();
+        while (runtime_ring.head != runtime_ring.tail &&
+               local_batch.count < TC_SERVICE_POP_BATCH) {
+            local_batch.items[local_batch.count] = runtime_ring.slots[runtime_ring.head];
+            runtime_ring.head = next_index(runtime_ring.head);
+            runtime_ring.pop_count++;
+            local_batch.count++;
+        }
+        if (local_batch.count == 0) {
+            runtime_ring.service_thread_sleeping = true;
+        }
+        runtime_ring.lock.unlock();
+
+        if (local_batch.count == 0) {
+            kthread_self_blocked(task_blocked_reason_t::no_job);
+            continue;
+        }
+
+        bool need_flush = false;
+        for (uint32_t i = 0; i < local_batch.count; ++i) {
+            const tc_slot& slot = local_batch.items[i];
+            switch (slot.head.type) {
+                case tc_msg_type::string:
+                    for (uint64_t j = 0; j < slot.payload.s.len; ++j) {
+                        PutChar(slot.payload.s.string[j]);
+                    }
+                    break;
+                case tc_msg_type::single_character:
+                    PutChar(slot.payload.c.ch);
+                    break;
+                case tc_msg_type::num: {
+                    const uint64_t n = format_num_to_buffer(
+                        num_buf,
+                        slot.payload.n.num_raw,
+                        slot.payload.n.format,
+                        slot.payload.n.radix
+                    );
+                    for (uint64_t j = 0; j < n; ++j) {
+                        PutChar(num_buf[j]);
+                    }
+                    break;
+                }
+                case tc_msg_type::flush:
+                    need_flush = true;
+                    break;
+                default:
+                    break;
+            }
+            if (slot.head.flags & tc_msg_flag_urgent) {
+                need_flush = true;
+            }
+        }
+        if (need_flush) {
+            GfxPrim::Flush();
+        }
+    }
 }

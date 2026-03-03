@@ -103,7 +103,7 @@ void x2apic::lapic_timer_one_shot::processor_regist()
     x2apic_driver::raw_config_timer(timer_config);
     x2apic_driver::raw_config_timer_divider(devide_config);
     x2apic_driver::raw_config_timer_init_count(0xFFFFFFFF);
-    time::hardware_time::timer_polling_spin_delay(10000);//这里是刻意假设不会把~0跑光
+    ktime::hardware_time::timer_polling_spin_delay(10000);//这里是刻意假设不会把~0跑光
     uint64_t current=x2apic_driver::get_timer_current_count();
     time_complex*complex=(time_complex*)read_gs_u64(TIME_COMPLEX_GS_INDEX);
     complex->private_token.lapic_fs_per_cycle=(__uint128_t)(10000*(__uint128_t)1000000000)/(0xFFFFFFFF-current);
@@ -116,7 +116,7 @@ void x2apic::lapic_timer_tsc_ddline::processor_regist()
 }
 void x2apic::lapic_timer_one_shot::set_clock_by_stamp(uint64_t stamp_mius)
 {
-    miusecond_time_stamp_t current=time::hardware_time::get_stamp();
+    miusecond_time_stamp_t current=ktime::hardware_time::get_stamp();
     miusecond_time_stamp_t offset=stamp_mius-current;
     return set_clock_by_offset(offset);
 }
@@ -148,7 +148,7 @@ void x2apic::lapic_timer_tsc_ddline::set_clock_by_offset(uint64_t offset_mius)
 }
 void x2apic::lapic_timer_tsc_ddline::set_clock_by_stamp(uint64_t stamp_mius)
 {
-    miusecond_time_stamp_t current=time::hardware_time::get_stamp();
+    miusecond_time_stamp_t current=ktime::hardware_time::get_stamp();
     miusecond_time_stamp_t offset=stamp_mius-current;
     return set_clock_by_offset(offset);
 }

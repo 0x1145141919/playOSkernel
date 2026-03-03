@@ -274,7 +274,7 @@ task::~task()
 }
 void task::atomic_load()
 {
-    this->lastest_run_stamp=time::hardware_time::get_stamp();
+    this->lastest_run_stamp=ktime::hardware_time::get_stamp();
     task_state=task_state_t::running;
     switch(task_type){
         case task_type_t::kthreadm:{

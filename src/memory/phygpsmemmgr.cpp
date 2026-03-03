@@ -617,7 +617,121 @@ int phymemspace_mgr::print_allseg()
 
 phymemspace_mgr::free_segs_t *phymemspace_mgr::free_segs_get()
 {
-    return nullptr;
+    static free_segs_t cached = {0, nullptr};
+    module_global_lock.lock();
+
+    auto idx_to_phyaddr = [](uint32_t idx1, uint16_t idx2, uint16_t idx4) -> phyaddr_t {
+        return ((static_cast<uint64_t>(idx1) * 512ULL * 512ULL) +
+                (static_cast<uint64_t>(idx2) * 512ULL) +
+                static_cast<uint64_t>(idx4)) << 12;
+    };
+
+    auto scan_free_atomic_runs = [&](bool fill_entries, free_segs_t::entry_t* entries, uint64_t& out_count) {
+        out_count = 0;
+        if (!physeg_list || !top_1gb_table) return;
+
+        for (auto it = physeg_list->begin(); it != physeg_list->end(); ++it) {
+            PHYSEG& seg = *it;
+            if (seg.type != DRAM_SEG || seg.seg_size == 0) continue;
+
+            phyaddr_t seg_begin = seg.base;
+            phyaddr_t seg_end = seg.base + seg.seg_size;
+
+            uint64_t idx1 = 0, idx2 = 0, idx4 = 0;
+            phy_to_indices(seg_begin, idx1, idx2, idx4);
+            atom_page_ptr cur(static_cast<uint32_t>(idx1), static_cast<uint16_t>(idx2), static_cast<uint16_t>(idx4));
+
+            bool has_run = false;
+            phyaddr_t run_base = 0;
+            uint64_t run_size = 0;
+
+            auto flush_run = [&]() {
+                if (!has_run || run_size == 0) return;
+                if (fill_entries) {
+                    entries[out_count].base = run_base;
+                    entries[out_count].size = run_size;
+                }
+                out_count++;
+                has_run = false;
+                run_size = 0;
+            };
+
+            while (true) {
+                if (cur.page_size != _4KB_PG_SIZE &&
+                    cur.page_size != _2MB_PG_SIZE &&
+                    cur.page_size != _1GB_PG_SIZE) {
+                    flush_run();
+                    break;
+                }
+
+                phyaddr_t atom_base = idx_to_phyaddr(cur._1gbtb_idx, cur._2mbtb_offestidx, cur._4kb_offestidx);
+                if (atom_base >= seg_end) {
+                    flush_run();
+                    break;
+                }
+
+                uint64_t atom_size = cur.page_size;
+                phyaddr_t atom_end = atom_base + atom_size;
+                bool is_free_atomic_page = false;
+
+                if (atom_base >= seg_begin && atom_end <= seg_end) {
+                    if (cur.page_size == _4KB_PG_SIZE) {
+                        auto* p4 = reinterpret_cast<page_size4kb_t*>(cur.page_strut_ptr);
+                        is_free_atomic_page = p4 && (p4->flags.state == FREE) && !p4->flags.is_belonged_to_buddy;
+                    } else if (cur.page_size == _2MB_PG_SIZE) {
+                        auto* p2 = reinterpret_cast<page_size2mb_t*>(cur.page_strut_ptr);
+                        is_free_atomic_page = p2 && (p2->flags.state == FREE) && !p2->flags.is_belonged_to_buddy;
+                    } else {
+                        auto* p1 = reinterpret_cast<page_size1gb_t*>(cur.page_strut_ptr);
+                        is_free_atomic_page = p1 && (p1->flags.state == FREE) && !p1->flags.is_belonged_to_buddy;
+                    }
+                }
+
+                if (is_free_atomic_page) {
+                    if (!has_run) {
+                        has_run = true;
+                        run_base = atom_base;
+                        run_size = atom_size;
+                    } else if (run_base + run_size == atom_base) {
+                        run_size += atom_size;
+                    } else {
+                        flush_run();
+                        has_run = true;
+                        run_base = atom_base;
+                        run_size = atom_size;
+                    }
+                } else {
+                    flush_run();
+                }
+
+                if (cur.the_next() != OS_SUCCESS) {
+                    flush_run();
+                    break;
+                }
+            }
+        }
+    };
+
+    uint64_t total_entries = 0;
+    scan_free_atomic_runs(false, nullptr, total_entries);
+
+    if (cached.entries) {
+        delete[] cached.entries;
+        cached.entries = nullptr;
+    }
+
+    cached.count = total_entries;
+    if (total_entries > 0) {
+        cached.entries = new free_segs_t::entry_t[total_entries];
+        uint64_t filled_entries = 0;
+        scan_free_atomic_runs(true, cached.entries, filled_entries);
+        if (filled_entries < cached.count) {
+            cached.count = filled_entries;
+        }
+    }
+
+    module_global_lock.unlock();
+    return &cached;
 }
 // ------------------------
 // 仅用于 pages_recycle 的回收前校验

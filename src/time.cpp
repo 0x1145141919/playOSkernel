@@ -4,11 +4,11 @@
 #include "core_hardwares/HPET.h"
 #include "GS_Slots_index_definitions.h"
 #include "core_hardwares/lapic.h"
-bool time::hardware_time::is_tsc_reliable = false;
-uint32_t time::hardware_time::bsp_tsc_fs_per_cycle = 0;
-bool time::hardware_time::is_hpet_initialized = false;
-bool time::hardware_time::is_bsp_registed;
-int time::hardware_time::try_tsc()
+bool ktime::hardware_time::is_tsc_reliable = false;
+uint32_t ktime::hardware_time::bsp_tsc_fs_per_cycle = 0;
+bool ktime::hardware_time::is_hpet_initialized = false;
+bool ktime::hardware_time::is_bsp_registed;
+int ktime::hardware_time::try_tsc()
 {
     uint32_t eax=0x1, ebx=0, ecx=0, edx=0;
     cpuid(&eax, &ebx, &ecx, &edx);
@@ -26,21 +26,21 @@ int time::hardware_time::try_tsc()
     return 0;
 }
 
-int time::hardware_time::inform_initialized_hpet()
+int ktime::hardware_time::inform_initialized_hpet()
 {
     is_hpet_initialized = true;
     return 0;
 }
 
-bool time::hardware_time::get_tsc_reliable()
+bool ktime::hardware_time::get_tsc_reliable()
 {
     return is_tsc_reliable;
 }
-bool time::hardware_time::get_if_hpet_initialized()
+bool ktime::hardware_time::get_if_hpet_initialized()
 {
     return is_hpet_initialized;
 }
-void time::hardware_time::processor_regist()
+void ktime::hardware_time::processor_regist()
 {
     if(!is_hpet_initialized)
     {
@@ -63,7 +63,7 @@ void time::hardware_time::processor_regist()
     }
 }
 
-miusecond_time_stamp_t time::hardware_time::get_stamp( )
+miusecond_time_stamp_t ktime::hardware_time::get_stamp( )
 {
     if(is_hpet_initialized){
         if(is_tsc_reliable){
@@ -84,7 +84,7 @@ miusecond_time_stamp_t time::hardware_time::get_stamp( )
     return 0;
 }
 constexpr uint64_t calibrated_cycles_per_us = 5000;
-void time::hardware_time::timer_polling_spin_delay(uint64_t microseconds)
+void ktime::hardware_time::timer_polling_spin_delay(uint64_t microseconds)
 {
     
         if(is_tsc_reliable){
@@ -116,20 +116,20 @@ void time::hardware_time::timer_polling_spin_delay(uint64_t microseconds)
         }
     
 }
-time::backend_choose time::time_interrupt_generator::back_end_type;
+ktime::backend_choose ktime::time_interrupt_generator::back_end_type;
 namespace {
-inline time::backend_choose normalize_backend(time::backend_choose backend)
+inline ktime::backend_choose normalize_backend(ktime::backend_choose backend)
 {
     switch (backend) {
-        case time::lapic_normal:
-        case time::lapic_tscddline:
+        case ktime::lapic_normal:
+        case ktime::lapic_tscddline:
             return backend;
         default:
-            return time::lapic_normal;
+            return ktime::lapic_normal;
     }
 }
 }
-void time::time_interrupt_generator::bsp_init()
+void ktime::time_interrupt_generator::bsp_init()
 {
     if(hardware_time::get_tsc_reliable()){
         back_end_type=lapic_tscddline;
@@ -145,7 +145,7 @@ void time::time_interrupt_generator::bsp_init()
             break;
     }
 }
-void time::time_interrupt_generator::set_clock_by_stamp(miusecond_time_stamp_t stamp)
+void ktime::time_interrupt_generator::set_clock_by_stamp(miusecond_time_stamp_t stamp)
 {
     back_end_type = normalize_backend(back_end_type);
     switch(back_end_type){
@@ -157,7 +157,7 @@ void time::time_interrupt_generator::set_clock_by_stamp(miusecond_time_stamp_t s
             break;
     };
 }
-void time::time_interrupt_generator::set_clock_by_offset(miusecond_time_stamp_t offset)
+void ktime::time_interrupt_generator::set_clock_by_offset(miusecond_time_stamp_t offset)
 {
     back_end_type = normalize_backend(back_end_type);
     switch(back_end_type){
@@ -169,7 +169,7 @@ void time::time_interrupt_generator::set_clock_by_offset(miusecond_time_stamp_t 
             break;
     };
 }
-uint64_t time::time_interrupt_generator::get_current_clock()
+uint64_t ktime::time_interrupt_generator::get_current_clock()
 {
     back_end_type = normalize_backend(back_end_type);
     switch(back_end_type){
@@ -180,7 +180,7 @@ uint64_t time::time_interrupt_generator::get_current_clock()
     };
     return 0;
 }
-void time::time_interrupt_generator::cancel_clock()
+void ktime::time_interrupt_generator::cancel_clock()
 {
     back_end_type = normalize_backend(back_end_type);
     switch(back_end_type){
@@ -192,7 +192,7 @@ void time::time_interrupt_generator::cancel_clock()
             break;
     };
 }
-bool time::time_interrupt_generator::is_alarm_set()
+bool ktime::time_interrupt_generator::is_alarm_set()
 {
     back_end_type = normalize_backend(back_end_type);
     switch(back_end_type){
@@ -203,12 +203,12 @@ bool time::time_interrupt_generator::is_alarm_set()
     };
     return false;
 }
-time::backend_choose time::time_interrupt_generator::get_backend_type()
+ktime::backend_choose ktime::time_interrupt_generator::get_backend_type()
 {
     back_end_type = normalize_backend(back_end_type);
     return back_end_type;
 }
-void time::time_interrupt_generator::ap_init()
+void ktime::time_interrupt_generator::ap_init()
 {
     back_end_type = normalize_backend(back_end_type);
     switch(back_end_type){

@@ -11,9 +11,14 @@ KURD_t FreePagesAllocator::Init()
     if(error_kurd(kurd))return kurd;
     first_BCB=new free_pages_in_seg_control_block(
         0x100000000,
-        18
+        20
     );
     return first_BCB->second_stage_init();
+}
+KURD_t FreePagesAllocator::enable_new_BCB_allow(uint8_t strategy)
+{
+    //暂时考虑两种策略，最适应和
+    return KURD_t();
 }
 Alloc_result FreePagesAllocator::alloc(uint64_t size, alloc_params params)
 {
@@ -36,8 +41,4 @@ KURD_t FreePagesAllocator::free(phyaddr_t base, uint64_t size)
     }
     KURD_t kurd=first_BCB->free_buddy_way(base,size);
     return kurd;
-}
-void FreePagesAllocator::enable_new_BCB_allow()
-{
-    flags.allow_new_BCB=true;
 }

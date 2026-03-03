@@ -73,7 +73,7 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
     kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one try init all exclued self prcessor"<<kio::kendl;
     x2apic::x2apic_driver::raw_send_ipi(icr_init);
     kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one init all exclued self prcessor sucess"<<kio::kendl;
-    time::hardware_time::timer_polling_spin_delay(20000);
+    ktime::hardware_time::timer_polling_spin_delay(20000);
     }
     {
         x2apic::x2apic_icr_t icr_init_de_assert={
@@ -93,11 +93,11 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
     kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one try init-de-assert all exclued self prcessor"<<kio::kendl;
     x2apic::x2apic_driver::raw_send_ipi(icr_init_de_assert);
     kio::bsp_kout<<kio::now<<"[x64_local_processor]AP_Init_one_by_one init-de-assert all exclued self prcessor sucess"<<kio::kendl;
-    time::hardware_time::timer_polling_spin_delay(1000);
+    ktime::hardware_time::timer_polling_spin_delay(1000);
     }
     
     uint32_t processor_id = 1;
-    if(time::hardware_time::get_if_hpet_initialized()==false){
+    if(ktime::hardware_time::get_if_hpet_initialized()==false){
         fail.result=result_code::RETRY;
         fail.reason=INTERRUPT_SUB_MODULES_LOCATIONS::PROCESSORS_EVENT_CODE::APS_INIT_RESULTS_CODE::RETRY_REASON_CODE::RETRY_REASON_CODE_DEPENDIES_NOT_INITIALIZED;
         return fail;
@@ -319,7 +319,7 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
         uint64_t delay_microseconds,
         ap_observe_once_result_t(*observe_ap)(uint32_t),//返回值0代表等待，返回值1代表成功，-1代表失败
         void(*failer_dealing)(),uint32_t success_word)->ap_observe_result_t{//启用全局错误码的情况下，0成功，1失败，2超时
-        uint64_t now_microseconds = time::hardware_time::get_stamp();//GS槽位里面会专门放每个核心的时间token的
+        uint64_t now_microseconds = ktime::hardware_time::get_stamp();//GS槽位里面会专门放每个核心的时间token的
         uint64_t ddline_stamp = now_microseconds + delay_microseconds;
         while(now_microseconds < ddline_stamp){
             int observe_ap_result= observe_ap(success_word);
@@ -328,7 +328,7 @@ KURD_t x86_smp_processors_container::AP_Init_one_by_one()
                 failer_dealing();
                 return CHECKPOINT_FAIL;}    
             
-            now_microseconds = time::hardware_time::get_stamp();
+            now_microseconds = ktime::hardware_time::get_stamp();
         }
         return CHECKPOINT_TIMEOUT;
     };

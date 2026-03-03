@@ -180,7 +180,7 @@ void kthread_yield_true_enter(kthread_yield_raw_context *context)
     if(!success_all_kurd(running_task_kurd) || !interrupted_task){
         panic_with_kurd(running_task_kurd);
     }
-    interrupted_task->lastest_span_length=time::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
+    interrupted_task->lastest_span_length=ktime::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
     interrupted_task->accumulated_time+=interrupted_task->lastest_span_length;
     if(interrupted_task->get_task_type()!=task_type_t::kthreadm){
         panic_with_kurd(make_self_scheduler_fatal(
@@ -235,7 +235,7 @@ void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
     if(!success_all_kurd(running_task_kurd) || !interrupted_task){
         panic_with_kurd(frame, running_task_kurd);
     }
-    interrupted_task->lastest_span_length=time::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
+    interrupted_task->lastest_span_length=ktime::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
     interrupted_task->accumulated_time+=interrupted_task->lastest_span_length;
     switch(interrupted_task->get_task_type()){
         case task_type_t::kthreadm:
@@ -299,7 +299,7 @@ void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
     //uint64_t apic_fault=rdmsr(msr::apic::IA32_X2APIC_ESR);
     //kio::bsp_kout<<"wrong with apic_error_status"<<apic_fault<<kio::kendl;
     asm volatile("sti");
-    time::time_interrupt_generator::set_clock_by_offset(DEFALUT_TIMER_SPAN_MIUS);
+    ktime::time_interrupt_generator::set_clock_by_offset(DEFALUT_TIMER_SPAN_MIUS);
     scheduler->schedule_and_switch();
 }
 void kthread_true_exit(uint64_t will) 
@@ -310,7 +310,7 @@ void kthread_true_exit(uint64_t will)
     if(!success_all_kurd(running_task_kurd) || !exit_task){
         panic_with_kurd(running_task_kurd);
     }
-    exit_task->lastest_span_length=time::hardware_time::get_stamp()-exit_task->lastest_run_stamp;
+    exit_task->lastest_span_length=ktime::hardware_time::get_stamp()-exit_task->lastest_run_stamp;
     exit_task->accumulated_time+=exit_task->lastest_span_length;
     exit_task->context.kthread->regs.rax=will;
     KURD_t kurd=scheduler->task_set_zombie(exit_task);
@@ -356,7 +356,7 @@ void kthread_self_blocked_cppenter(kthread_yield_raw_context* context)
     if(!success_all_kurd(running_task_kurd) || !interrupted_task){
         panic_with_kurd(running_task_kurd);
     }
-    interrupted_task->lastest_span_length=time::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
+    interrupted_task->lastest_span_length=ktime::hardware_time::get_stamp()-interrupted_task->lastest_run_stamp;
     interrupted_task->accumulated_time+=interrupted_task->lastest_span_length;
     if(interrupted_task->get_task_type()!=task_type_t::kthreadm){
         panic_with_kurd(make_self_scheduler_fatal(

@@ -15,7 +15,7 @@ struct time_complex{
     class time_interrupt_generator*private_clock;
 
 };
-namespace time
+namespace ktime
 {
     
     class macro_time

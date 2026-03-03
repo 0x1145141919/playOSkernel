@@ -195,6 +195,61 @@ target_compile_options(
     -DUSER_MODE
 
 )
+add_executable(multhread
+    src/tests/multithread_test.cpp
+    src/utils/lock.cpp
+    src/utils/bitmap.cpp
+    src/utils/util.cpp
+)
+target_include_directories(
+    multhread PRIVATE
+     "${CMAKE_SOURCE_DIR}/src/include"
+     "/usr/include/efi"
+)
+target_compile_options(
+    multhread PRIVATE
+    -DUSER_MODE
+    -fsanitize=address
+)
+target_link_options(multhread PRIVATE -fsanitize=address)
+target_link_libraries(
+    multhread PRIVATE
+    pthread
+)
+
+# AArch64 static cross-build target for multhread
+set(MULTHREAD_AARCH64_OUT "${CMAKE_BINARY_DIR}/bin/multhread_aarch64")
+set(MULTHREAD_AARCH64_CXX "aarch64-linux-gnu-g++" CACHE STRING "AArch64 C++ cross compiler for multhread_aarch64 target")
+set(MULTHREAD_AARCH64_EFI_INC "${CMAKE_SOURCE_DIR}/outsbmodules/gnu-efi/inc" CACHE PATH "gnu-efi include path for AArch64 multhread target")
+add_custom_command(
+    OUTPUT "${MULTHREAD_AARCH64_OUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/bin"
+    COMMAND "${MULTHREAD_AARCH64_CXX}"
+            -std=c++23
+            -g
+            -O0
+            -static
+            -pthread
+            -DUSER_MODE
+            -I${MULTHREAD_AARCH64_EFI_INC}
+            -idirafter ${CMAKE_SOURCE_DIR}/src/include
+            "${CMAKE_SOURCE_DIR}/src/tests/multithread_test.cpp"
+            "${CMAKE_SOURCE_DIR}/src/utils/lock.cpp"
+            "${CMAKE_SOURCE_DIR}/src/utils/bitmap.cpp"
+            "${CMAKE_SOURCE_DIR}/src/utils/os_utils_portable_min.cpp"
+            -o "${MULTHREAD_AARCH64_OUT}"
+    DEPENDS
+            "${CMAKE_SOURCE_DIR}/src/tests/multithread_test.cpp"
+            "${CMAKE_SOURCE_DIR}/src/utils/lock.cpp"
+            "${CMAKE_SOURCE_DIR}/src/utils/bitmap.cpp"
+            "${CMAKE_SOURCE_DIR}/src/utils/os_utils_portable_min.cpp"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building static AArch64 multhread executable: ${MULTHREAD_AARCH64_OUT}"
+    VERBATIM
+)
+add_custom_target(multhread_aarch64
+    DEPENDS "${MULTHREAD_AARCH64_OUT}"
+)
 add_executable(fs_test
     src/tests/fs_test_main.cpp
 
