@@ -80,6 +80,7 @@ add_dependencies(ksymbols symbols_dumper)
 
 add_dependencies(kernel_resources 
     kernel.elf 
+    init.elf
     ksymbols
 ) 
 # 获取gnu-efi构建目录路径
@@ -126,6 +127,28 @@ add_executable(kernel.elf
     $<TARGET_OBJECTS:Mem_module>
     ${SRC_COMMON}
 )
+add_executable(init.elf
+    src/init/init_init.cpp
+    src/init/kernel_mmu.cpp
+    src/init/kernel_load.cpp
+    src/init/init_entry.asm
+    src/init/Interrupts/Sysdef_exception_entries.asm
+    src/init/Interrupts/exceptions_handler.cpp
+    src/init/heap_alloc.cpp
+    src/init/core_hardwares/init_gop.cpp
+    src/init/core_hardwares/PortDriver.cpp
+    src/init/util/textConsole.cpp
+    src/init/pages_alloc.cpp
+    src/init/panic.cpp
+    src/init/util/kout.cpp
+    src/utils/util.cpp
+    src/init/util/bitmap.cpp
+    src/utils/lock.cpp
+    src/Processor/early_bsp_resources.cpp 
+    src/os_error_definitions.cpp
+    src/init/info_fill.cpp
+    src/init/mem_loads.cpp
+)
 add_executable(BCB_test
     src/tests/BCB_test.cpp
      ${SRC_COMMON}
@@ -171,7 +194,6 @@ target_compile_options(
 
 add_executable(test_mem
     src/tests/test_memmodule.cpp
-    src/memory/Memory.cpp
     src/memory/phygpsmemmgr.cpp
     src/memory/phygpsmemmgr_pgcount_modify.cpp
     src/memory/phygpsmemmgr_pgs_set.cpp
@@ -221,35 +243,6 @@ target_link_libraries(
 set(MULTHREAD_AARCH64_OUT "${CMAKE_BINARY_DIR}/bin/multhread_aarch64")
 set(MULTHREAD_AARCH64_CXX "aarch64-linux-gnu-g++" CACHE STRING "AArch64 C++ cross compiler for multhread_aarch64 target")
 set(MULTHREAD_AARCH64_EFI_INC "${CMAKE_SOURCE_DIR}/outsbmodules/gnu-efi/inc" CACHE PATH "gnu-efi include path for AArch64 multhread target")
-add_custom_command(
-    OUTPUT "${MULTHREAD_AARCH64_OUT}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/bin"
-    COMMAND "${MULTHREAD_AARCH64_CXX}"
-            -std=c++23
-            -g
-            -O0
-            -static
-            -pthread
-            -DUSER_MODE
-            -I${MULTHREAD_AARCH64_EFI_INC}
-            -idirafter ${CMAKE_SOURCE_DIR}/src/include
-            "${CMAKE_SOURCE_DIR}/src/tests/multithread_test.cpp"
-            "${CMAKE_SOURCE_DIR}/src/utils/lock.cpp"
-            "${CMAKE_SOURCE_DIR}/src/utils/bitmap.cpp"
-            "${CMAKE_SOURCE_DIR}/src/utils/os_utils_portable_min.cpp"
-            -o "${MULTHREAD_AARCH64_OUT}"
-    DEPENDS
-            "${CMAKE_SOURCE_DIR}/src/tests/multithread_test.cpp"
-            "${CMAKE_SOURCE_DIR}/src/utils/lock.cpp"
-            "${CMAKE_SOURCE_DIR}/src/utils/bitmap.cpp"
-            "${CMAKE_SOURCE_DIR}/src/utils/os_utils_portable_min.cpp"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building static AArch64 multhread executable: ${MULTHREAD_AARCH64_OUT}"
-    VERBATIM
-)
-add_custom_target(multhread_aarch64
-    DEPENDS "${MULTHREAD_AARCH64_OUT}"
-)
 add_executable(fs_test
     src/tests/fs_test_main.cpp
 
@@ -268,21 +261,8 @@ target_compile_options(
     -fsanitize=address
 )
 
-target_link_libraries(kernel.elf PRIVATE 
-    ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
-    ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
-)
-
-
-
-target_include_directories(kernel.elf PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/include"
-    "${GNU_EFI_SOURCE_DIR}/inc"
-    "${GNU_EFI_SOURCE_DIR}/inc/x86_64"
-)
-
-# 内核链接选项
-set(KERNEL_LINK_OPTS
+# 内核/引导阶段共享链接选项
+set(COMMON_ELF_LINK_OPTS
 -nostdlib
     -ffreestanding
     -fno-use-cxa-atexit
@@ -294,45 +274,77 @@ set(KERNEL_LINK_OPTS
     #-ftls-model=local-exec
     -mno-red-zone
     -static
-    -T${CMAKE_SOURCE_DIR}/kld.ld
     -lgcc
     -Wl,--wrap=__stack_chk_fail
+)
+
+set(KERNEL_LINK_OPTS
+    ${COMMON_ELF_LINK_OPTS}
+    -T${CMAKE_SOURCE_DIR}/kld.ld
+)
+
+set(INIT_LINK_OPTS
+    ${COMMON_ELF_LINK_OPTS}
+    -T${CMAKE_SOURCE_DIR}/init.ld
 )
 
 # 如果在Debug模式下，添加调试链接标志
 if(DEBUG_LINK_FLAGS)
     list(APPEND KERNEL_LINK_OPTS ${DEBUG_LINK_FLAGS})
+    list(APPEND INIT_LINK_OPTS ${DEBUG_LINK_FLAGS})
 endif()
 
-# 应用编译选项
-target_compile_options(kernel.elf PRIVATE 
-    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra  
-    -mgeneral-regs-only
-    -ffreestanding
-    -mno-red-zone
-    -fno-stack-protector 
-    -fno-exceptions
-    -fno-builtin
-    -fno-rtti
-    -static
-    -mgeneral-regs-only
-    -fno-lto
-    -fpermissive
-    -fno-PIC
-    -DKERNEL_MODE>
-    -DPGLV_4>
-$<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
+function(configure_kernel_like_elf target_name link_opts)
+    target_link_libraries(${target_name} PRIVATE
+        ${GNU_EFI_SOURCE_DIR}/x86_64/lib/libefi.a
+        ${GNU_EFI_SOURCE_DIR}/x86_64/gnuefi/libgnuefi.a
+    )
+
+    target_compile_options(${target_name} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra
+        -mgeneral-regs-only
+        -ffreestanding
+        -mno-red-zone
+        -fno-stack-protector
+        -fno-exceptions
+        -fno-builtin
+        -fno-rtti
+        -static
+        -mgeneral-regs-only
+        -fno-lto
+        -fpermissive
+        -fno-PIC
+        -DKERNEL_MODE>
+        -DPGLV_4>
+    $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
+    )
+
+    target_link_options(${target_name} PRIVATE ${link_opts}
+        -fno-exceptions
+        -fno-builtin
+        -fno-rtti
+        -static
+        -mgeneral-regs-only
+        -fno-lto
+        -fpermissive
+        -fno-PIC
+        -DKERNEL_MODE>
+        -DPGLV_4>
+    $<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
+    )
+endfunction()
+
+configure_kernel_like_elf(kernel.elf "${KERNEL_LINK_OPTS}")
+configure_kernel_like_elf(init.elf "${INIT_LINK_OPTS}")
+
+target_include_directories(kernel.elf PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/include"
+    "${GNU_EFI_SOURCE_DIR}/inc"
+    "${GNU_EFI_SOURCE_DIR}/inc/x86_64"
 )
-target_link_options(kernel.elf PRIVATE ${KERNEL_LINK_OPTS}
-    -fno-exceptions
-    -fno-builtin
-    -fno-rtti
-    -static
-    -mgeneral-regs-only
-    -fno-lto
-    -fpermissive
-    -fno-PIC
-    -DKERNEL_MODE>
-    -DPGLV_4>
-$<$<COMPILE_LANGUAGE:ASM_NASM>:-felf64>
+
+target_include_directories(init.elf PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/include"
+    "${GNU_EFI_SOURCE_DIR}/inc"
+    "${GNU_EFI_SOURCE_DIR}/inc/x86_64"
 )

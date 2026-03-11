@@ -3,14 +3,15 @@
 #include "util/OS_utils.h"
 #include "panic.h"
 
+
 namespace {
 class bcb_lock_guard_t {
 private:
-    trylock_cpp_t& lock_;
+    spinlock_cpp_t& lock_;
 public:
-    explicit bcb_lock_guard_t(trylock_cpp_t& lock) : lock_(lock)
+    explicit bcb_lock_guard_t(spinlock_cpp_t& lock) : lock_(lock)
     {
-        while (!lock_.try_lock()) {}
+        lock_.lock();
     }
     ~bcb_lock_guard_t()
     {
@@ -18,28 +19,50 @@ public:
     }
 };
 }
-
-FreePagesAllocator::free_pages_in_seg_control_block*FreePagesAllocator::first_BCB;
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_success()
+bool FreePagesAllocator::BuddyControlBlock::is_addr_belong_to_this_BCB_no_lock(phyaddr_t addr)
+{
+    return (addr<=this->base) && (this->base+(1ull<<(max_supprt_order+12)));
+}
+FreePagesAllocator::BuddyControlBlock*FreePagesAllocator::first_BCB;
+KURD_t FreePagesAllocator::BuddyControlBlock::default_success()
 {
     KURD_t kurd=default_kurd();
     kurd.result=result_code::SUCCESS;
     kurd.level=level_code::INFO;
     return kurd;
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_fatal()
+bool FreePagesAllocator::BuddyControlBlock::can_alloc(uint8_t order)
+{
+    bcb_lock_guard_t guard(lock);
+    for(uint8_t current_order=order;current_order<=max_supprt_order;++current_order){
+        if(statistics.free_count[current_order]>0){
+            return true;
+        }
+    }
+    return false;
+}
+bool FreePagesAllocator::BuddyControlBlock::is_bcb_avaliable()
+{
+    return !lock.is_locked();
+}
+void FreePagesAllocator::BuddyControlBlock::first_bcb_specified_init(loaded_VM_interval *first_BCB_bitmap)
+{
+    order_freepage_existency_bitmaps=new mixed_bitmap_t(1ull<<(max_supprt_order+1));
+    order_freepage_existency_bitmaps->first_bcb_specified_init(first_BCB_bitmap);
+}
+KURD_t FreePagesAllocator::BuddyControlBlock::default_fatal()
 {
     KURD_t kurd=default_kurd();
     kurd=set_fatal_result_level(kurd);
     return kurd;
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_error()
+KURD_t FreePagesAllocator::BuddyControlBlock::default_error()
 {
     KURD_t kurd=default_kurd();
     kurd=set_result_fail_and_error_level(kurd);
     return kurd;
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::default_kurd()
+KURD_t FreePagesAllocator::BuddyControlBlock::default_kurd()
 {
     return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK,0,0,err_domain::CORE_MODULE);
 }
@@ -158,13 +181,13 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_tree
     return replay_validate_tree_no_lock(tag);
 }
 #endif
-uint8_t FreePagesAllocator::free_pages_in_seg_control_block::get_max_order()
+uint8_t FreePagesAllocator::BuddyControlBlock::get_max_order()
 {
     bcb_lock_guard_t guard(lock);
-    return this->MAX_SUPPORT_ORDER;
+    return this->max_supprt_order;
 }
 
-void FreePagesAllocator::free_pages_in_seg_control_block::cache_insert(uint8_t order, uint64_t idx)
+void FreePagesAllocator::BuddyControlBlock::cache_insert(uint8_t order, uint64_t idx)
 {
     if (order >= DESINGED_MAX_SUPPORT_ORDER) return;
     for (uint8_t i = 0; i < PER_ORDER_CACHE_SUGGEST_COUNT; ++i) {
@@ -178,7 +201,7 @@ void FreePagesAllocator::free_pages_in_seg_control_block::cache_insert(uint8_t o
     cursor = (cursor + 1) % PER_ORDER_CACHE_SUGGEST_COUNT;
 }
 
-bool FreePagesAllocator::free_pages_in_seg_control_block::cache_pick(uint8_t order, uint64_t& out_idx)
+bool FreePagesAllocator::BuddyControlBlock::cache_pick(uint8_t order, uint64_t& out_idx)
 {
     if (order >= DESINGED_MAX_SUPPORT_ORDER) return false;
     for (uint8_t i = 0; i < PER_ORDER_CACHE_SUGGEST_COUNT; ++i) {
@@ -194,7 +217,7 @@ bool FreePagesAllocator::free_pages_in_seg_control_block::cache_pick(uint8_t ord
     return false;
 }
 
-uint8_t FreePagesAllocator::free_pages_in_seg_control_block::size_to_order(uint64_t size)
+uint8_t FreePagesAllocator::BuddyControlBlock::size_to_order(uint64_t size)
 {
     if (size == 0) {
         return 0;
@@ -223,7 +246,7 @@ uint8_t FreePagesAllocator::free_pages_in_seg_control_block::size_to_order(uint6
     // 注意：np2 保证是2的幂且不为0
     return 63 - __builtin_clzll(np2);
 }
-phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_way(uint64_t size, KURD_t &result)
+phyaddr_t FreePagesAllocator::BuddyControlBlock::allocate_buddy_way(uint64_t size, KURD_t &result,uint8_t align_log2)
 {
     bcb_lock_guard_t guard(lock);
     KURD_t success=default_success();
@@ -232,8 +255,12 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY;
     error.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY;
     fatal.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY;
-    uint8_t order=size_to_order(size);
-    if(order>MAX_SUPPORT_ORDER){
+    uint8_t order=0;
+    uint8_t size_order=size_to_order(size);
+    uint8_t align_order=align_log2>12?align_log2-12:0;
+
+    order=size_order>align_order?size_order:align_order;
+    if(size_order>max_supprt_order||align_order>max_supprt_order){
         error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::ALLOCATE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_ACQUIRE_SIZE_TO_BIG;
         result=error;
         return 0;
@@ -246,7 +273,7 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
             result=kurd;
             return 0;
     }
-    for(uint8_t i=order;i<=MAX_SUPPORT_ORDER;i++){
+    for(uint8_t i=order;i<=max_supprt_order;i++){
         uint64_t cached_idx = INVALID_INBCB_INDEX;
         if(cache_pick(i, cached_idx)){
             statistics.suggest_hit[order]++;
@@ -266,18 +293,30 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
                 return 0;
             }
             #endif
-            statistics.free_count[order]--;
+            
             phyaddr_t res_addr=base+(cached_idx<< (i+12));
             statistics.alloc_times_success++;
+            if(align_order>size_order){
+                kurd=split_page(cached_idx << (i - order),order,size_order);
+                if(!success_all_kurd(kurd)){
+                    statistics.alloc_times_success--;
+                    statistics.alloc_times_fail++;
+                    result=kurd;
+                    return 0;
+                }
+                statistics.free_count[size_order]--;
+            }else{
+                statistics.free_count[order]--;
+            }
             result=success;
             return res_addr;
         }else statistics.suggest_miss[order]++;
     }
     statistics.scan_count++;
-    for(uint8_t i=order;i<=MAX_SUPPORT_ORDER;i++){//线性扫描
+    for(uint8_t i=order;i<=max_supprt_order;i++){//线性扫描
         uint64_t found_idx=order_freepage_existency_bitmaps->find_free_in_interval(
             order_bases[i],
-            1ULL<<(MAX_SUPPORT_ORDER-i)
+            1ULL<<(max_supprt_order-i)
         );
         if(found_idx!=0xFFFFFFFFFFFFFFFF){
             result=success;
@@ -297,9 +336,21 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
                 return 0;
             }
             #endif
-            statistics.free_count[order]--;
+            
             statistics.alloc_times_success++;
             phyaddr_t res_addr=base+(found_idx<< (i+12));
+            if(align_order>size_order){
+                kurd=split_page(found_idx<<(i - order),order,size_order);
+                if(!success_all_kurd(kurd)){
+                    statistics.alloc_times_success--;
+                    statistics.alloc_times_fail++;
+                    result=kurd;
+                    return 0;
+                }
+                statistics.free_count[size_order]--;
+            }else {
+                statistics.free_count[order]--;
+            }
             return res_addr;
         }
     }
@@ -310,11 +361,15 @@ phyaddr_t FreePagesAllocator::free_pages_in_seg_control_block::allocate_buddy_wa
     result=error;
     return 0;
 }
-FreePagesAllocator::free_pages_in_seg_control_block::free_pages_in_seg_control_block(phyaddr_t base, uint8_t max_support_order)
+phyaddr_t FreePagesAllocator::BuddyControlBlock::get_base()
 {
-    this->MAX_SUPPORT_ORDER=max_support_order;
+    return this->base;
+}
+FreePagesAllocator::BuddyControlBlock::BuddyControlBlock(phyaddr_t base, uint8_t max_support_order)
+{
+    this->max_supprt_order=max_support_order;
     this->base=base;
-    for(uint8_t i=0;i<=MAX_SUPPORT_ORDER;i++){
+    for(uint8_t i=0;i<=max_supprt_order;i++){
         for (uint8_t j = 0; j < PER_ORDER_CACHE_SUGGEST_COUNT; ++j) {
             suggest_order_free_page_index[i][j]=~0;
         }
@@ -329,7 +384,7 @@ FreePagesAllocator::free_pages_in_seg_control_block::free_pages_in_seg_control_b
     this->is_splited_bitmap_valid=is_splited_bitmap_valid;
     ksetmem_8(&statistics, 0, sizeof(statistics));
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
+KURD_t FreePagesAllocator::BuddyControlBlock::second_stage_init()
 {
     bcb_lock_guard_t guard(lock);
     KURD_t success=default_success();
@@ -339,17 +394,17 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_INIT;
     error.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_INIT;
     fatal.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_INIT;
-    order_freepage_existency_bitmaps=new mixed_bitmap_t(1ULL<<(MAX_SUPPORT_ORDER+1));
+    order_freepage_existency_bitmaps=new mixed_bitmap_t(1ULL<<(max_supprt_order+1));
     contain=order_freepage_existency_bitmaps->second_stage_init();
     if(contain.result!=result_code::SUCCESS)return contain;
     order_bases[0]=0;
-    for(uint8_t order=0;order<MAX_SUPPORT_ORDER;order++){
-        order_bases[order+1]=order_bases[order]+(1ULL<<(MAX_SUPPORT_ORDER-order));
+    for(uint8_t order=0;order<max_supprt_order;order++){
+        order_bases[order+1]=order_bases[order]+(1ULL<<(max_supprt_order-order));
     }
     #ifdef REPALY_MODE
     replay_internal_init();
     #endif
-    free_page_without_merge(0,MAX_SUPPORT_ORDER);
+    free_page_without_merge(0,max_supprt_order);
     #ifdef REPALY_MODE
     KURD_t replay_kurd = replay_validate_tree_no_lock("second_stage_init");
     if (!success_all_kurd(replay_kurd)) {
@@ -358,7 +413,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::second_stage_init()
     #endif
     return success;
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::free_page_without_merge(uint64_t in_bcb_idx, uint8_t order)
+void FreePagesAllocator::BuddyControlBlock::free_page_without_merge(uint64_t in_bcb_idx, uint8_t order)
 {
     order_freepage_existency_bitmaps->bit_set(order_bases[order]+in_bcb_idx,true);
     statistics.free_count[order]++;
@@ -371,13 +426,13 @@ void FreePagesAllocator::free_pages_in_seg_control_block::free_page_without_merg
     }*/
     #endif
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t splited_idx, uint8_t splited_order, uint8_t target_order) 
+KURD_t FreePagesAllocator::BuddyControlBlock::split_page(uint64_t splited_idx, uint8_t splited_order, uint8_t target_order) 
 {//每一层递归固定被拆分层减少一个，拆分出来两个增加
     KURD_t success=default_success();
     KURD_t error=default_error();
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_SPLIT_PAGE;
     error.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_SPLIT_PAGE;
-    if(splited_order<target_order||target_order>MAX_SUPPORT_ORDER||splited_order>MAX_SUPPORT_ORDER){//外部的错误参数
+    if(splited_order<target_order||target_order>max_supprt_order||splited_order>max_supprt_order){//外部的错误参数
         error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::SPLIT_PAGE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_INVALID_ORDER;
         return error;
     }
@@ -398,7 +453,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::split_page(uint64_t 
     statistics.split_count++;
     return split_page(splited_idx<<1,splited_order-1,target_order);
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64_t in_bcb_idx, uint8_t order)
+KURD_t FreePagesAllocator::BuddyControlBlock::conanico_free(uint64_t in_bcb_idx, uint8_t order)
 {
     KURD_t success=default_success();
     KURD_t error=default_error();
@@ -406,7 +461,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
     error.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_CONANICO_FREE;
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_CONANICO_FREE;
     fatal.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_CONANICO_FREE;
-    if(order>MAX_SUPPORT_ORDER){
+    if(order>max_supprt_order){
         error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::CONANICO_FREE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_INVALID_ORDER;
         return error;
     }
@@ -414,7 +469,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
         error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::CONANICO_FREE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_DOUBLE_FREE;
         return error;
     }
-    if(in_bcb_idx>=1ULL<<(MAX_SUPPORT_ORDER-order)){
+    if(in_bcb_idx>=1ULL<<(max_supprt_order-order)){
         error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::CONANICO_FREE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_INVALID_PAGE_INDEX;
         return error;
     }
@@ -426,7 +481,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
     statistics.free_count[order]++;
     uint8_t current_order=order;
     uint64_t current_idx=in_bcb_idx;
-    for(;current_order<MAX_SUPPORT_ORDER;current_order++){
+    for(;current_order<max_supprt_order;current_order++){
         uint64_t buddy_idx=current_idx^1;
         if(!order_freepage_existency_bitmaps->bit_get(order_bases[current_order]+buddy_idx)){
             statistics.fold_count_fail++;
@@ -458,20 +513,15 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::conanico_free(uint64
     #endif
     return success;
 }
-bool FreePagesAllocator::free_pages_in_seg_control_block::is_addr_belong_to_this_BCB_no_lock(phyaddr_t addr)
+bool FreePagesAllocator::BuddyControlBlock::is_addr_belong_to_this_BCB(phyaddr_t addr)
 {
     uint64_t base_val = static_cast<uint64_t>(this->base);
     uint64_t addr_val = static_cast<uint64_t>(addr);
-    uint64_t end_val = base_val + (static_cast<uint64_t>(1) << (MAX_SUPPORT_ORDER+12));
+    uint64_t end_val = base_val + (static_cast<uint64_t>(1) << (max_supprt_order+12));
     
     return (base_val <= addr_val) && (addr_val < end_val);
 }
-bool FreePagesAllocator::free_pages_in_seg_control_block::is_addr_belong_to_this_BCB(phyaddr_t addr)
-{
-    bcb_lock_guard_t guard(lock);
-    return is_addr_belong_to_this_BCB_no_lock(addr);
-}
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_buddy_way(phyaddr_t base, uint64_t size)
+KURD_t FreePagesAllocator::BuddyControlBlock::free_buddy_way(phyaddr_t base, uint64_t size)
 {
     bcb_lock_guard_t guard(lock);
     bool base_belong=is_addr_belong_to_this_BCB_no_lock(base);
@@ -487,9 +537,9 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_buddy_way(phyad
         return fail;
     }
 }
-bool FreePagesAllocator::free_pages_in_seg_control_block::is_reclusive_fold_success(uint64_t idx, uint8_t order)
+bool FreePagesAllocator::BuddyControlBlock::is_reclusive_fold_success(uint64_t idx, uint8_t order)
 {
-    if(order>MAX_SUPPORT_ORDER||order==0){
+    if(order>max_supprt_order||order==0){
         return false;
     }
    
@@ -533,12 +583,12 @@ bool FreePagesAllocator::free_pages_in_seg_control_block::is_reclusive_fold_succ
         return false;
 
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::top_fold()
+void FreePagesAllocator::BuddyControlBlock::top_fold()
 {
     bcb_lock_guard_t guard(lock);
-    is_reclusive_fold_success(0,MAX_SUPPORT_ORDER);
+    is_reclusive_fold_success(0,max_supprt_order);
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_basic_info_no_lock()
+void FreePagesAllocator::BuddyControlBlock::print_basic_info_no_lock()
 {
     /**
      * 打印base，MAX_SUPPORT_ORDER，suggest_order_free_page_index[DESINGED_MAX_SUPPORT_ORDER]数组的有效条目
@@ -549,12 +599,12 @@ void FreePagesAllocator::free_pages_in_seg_control_block::print_basic_info_no_lo
     kio::bsp_kout << base << kio::kendl;
     kio::bsp_kout.shift_dec();  // 切换回十进制模式
     kio::bsp_kout << "Max Support Order: ";
-    kio::bsp_kout << (uint32_t)MAX_SUPPORT_ORDER << kio::kendl;
+    kio::bsp_kout << (uint32_t)max_supprt_order << kio::kendl;
     kio::bsp_kout << "Suggest Order Free Page Index Cache:" << kio::kendl;
-    for(uint8_t i = 0; i <=MAX_SUPPORT_ORDER; i++){
+    for(uint8_t i = 0; i <=max_supprt_order; i++){
         kio::bsp_kout<<"order "<<i<< " free_count:"<<statistics.free_count[i]<<kio::kendl;
     }
-    for (uint8_t i = 0; i <=MAX_SUPPORT_ORDER; i++) {
+    for (uint8_t i = 0; i <=max_supprt_order; i++) {
         bool any=false;
         for (uint8_t j = 0; j < PER_ORDER_CACHE_SUGGEST_COUNT; ++j) {
             if (suggest_order_free_page_index[i][j] != INVALID_INBCB_INDEX) {
@@ -572,43 +622,43 @@ void FreePagesAllocator::free_pages_in_seg_control_block::print_basic_info_no_lo
     }
 
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_basic_info()
+void FreePagesAllocator::BuddyControlBlock::print_basic_info()
 {
     bcb_lock_guard_t guard(lock);
     print_basic_info_no_lock();
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_info_no_lock()
+void FreePagesAllocator::BuddyControlBlock::print_bitmap_info_no_lock()
 {
     kio::bsp_kout << "[Bitmap Info for all Orders]" << kio::kendl;
     
-    for (uint8_t order = 0; order < MAX_SUPPORT_ORDER; order++) {
+    for (uint8_t order = 0; order < max_supprt_order; order++) {
         print_bitmap_order_info_compress_no_lock(order);
     }
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_info()
+void FreePagesAllocator::BuddyControlBlock::print_bitmap_info()
 {
     bcb_lock_guard_t guard(lock);
     print_bitmap_info_no_lock();
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_order_info_compress_no_lock(uint8_t order)
+void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_info_compress_no_lock(uint8_t order)
 {
-    print_bitmap_order_interval_compress_no_lock(order, 0, 1ULL << (MAX_SUPPORT_ORDER - order));
+    print_bitmap_order_interval_compress_no_lock(order, 0, 1ULL << (max_supprt_order - order));
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_order_info_compress(uint8_t order)
+void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_info_compress(uint8_t order)
 {
     bcb_lock_guard_t guard(lock);
     print_bitmap_order_info_compress_no_lock(order);
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_order_interval_compress_no_lock(uint8_t order, uint64_t base, uint64_t length)
+void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress_no_lock(uint8_t order, uint64_t base, uint64_t length)
 {
     kio::bsp_kout << "[Bitmap Order " << (uint32_t)order << " Interval Compress Print]" << kio::kendl;
     
-    if (order >= MAX_SUPPORT_ORDER) {
+    if (order >= max_supprt_order) {
         kio::bsp_kout << "Invalid order!" << kio::kendl;
         return;
     }
     
-    uint64_t max_count = 1 << (MAX_SUPPORT_ORDER - order);
+    uint64_t max_count = 1 << (max_supprt_order - order);
     
     // 确保base和length不超过有效范围
     if (base >= max_count) {
@@ -662,21 +712,21 @@ void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_order_int
         }
     }
 }
-void FreePagesAllocator::free_pages_in_seg_control_block::print_bitmap_order_interval_compress(uint8_t order, uint64_t base, uint64_t length)
+void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress(uint8_t order, uint64_t base, uint64_t length)
 {
     bcb_lock_guard_t guard(lock);
     print_bitmap_order_interval_compress_no_lock(order, base, length);
 }
-KURD_t FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush()
+KURD_t FreePagesAllocator::BuddyControlBlock::free_pages_flush()
 {
     bcb_lock_guard_t guard(lock);
     KURD_t success=default_success();
     KURD_t fatal=default_fatal();
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT;
     fatal.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT;
-    for(uint8_t i=0;i<=MAX_SUPPORT_ORDER;i++){
+    for(uint8_t i=0;i<=max_supprt_order;i++){
         uint64_t actual_free_count=0;
-        for(uint64_t j=0;j<(1ULL<<(MAX_SUPPORT_ORDER-i));j++){
+        for(uint64_t j=0;j<(1ULL<<(max_supprt_order-i));j++){
             if(order_freepage_existency_bitmaps->bit_get(order_bases[i]+j))
                 actual_free_count++;
         }

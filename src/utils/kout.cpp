@@ -500,14 +500,14 @@ kio::kout &kio::kout::operator<<(now_time time)
     statistics.calls_now_time++;
     #ifdef KERNEL_MODE 
     
-    if(time::hardware_time::get_if_hpet_initialized()){
+    if(ktime::hardware_time::get_if_hpet_initialized()){
         *this<<'[';
-        miusecond_time_stamp_t stamp=time::hardware_time::get_stamp();
+        miusecond_time_stamp_t stamp=ktime::hardware_time::get_stamp();
         print_numer(&stamp, DEC, 8, false);
         *this<<']';
     }else{
         *this<<'<';
-        miusecond_time_stamp_t stamp=time::hardware_time::get_stamp();
+        miusecond_time_stamp_t stamp=ktime::hardware_time::get_stamp();
         print_numer(&stamp, DEC, 8, false);
         *this<<'>';
     }

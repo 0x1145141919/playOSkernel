@@ -36,25 +36,12 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t kpoolmemmgr_t::HCB_v2::HCB_bitmap
     }
     return kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t::SUCCESS;
 }
-int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init()
+int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init(loaded_VM_interval *first_static_heap_bitmap)
 {
-    if(this!=&kpoolmemmgr_t::first_linekd_heap.bitmap_controller)
-    {
-        return OS_BAD_FUNCTION;
-    }
-    uint32_t bitmap_size_in_byte=0;
-#ifdef KERNEL_MODE
-    this->bitmap=(uint64_t*)&__heap_bitmap_start;
-    bitmap_size_in_byte=((uint64_t)&__heap_bitmap_end-(uint64_t)&__heap_bitmap_start);
-#endif
-#ifdef USER_MODE
-    this->bitmap=(uint64_t*)malloc(FIRST_STATIC_HEAP_SIZE/128);
-    bitmap_size_in_byte=FIRST_STATIC_HEAP_SIZE/128;
-#endif
-    bitmap_size_in_64bit_units=bitmap_size_in_byte/8;
-    byte_bitmap_base=(uint8_t*)this->bitmap;
-    ksetmem_8(this->bitmap, 0, bitmap_size_in_byte);
+    bitmap=(uint64_t*)first_static_heap_bitmap->vbase;
     bitmap_used_bit=0;
+    bitmap_size_in_64bit_units=first_static_heap_bitmap->size/sizeof(uint64_t);
+    byte_bitmap_base=(uint8_t*)bitmap;
     return OS_SUCCESS;
 }
 KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::default_kurd()
@@ -317,24 +304,13 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
     return SUCCESS;
 }
 
-int kpoolmemmgr_t::HCB_v2::first_linekd_heap_Init()
+int kpoolmemmgr_t::HCB_v2::first_linekd_heap_Init(loaded_VM_interval *first_static_heap, loaded_VM_interval *first_static_heap_bitmap)
 {
-    if(this!=&kpoolmemmgr_t::first_linekd_heap)return OS_BAD_FUNCTION;
-    #ifdef KERNEL_MODE
-    int status=this->bitmap_controller.Init();
-    phybase=(phyaddr_t)&_heap_lma;
-    vbase=(vaddr_t)&__heap_start;
-    total_size_in_bytes=(uint64_t)&__heap_end-(uint64_t)&__heap_start;
-    return status;  
-    #endif
-     
-    #ifdef USER_MODE
-    vbase=(vaddr_t)malloc(FIRST_STATIC_HEAP_SIZE);
-    phybase=vbase;
-    total_size_in_bytes=FIRST_STATIC_HEAP_SIZE;
-    if(vbase==NULL)return OS_OUT_OF_MEMORY;
+    bitmap_controller.Init(first_static_heap_bitmap);
+    vbase=first_static_heap->vbase;
+    phybase=first_static_heap->pbase;
+    total_size_in_bytes=first_static_heap->size;
     return OS_SUCCESS;
-    #endif
 }
 
 

@@ -1,8 +1,10 @@
 #include "firmware/UefiRunTimeServices.h"
 #include "util/OS_utils.h"
-#include  "memory/Memory.h"
+#include "memory/Memory.h"
 #include "memory/AddresSpace.h"
 #include "os_error_definitions.h"
+#include "memory/init_memory_info.h"
+
 EFI_SYSTEM_TABLE*global_gST;
 EFI_SYSTEM_TABLE* EFI_RT_SVS::gST;
 EFI_RESET_SYSTEM EFI_RT_SVS::reset_system;
@@ -15,25 +17,29 @@ EFI_CONVERT_POINTER EFI_RT_SVS::convert_pointer;
 EFI_RT_SVS::EFI_RT_SVS()
 {
 }
-int EFI_RT_SVS::Init(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
+int EFI_RT_SVS::Init(EFI_SYSTEM_TABLE *sti)
 {
-    gST = sti;
-    uint64_t filter_maxcount = gBaseMemMgr.getEfiMemoryDescriptorTableEntryCount();
-    EFI_MEMORY_DESCRIPTORX64*entries_fileter= new EFI_MEMORY_DESCRIPTORX64[filter_maxcount];
-    EFI_MEMORY_DESCRIPTORX64*copyptr=gBaseMemMgr.getEfiMemoryDescriptorTable();
-    uint16_t gST_locate_index=0;
-    for (uint64_t i = 0; i < filter_maxcount; i++)
+   gST = sti;
+   uint64_t filter_maxcount = phymem_segments_count;
+    loaded_VM_interval*entries_fileter= new loaded_VM_interval[filter_maxcount];
+   uint16_t gST_locate_index=0;
+    for (uint64_t i = 0,i1=0; i < filter_maxcount; i++)
     {
-        if (copyptr[i].Attribute & EFI_MEMORY_RUNTIME)
+       if (phymem_segments[i].type==EFI_RUNTIME_SERVICES_CODE||
+       phymem_segments[i].type==EFI_RUNTIME_SERVICES_DATA||
+       phymem_segments[i].type==EFI_ACPI_RECLAIM_MEMORY)
         {
             KURD_t kurd=KURD_t();
-            vaddr_t vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,copyptr[i].PhysicalStart,4096*copyptr[i].NumberOfPages,KspaceMapMgr::PG_RWX,0);
-            if(!vbase)return kurd_get_raw(kurd);            
-            copyptr[i].VirtualStart=(vaddr_t)vbase;
-            if(copyptr[i].PhysicalStart<=(phyaddr_t)sti&&(phyaddr_t)sti<(copyptr[i].PhysicalStart+4096*copyptr[i].NumberOfPages))
+           vaddr_t vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,phymem_segments[i].start,phymem_segments[i].size,KspaceMapMgr::PG_RWX,0);
+           if(!vbase)return kurd_get_raw(kurd);
+           entries_fileter[i1].pbase=phymem_segments[i].start;
+           entries_fileter[i1].size=phymem_segments[i].size;            
+           entries_fileter[i1].vbase=(vaddr_t)vbase;
+           if(phymem_segments[i].start<=(phyaddr_t)sti&&(phyaddr_t)sti<(phymem_segments[i].size+phymem_segments[i].start))
             {
-                gST_locate_index=i;
+               gST_locate_index=i1;
             }
+            i1++;
         }
     }
     reset_system = (EFI_RESET_SYSTEM)gST->RuntimeServices->ResetSystem;
@@ -43,7 +49,7 @@ int EFI_RT_SVS::Init(EFI_SYSTEM_TABLE *sti,uint64_t mapver)
     set_wakeup_time = (EFI_SET_WAKEUP_TIME)gST->RuntimeServices->SetWakeupTime;
     set_virtual_address_map = (EFI_SET_VIRTUAL_ADDRESS_MAP)gST->RuntimeServices->SetVirtualAddressMap;
     convert_pointer = (EFI_CONVERT_POINTER)gST->RuntimeServices->ConvertPointer;
-    gST=(EFI_SYSTEM_TABLE*)(copyptr[gST_locate_index].VirtualStart-copyptr[gST_locate_index].PhysicalStart+(uint64_t)sti);
+   gST=(EFI_SYSTEM_TABLE*)(entries_fileter[gST_locate_index].vbase-entries_fileter[gST_locate_index].pbase+(uint64_t)sti);
     return OS_SUCCESS;
 }
 

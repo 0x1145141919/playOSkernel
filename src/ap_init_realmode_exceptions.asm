@@ -5,7 +5,7 @@ global ap_init_patch_idt_rm
 %include "checkpoint.inc"
 %define realmode_magic 0x15
 extern realmode_enter_checkpoint
-SECTION .boottext
+SECTION .ap_bootstrap_text
 realmode_interrupt_handlers:
 bits 16
     .divide_by_zero:
@@ -461,7 +461,7 @@ bits 64
     pop rax
     ret
 
-SECTION .init_rodata
+SECTION .ap_bootstrap_data
 ; IDT定义 - 实模式16位下的前32个向量（实际上实模式使用向量跳转表，此处为模拟结构）
 idt_table_rm:
     ; 实模式下实际不使用IDT，而是使用向量跳转表

@@ -3,6 +3,8 @@
 #include "memory/AddresSpace.h"
 #include "os_error_definitions.h"
 #include "panic.h"
+#include "memory/init_memory_info.h"
+
 acpimgr_t gAcpiVaddrSapceMgr;
 typedef uint64_t GUID_DEF[2];
 bool is_guid_equal(GUID_DEF *a, GUID_DEF *b)
@@ -12,8 +14,8 @@ bool is_guid_equal(GUID_DEF *a, GUID_DEF *b)
 
 int acpimgr_t::Init(EFI_SYSTEM_TABLE *st)
 {
-    RSDP_struct *rsdp_phy = nullptr;
-    uint8_t configtb_count=st->NumberOfTableEntries;
+  RSDP_struct *rsdp_phy = nullptr;
+  uint8_t configtb_count=st->NumberOfTableEntries;
     bool compare_result;
     EFI_CONFIGURATION_TABLE *configtb_base = st->ConfigurationTable;
     EFI_GUID acpi_guid = ACPI_20_TABLE_GUID;
@@ -27,53 +29,69 @@ int acpimgr_t::Init(EFI_SYSTEM_TABLE *st)
        }
     }
     
-    // 检查是否找到ACPI表
+    // 检查是否找到 ACPI 表
     if (!rsdp_phy) {
         return OS_ACPI_NOT_FOUNED;
     }
-    phy_memDescriptor *des;
-    uint64_t xsdt_phy = rsdp_phy->XsdtAddress;
-    des = gBaseMemMgr.queryPhysicalMemoryUsage((phyaddr_t)xsdt_phy);
-    if (!des || des->Type!=EFI_ACPI_RECLAIM_MEMORY)
+    
+    // 从全局 phymem_segments 中查找 XSDT 所在的内存段
+  phy_memDescriptor des_temp;
+  phy_memDescriptor *des = nullptr;
+  uint64_t xsdt_phy = rsdp_phy->XsdtAddress;
+    
+    // 遍历 phymem_segments 数组查找包含 XSDT 物理地址的段
+    for(uint64_t i = 0; i < phymem_segments_count; i++) {
+      phymem_segment& seg = phymem_segments[i];
+        if(xsdt_phy >= seg.start && xsdt_phy < seg.start + seg.size) {
+            // 找到了包含 XSDT 的内存段
+            des_temp.PhysicalStart = seg.start;
+            des_temp.NumberOfPages = seg.size / 0x1000;  // 转换为页数
+            des_temp.Type = seg.type;
+            des = &des_temp;
+            break;
+        }
+    }
+    
+    if (!des || des->Type != EFI_ACPI_RECLAIM_MEMORY)
     {
         return OS_INVALID_PARAMETER;
     }
+    
     KURD_t kurd;
-    acpi_seg_vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,des->PhysicalStart, des->NumberOfPages * 0x1000, KspaceMapMgr::PG_RW,0);
-    acpi_seg_pbase=des->PhysicalStart;
-    acpi_seg_size=des->NumberOfPages * 0x1000;
-    if(acpi_seg_vbase==0)return kurd_get_raw(kurd);
-    uint64_t acpi_seg_offset = acpi_seg_vbase - des->PhysicalStart;
-    XSDT_OFFSET = xsdt_phy-acpi_seg_pbase;
-    XSDT_Table*vXSDT = (XSDT_Table*)(XSDT_OFFSET+acpi_seg_pbase);
+    acpi_seg_vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd, des->PhysicalStart, des->NumberOfPages * 0x1000, KspaceMapMgr::PG_RW, 0);
+    acpi_seg_pbase = des->PhysicalStart;
+    acpi_seg_size = des->NumberOfPages * 0x1000;
+    if(acpi_seg_vbase == 0) return kurd_get_raw(kurd);
+    
+    XSDT_OFFSET = xsdt_phy - acpi_seg_pbase;
+    XSDT_Table *vXSDT = (XSDT_Table*)(XSDT_OFFSET + acpi_seg_pbase);
     xsdt_entry_count = (vXSDT->Header.Length - sizeof(ACPI_Table_Header)) / sizeof(uint64_t);
     for (int i = 0; i < xsdt_entry_count; i++)
     {
-       uint32_t Sig=*(uint32_t*)vXSDT->Entry[i];
+     uint32_t Sig = *(uint32_t*)vXSDT->Entry[i];
        switch (Sig)
        {
         case FADT_SIGNATURE_UINT32:
         {
-        FADT_OFFSET = (uint64_t)((FADT_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
-        FADT_Table*vFADT = (FADT_Table*)(acpi_seg_pbase+FADT_OFFSET);
-        DSDT_OFFSET = (uint64_t)(vFADT->Dsdt-acpi_seg_pbase);
-        break;
+            FADT_OFFSET = (uint64_t)((FADT_Table*)vXSDT->Entry[i]) - acpi_seg_pbase;
+            FADT_Table *vFADT = (FADT_Table*)(acpi_seg_pbase + FADT_OFFSET);
+            DSDT_OFFSET = (uint64_t)(vFADT->Dsdt - acpi_seg_pbase);
+            break;
         }
         case FACS_SIGNATURE_UINT32:
-        FACS_OFFSET = (uint64_t)((FACS_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
-        /* code */
-        break;
+            FACS_OFFSET = (uint64_t)((FACS_Table*)vXSDT->Entry[i]) - acpi_seg_pbase;
+            break;
         case MADT_SIGNATURE_UINT32:
-        MADT_OFFSET = (uint64_t)((MADT_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
-        break;
+            MADT_OFFSET = (uint64_t)((MADT_Table*)vXSDT->Entry[i]) - acpi_seg_pbase;
+            break;
         case MCFG_SIGNATURE_UINT32:
-        MCFG_OFFSET = (uint64_t)((MCFG_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
-        break;
+            MCFG_OFFSET = (uint64_t)((MCFG_Table*)vXSDT->Entry[i]) - acpi_seg_pbase;
+            break;
         case HPET_SIGNATURE_UINT32:
-        HPET_OFFSET = (uint64_t)((HPET_Table*)vXSDT->Entry[i])-acpi_seg_pbase;
-        break;
+            HPET_OFFSET = (uint64_t)((HPET_Table*)vXSDT->Entry[i]) - acpi_seg_pbase;
+            break;
         default:
-        break;
+            break;
        }
     }
     

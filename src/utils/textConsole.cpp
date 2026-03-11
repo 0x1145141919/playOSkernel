@@ -49,6 +49,7 @@ spintrylock_cpp_t textconsole_GoP::runtime_service_create_lock = {};
 tc_ring textconsole_GoP::runtime_ring = {};
 bool textconsole_GoP::ready = false;
 uint16_t textconsole_GoP::glyph_index[256] = {};
+bool textconsole_GoP::is_font_rendered = false;
 
 KURD_t textconsole_GoP::default_kurd()
 {
@@ -139,6 +140,64 @@ KURD_t textconsole_GoP::Init(
         return fail;
     }
 
+    // 初始化直接位图渲染模式所需的参数
+    font_bitmap = font_bitmap_param;
+    font_color = font_color_param;
+    background_color = background_color_param;
+
+    // 初始化 glyph_index 表（用于后续 enable_font_render）
+    static constexpr uint32_t kFirstPrintable = 0x20;
+    static constexpr uint32_t kLastPrintable = 0x7E;
+    static constexpr uint32_t kPrintableCount = kLastPrintable - kFirstPrintable + 1;
+    static constexpr uint32_t kPlaceholderIndex = 0;
+    static constexpr uint32_t kPrintableBaseIndex = 1;
+    const uint32_t glyph_count = kPrintableCount + 1;
+    
+    for (uint32_t ch = 0; ch < 256; ++ch) {
+        if (ch >= kFirstPrintable && ch <= kLastPrintable) {
+            glyph_index[ch] = static_cast<uint16_t>(kPrintableBaseIndex + (ch - kFirstPrintable));
+        } else {
+            glyph_index[ch] = static_cast<uint16_t>(kPlaceholderIndex);
+        }
+    }
+
+    // 初始化状态：直接位图渲染模式
+    glyph_cache = nullptr;
+    template_character.width = 0;
+    template_character.height = 0;
+    template_character.stride_bytes = 0;
+    template_character.pixels = nullptr;
+
+    cursor = {0, 0};
+    runtime_ring.head = 0;
+    runtime_ring.tail = 0;
+    runtime_ring.seq_gen = 0;
+    runtime_ring.drop_count = 0;
+    runtime_ring.push_count = 0;
+    runtime_ring.pop_count = 0;
+    runtime_ring.service_thread_sleeping = false;
+    runtime_service_task = nullptr;
+    ready = true;
+    return success;
+}
+KURD_t textconsole_GoP::enable_font_render()
+{
+    KURD_t success = default_success();
+    KURD_t fail = default_fail();
+    success.event_code = infrastructure_location_code::textconsole_GoP_events::textconsole_GoP_event_init;
+    fail.event_code = infrastructure_location_code::textconsole_GoP_events::textconsole_GoP_event_init;
+
+    if (!ready) {
+        fail.reason = infrastructure_location_code::textconsole_GoP_events::init_results::fail_reasons::gfx_not_ready;
+        return fail;
+    }
+
+    if (is_font_rendered) {
+        // 已经启用过字体渲染，直接返回成功
+        return success;
+    }
+
+    // 申请 glyph_cache 内存
     static constexpr uint32_t kFirstPrintable = 0x20;
     static constexpr uint32_t kLastPrintable = 0x7E;
     static constexpr uint32_t kPrintableCount = kLastPrintable - kFirstPrintable + 1;
@@ -151,30 +210,20 @@ KURD_t textconsole_GoP::Init(
     const uint64_t page_count = alloc_bytes / 0x1000;
 
     KURD_t kurd = empty_kurd;
-    glyph_cache = __wrapped_pgs_valloc(&kurd, page_count, KERNEL, 12);
-    if (glyph_cache == nullptr || error_kurd(kurd)) {
+    void* new_glyph_cache = __wrapped_pgs_valloc(&kurd, page_count, KERNEL, 12);
+    if (new_glyph_cache == nullptr || error_kurd(kurd)) {
         fail.reason = infrastructure_location_code::textconsole_GoP_events::init_results::fail_reasons::glyph_cache_alloc_fail;
         return error_kurd(kurd) ? kurd : fail;
     }
 
-    font_bitmap = font_bitmap_param;
-    font_color = font_color_param;
-    background_color = background_color_param;
-
+    // 设置 template_character
     template_character.width = static_cast<uint32_t>(view.cell.x);
     template_character.height = static_cast<uint32_t>(view.cell.y);
     template_character.stride_bytes = static_cast<uint32_t>(view.cell.x) * 4;
-    template_character.pixels = glyph_cache;
+    template_character.pixels = new_glyph_cache;
 
-    for (uint32_t ch = 0; ch < 256; ++ch) {
-        if (ch >= kFirstPrintable && ch <= kLastPrintable) {
-            glyph_index[ch] = static_cast<uint16_t>(kPrintableBaseIndex + (ch - kFirstPrintable));
-        } else {
-            glyph_index[ch] = static_cast<uint16_t>(kPlaceholderIndex);
-        }
-    }
-
-    const uint8_t* bitmap = font_bitmap_param;
+    // 预渲染所有字符到 glyph_cache
+    const uint8_t* bitmap = font_bitmap;
     const uint32_t bytes_per_row = 2;
     const uint32_t row_bytes = template_character.stride_bytes;
     const uint64_t color64_bg = (static_cast<uint64_t>(background_color) << 32) | background_color;
@@ -183,7 +232,7 @@ KURD_t textconsole_GoP::Init(
         uint32_t render_idx = (idx == kPlaceholderIndex)
             ? 2
             : (kFirstPrintable + (idx - kPrintableBaseIndex));
-        uint8_t* glyph_base = static_cast<uint8_t*>(glyph_cache) + glyph_bytes * idx;
+        uint8_t* glyph_base = static_cast<uint8_t*>(new_glyph_cache) + glyph_bytes * idx;
         const uint8_t* glyph_bitmap = bitmap + render_idx * view.cell.y * bytes_per_row;
 
         for (int row = 0; row < view.cell.y; ++row) {
@@ -205,19 +254,10 @@ KURD_t textconsole_GoP::Init(
         }
     }
 
-    cursor = {0, 0};
-    runtime_ring.head = 0;
-    runtime_ring.tail = 0;
-    runtime_ring.seq_gen = 0;
-    runtime_ring.drop_count = 0;
-    runtime_ring.push_count = 0;
-    runtime_ring.pop_count = 0;
-    runtime_ring.service_thread_sleeping = false;
-    runtime_service_task = nullptr;
-    ready = true;
+    glyph_cache = new_glyph_cache;
+    is_font_rendered = true;
     return success;
 }
-
 bool textconsole_GoP::Ready()
 {
     return ready;
@@ -260,15 +300,59 @@ void textconsole_GoP::PutChar(char ch)
         }
         default: {
             unsigned char uch = static_cast<unsigned char>(ch);
-            uint16_t idx = glyph_index[uch];
-            const uint64_t glyph_bytes = static_cast<uint64_t>(view.cell.x) * view.cell.y * 4;
-            template_character.pixels = static_cast<uint8_t*>(glyph_cache) + glyph_bytes * idx;
+            
+            if (is_font_rendered) {
+                // 缓存渲染模式：使用 glyph_cache
+                uint16_t idx = glyph_index[uch];
+                const uint64_t glyph_bytes = static_cast<uint64_t>(view.cell.x) * view.cell.y * 4;
+                template_character.pixels = static_cast<uint8_t*>(glyph_cache) + glyph_bytes * idx;
 
-            Vec2i pos = {
-                view.pos.x + cursor.m * view.cell.x,
-                view.pos.y + cursor.n * view.cell.y
-            };
-            GfxPrim::Blit(pos, &template_character);
+                Vec2i pos = {
+                    view.pos.x + cursor.m * view.cell.x,
+                    view.pos.y + cursor.n * view.cell.y
+                };
+                GfxPrim::Blit(pos, &template_character);
+            } else {
+                // 直接位图渲染模式：逐 bit调用 PutPixel
+                uint16_t idx = glyph_index[uch];
+                const uint32_t bytes_per_row = 2;
+                const uint8_t* char_bitmap = font_bitmap + idx * view.cell.y * bytes_per_row;
+                
+                Vec2i base_pos = {
+                    view.pos.x + cursor.m * view.cell.x,
+                    view.pos.y + cursor.n * view.cell.y
+                };
+                
+                // 先用背景色填充字符区域
+                GfxPrim::FillRect(base_pos, view.cell, background_color);
+                
+                // 逐行逐 bit 绘制前景像素
+                for (int row = 0; row < view.cell.y; ++row) {
+                    const uint8_t bitmap_byte = char_bitmap[row * bytes_per_row];
+                    for (int bit = 0; bit < 8; ++bit) {
+                        if (bitmap_byte & (0x80 >> bit)) {
+                            Vec2i pixel_pos = {
+                                base_pos.x + bit,
+                                base_pos.y + row
+                            };
+                            GfxPrim::PutPixel(pixel_pos, font_color);
+                        }
+                    }
+                    // 处理第二个字节（如果有）
+                    if (bytes_per_row > 1) {
+                        const uint8_t bitmap_byte2 = char_bitmap[row * bytes_per_row + 1];
+                        for (int bit = 0; bit < 8; ++bit) {
+                            if (bitmap_byte2 & (0x80 >> bit)) {
+                                Vec2i pixel_pos = {
+                                    base_pos.x + 8 + bit,
+                                    base_pos.y + row
+                                };
+                                GfxPrim::PutPixel(pixel_pos, font_color);
+                            }
+                        }
+                    }
+                }
+            }
 
             cursor.m += 1;
             break;
@@ -286,13 +370,13 @@ void textconsole_GoP::PutChar(char ch)
     }
 }
 
-void textconsole_GoP::PutString(const char* s)
+void textconsole_GoP::PutString(const char* s,uint64_t len)
 {
     if (!ready || s == nullptr) return;
-    for (const char* p = s; *p; ++p) {
+    uint64_t left=len;
+    for (const char* p = s; *p&&left; ++p,left--) {
         PutChar(*p);
     }
-    //GfxPrim::Flush();
 }
 
 void textconsole_GoP::Clear()

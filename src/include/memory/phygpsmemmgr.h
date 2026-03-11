@@ -4,6 +4,7 @@
 #include <util/lock.h>
 #include <util/Ktemplats.h>
 #include "memory/memmodule_err_definitions.h"
+#include "init_to_kernel_info.h"
 typedef  uint64_t phyaddr_t;
 namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR=8;//[8~15]是phymemspace_mgr的子模块
@@ -529,7 +530,7 @@ class phymemspace_mgr{
         };
         entry_t*entries;
     };
-    static free_segs_t*free_segs_get();//慎用，此函数会锁住整个模块扫描整个模块的表汇报内容，用于FreePagesAllocator的伙伴系统初始化内存段
+    static free_segs_t*free_segs_get();//慎用，此函数会锁住整个模块扫描整个模块的表汇报内容，用于FreePagesAllocator的伙伴系统初始化内存段。返回值与entries均在堆上，调用者负责delete[] entries并delete该结构体。
     static KURD_t blackhole_acclaim(
         phyaddr_t base,
         uint64_t numof_4kbpgs,
@@ -544,7 +545,7 @@ class phymemspace_mgr{
     );
     static PHYSEG get_physeg_by_addr(phyaddr_t addr);
     static phymemmgr_statistics_t get_statisit_copy();
-    static void subtb_alloc_is_pool_way_flag_enable();
+    static void subtb_alloc_shift_pages_way();
     /** 
      * 这个函数的工作是
      * 1.    phyaddr_t base;
@@ -558,7 +559,7 @@ class phymemspace_mgr{
      * 3.对于尾巴剩余的内存，用标准接口注册为reserved
      */
     
-    static KURD_t Init();
+    static KURD_t Init(init_to_kernel_info*info);
     #ifdef USER_MODE
     phymemspace_mgr();
     #endif

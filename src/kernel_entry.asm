@@ -51,11 +51,11 @@ global pemode_enter_checkpoint
 global _kernel_Init
 global pml4_table_init
 global pml5_table_init
-
+global assigned_cr3
 global AP_realmode_start
 global assigned_processor_id
 
-SECTION .bootdata
+SECTION .ap_bootstrap_data
 
 
 ; 定义两个check_point结构体
@@ -66,8 +66,9 @@ pemode_enter_checkpoint:
     resb check_point_size
 assigned_processor_id:
     dd 0
-
-SECTION .boottext
+assigned_cr3:
+    dd 0
+SECTION .ap_bootstrap_text
 
 AP_realmode_start:
 .ap_start:
@@ -110,7 +111,7 @@ bits 32
     and eax, ~(((1 << 12)))    ; 修复位运算表达式语法
     and eax, ~(((1 << 4)))     ; 修复位运算表达式语法
     mov cr4, eax
-    mov eax, pml4_table_init
+    mov eax, [assigned_cr3]
     mov cr3, eax
     mov ecx, 0xC0000080
     rdmsr
@@ -132,15 +133,57 @@ bits 64
     
     
     
-_kernel_Init:
 
-    ; 使用四级分页
-    mov rax, pml4_table_init
-    mov cr3, rax
+SECTION .ap_bootstrap_rodata
+align 0x1000
+
+; GDT定义
+gdt_start:
+    dq 0                                ; Nullwan quan bu yi yang descriptor
+gdt_code:
+    dw 0xFFFF                           ; Limit
+    dw 0                                ; Base (low)
+    db 0                                ; Base (middle)
+    db 10011010b                        ; Access byte (Present, Ring 0, Code, Exec Read)
+    db 11001111b                        ; Flags (Granularity 4KB, 32-bit mode)
+    db 0                                ; Base (high)
+gdt_data:
+    dw 0xFFFF                           ; Limit
+    dw 0                                ; Base (low)
+    db 0                                ; Base (middle)
+    db 10010010b                        ; Access byte (Present, Ring 0, Data, Read Write)
+    db 11001111b                        ; Flags (Granularity 4KB, 32-bit mode)
+    db 0                                ; Base (high)
+gdt_longmode_code:
+    dw 0xFFFF                           ; Limit
+    dw 0                                ; Base (low)
+    db 0                                ; Base (middle)
+    db 10011000b                        ; Access byte (Present, Ring 0, Code, Exec Read)
+    db 10101111b                        ; Flags (Granularity 4KB, 64-bit mode)
+    db 0  
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1          ; GDT limit
+    dd gdt_start                        ; GDT base address
+; 实模式下的中断处理例程标签（用于模拟实模式，实际实模式使用向量跳转表）
+
+SECTION .ap_bootstrap_stack
+align 0x1000
+times 2048 dq 0
+init_stack_end:                         ; 为AP初始栈分配空间
+SECTION .text
+bits 64
+global secure_hlt
+global ap_final_work
+extern get_current_processor_rsp0
+_kernel_Init:
+    mov ecx, 0x277
+    mov eax, 0x00070106
+    mov edx, 0x04070506
+    wrmsr
     jmp .patch_bsp_idt
 .paging_done:
-    ; 恢复寄存器
-    mov rsp,_stack_top
     mov ecx, 0xC0000080
     rdmsr
     or eax, (1<<11)|(1<<8)|1
@@ -325,98 +368,6 @@ extern  bsp_init_idt_entries;这个IDT表
     mov dword [rbx + 0xFF*16 + 8], eax  ; offset_high
     mov dword [rbx + 0xFF*16 + 12], 0   ; reserved
     jmp .paging_done
-SECTION .init_rodata
-align 0x1000
-pml4_table_init:
-dq pml4_table_pdpt_lowmem_rigon+0x3
-times 255 dq 0
-dq pml4_table_pdpt_lowmem_rigon+0x3
-times 255 dq 0
-
-pml4_table_pdpt_lowmem_rigon:
-; PDPT[0]: use 4KB pages for fine-grained low memory hole.
-dq pml4_table_pd_lowmem_0_1g+0x3
-; PDPT[1..511]: keep 1GB identity map.
-%assign i 1
-%rep 511
-dq i*PAGE_SIZE_IN_LV_2+3+PS_MASK
-%assign i  i+1
-%endrep
-%undef i
-
-; 0..1GB mapping split to support unmapped low 64KB.
-pml4_table_pd_lowmem_0_1g:
-; PD[0]: first 2MB mapped by PT.
-dq pml4_table_pt_lowmem_0_2m+0x3
-; PD[1..511]: 2MB identity map.
-%assign i 1
-%rep 511
-dq i*PAGE_SIZE_IN_LV_1+3+PS_MASK
-%assign i  i+1
-%endrep
-%undef i
-
-pml4_table_pt_lowmem_0_2m:
-; PT[0..15] (0..64KB): not present, used to catch null pointer accesses.
-times 4 dq 0
-; PT[16..511]: 4KB identity map from 64KB to 2MB.
-%assign i 4
-%rep 508
-dq i*PAGE_SIZE_IN_LV_0+3
-%assign i  i+1
-%endrep
-%undef i
-
-pml5_table_init:
-dq pml5_table_pml4_low+0x3
-times 255 dq 0
-dq pml5_table_pml4_low+0x3
-times 255 dq 0
-
-pml5_table_pml4_low:
-dq pml4_table_pdpt_lowmem_rigon+0x3
-times 511 dq 0
-
-; GDT定义
-gdt_start:
-    dq 0                                ; Nullwan quan bu yi yang descriptor
-gdt_code:
-    dw 0xFFFF                           ; Limit
-    dw 0                                ; Base (low)
-    db 0                                ; Base (middle)
-    db 10011010b                        ; Access byte (Present, Ring 0, Code, Exec Read)
-    db 11001111b                        ; Flags (Granularity 4KB, 32-bit mode)
-    db 0                                ; Base (high)
-gdt_data:
-    dw 0xFFFF                           ; Limit
-    dw 0                                ; Base (low)
-    db 0                                ; Base (middle)
-    db 10010010b                        ; Access byte (Present, Ring 0, Data, Read Write)
-    db 11001111b                        ; Flags (Granularity 4KB, 32-bit mode)
-    db 0                                ; Base (high)
-gdt_longmode_code:
-    dw 0xFFFF                           ; Limit
-    dw 0                                ; Base (low)
-    db 0                                ; Base (middle)
-    db 10011000b                        ; Access byte (Present, Ring 0, Code, Exec Read)
-    db 10101111b                        ; Flags (Granularity 4KB, 64-bit mode)
-    db 0  
-gdt_end:
-
-gdt_descriptor:
-    dw gdt_end - gdt_start - 1          ; GDT limit
-    dd gdt_start                        ; GDT base address
-; 实模式下的中断处理例程标签（用于模拟实模式，实际实模式使用向量跳转表）
-
-SECTION .init_stack
-align 0x1000
-times 2048 dq 0
-init_stack_end:                         ; 为AP初始栈分配空间
-SECTION .text
-bits 64
-global secure_hlt
-global ap_final_work
-extern get_current_processor_rsp0
 secure_hlt:
     sti 
     hlt

@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/pangsong/PS_git/OS_pj_uefi/kernel
+CMAKE_SOURCE_DIR = /home/PS/PS_git/OS_pj_uefi/kernel
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/pangsong/PS_git/OS_pj_uefi/kernel
+CMAKE_BINARY_DIR = /home/PS/PS_git/OS_pj_uefi/kernel
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,14 +87,14 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(CMAKE_COMMAND) -E cmake_progress_start /home/pangsong/PS_git/OS_pj_uefi/kernel/CMakeFiles /home/pangsong/PS_git/OS_pj_uefi/kernel/src/memory//CMakeFiles/progress.marks
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/pangsong/PS_git/OS_pj_uefi/kernel/CMakeFiles 0
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(CMAKE_COMMAND) -E cmake_progress_start /home/PS/PS_git/OS_pj_uefi/kernel/CMakeFiles /home/PS/PS_git/OS_pj_uefi/kernel/src/memory//CMakeFiles/progress.marks
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/PS/PS_git/OS_pj_uefi/kernel/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/clean
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/clean
 .PHONY : clean
 
 # The main clean target
@@ -103,22 +103,22 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/preinstall
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/preinstall
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
 
 # Convenience name for target.
 src/memory/CMakeFiles/Mem_module.dir/rule:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/CMakeFiles/Mem_module.dir/rule
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/memory/CMakeFiles/Mem_module.dir/rule
 .PHONY : src/memory/CMakeFiles/Mem_module.dir/rule
 
 # Convenience name for target.
@@ -127,7 +127,7 @@ Mem_module: src/memory/CMakeFiles/Mem_module.dir/rule
 
 # fast build rule for target.
 Mem_module/fast:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/build
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/build
 .PHONY : Mem_module/fast
 
 AddresSpace.o: AddresSpace.cpp.o
@@ -135,7 +135,7 @@ AddresSpace.o: AddresSpace.cpp.o
 
 # target to build an object file
 AddresSpace.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/AddresSpace.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/AddresSpace.cpp.o
 .PHONY : AddresSpace.cpp.o
 
 AddresSpace.i: AddresSpace.cpp.i
@@ -143,7 +143,7 @@ AddresSpace.i: AddresSpace.cpp.i
 
 # target to preprocess a source file
 AddresSpace.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/AddresSpace.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/AddresSpace.cpp.i
 .PHONY : AddresSpace.cpp.i
 
 AddresSpace.s: AddresSpace.cpp.s
@@ -151,15 +151,63 @@ AddresSpace.s: AddresSpace.cpp.s
 
 # target to generate assembly for a file
 AddresSpace.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/AddresSpace.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/AddresSpace.cpp.s
 .PHONY : AddresSpace.cpp.s
+
+FreePagesAllocator.o: FreePagesAllocator.cpp.o
+.PHONY : FreePagesAllocator.o
+
+# target to build an object file
+FreePagesAllocator.cpp.o:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/FreePagesAllocator.cpp.o
+.PHONY : FreePagesAllocator.cpp.o
+
+FreePagesAllocator.i: FreePagesAllocator.cpp.i
+.PHONY : FreePagesAllocator.i
+
+# target to preprocess a source file
+FreePagesAllocator.cpp.i:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/FreePagesAllocator.cpp.i
+.PHONY : FreePagesAllocator.cpp.i
+
+FreePagesAllocator.s: FreePagesAllocator.cpp.s
+.PHONY : FreePagesAllocator.s
+
+# target to generate assembly for a file
+FreePagesAllocator.cpp.s:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/FreePagesAllocator.cpp.s
+.PHONY : FreePagesAllocator.cpp.s
+
+FreePagesAllocator_BCB.o: FreePagesAllocator_BCB.cpp.o
+.PHONY : FreePagesAllocator_BCB.o
+
+# target to build an object file
+FreePagesAllocator_BCB.cpp.o:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/FreePagesAllocator_BCB.cpp.o
+.PHONY : FreePagesAllocator_BCB.cpp.o
+
+FreePagesAllocator_BCB.i: FreePagesAllocator_BCB.cpp.i
+.PHONY : FreePagesAllocator_BCB.i
+
+# target to preprocess a source file
+FreePagesAllocator_BCB.cpp.i:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/FreePagesAllocator_BCB.cpp.i
+.PHONY : FreePagesAllocator_BCB.cpp.i
+
+FreePagesAllocator_BCB.s: FreePagesAllocator_BCB.cpp.s
+.PHONY : FreePagesAllocator_BCB.s
+
+# target to generate assembly for a file
+FreePagesAllocator_BCB.cpp.s:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/FreePagesAllocator_BCB.cpp.s
+.PHONY : FreePagesAllocator_BCB.cpp.s
 
 KspacMapMgr.o: KspacMapMgr.cpp.o
 .PHONY : KspacMapMgr.o
 
 # target to build an object file
 KspacMapMgr.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr.cpp.o
 .PHONY : KspacMapMgr.cpp.o
 
 KspacMapMgr.i: KspacMapMgr.cpp.i
@@ -167,7 +215,7 @@ KspacMapMgr.i: KspacMapMgr.cpp.i
 
 # target to preprocess a source file
 KspacMapMgr.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr.cpp.i
 .PHONY : KspacMapMgr.cpp.i
 
 KspacMapMgr.s: KspacMapMgr.cpp.s
@@ -175,7 +223,7 @@ KspacMapMgr.s: KspacMapMgr.cpp.s
 
 # target to generate assembly for a file
 KspacMapMgr.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr.cpp.s
 .PHONY : KspacMapMgr.cpp.s
 
 KspacMapMgr_pagediretct_operate.o: KspacMapMgr_pagediretct_operate.cpp.o
@@ -183,7 +231,7 @@ KspacMapMgr_pagediretct_operate.o: KspacMapMgr_pagediretct_operate.cpp.o
 
 # target to build an object file
 KspacMapMgr_pagediretct_operate.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr_pagediretct_operate.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr_pagediretct_operate.cpp.o
 .PHONY : KspacMapMgr_pagediretct_operate.cpp.o
 
 KspacMapMgr_pagediretct_operate.i: KspacMapMgr_pagediretct_operate.cpp.i
@@ -191,7 +239,7 @@ KspacMapMgr_pagediretct_operate.i: KspacMapMgr_pagediretct_operate.cpp.i
 
 # target to preprocess a source file
 KspacMapMgr_pagediretct_operate.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr_pagediretct_operate.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr_pagediretct_operate.cpp.i
 .PHONY : KspacMapMgr_pagediretct_operate.cpp.i
 
 KspacMapMgr_pagediretct_operate.s: KspacMapMgr_pagediretct_operate.cpp.s
@@ -199,7 +247,7 @@ KspacMapMgr_pagediretct_operate.s: KspacMapMgr_pagediretct_operate.cpp.s
 
 # target to generate assembly for a file
 KspacMapMgr_pagediretct_operate.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr_pagediretct_operate.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/KspacMapMgr_pagediretct_operate.cpp.s
 .PHONY : KspacMapMgr_pagediretct_operate.cpp.s
 
 Memory.o: Memory.cpp.o
@@ -207,7 +255,7 @@ Memory.o: Memory.cpp.o
 
 # target to build an object file
 Memory.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/Memory.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/Memory.cpp.o
 .PHONY : Memory.cpp.o
 
 Memory.i: Memory.cpp.i
@@ -215,7 +263,7 @@ Memory.i: Memory.cpp.i
 
 # target to preprocess a source file
 Memory.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/Memory.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/Memory.cpp.i
 .PHONY : Memory.cpp.i
 
 Memory.s: Memory.cpp.s
@@ -223,7 +271,7 @@ Memory.s: Memory.cpp.s
 
 # target to generate assembly for a file
 Memory.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/Memory.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/Memory.cpp.s
 .PHONY : Memory.cpp.s
 
 PhyAddrAccessor.o: PhyAddrAccessor.cpp.o
@@ -231,7 +279,7 @@ PhyAddrAccessor.o: PhyAddrAccessor.cpp.o
 
 # target to build an object file
 PhyAddrAccessor.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/PhyAddrAccessor.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/PhyAddrAccessor.cpp.o
 .PHONY : PhyAddrAccessor.cpp.o
 
 PhyAddrAccessor.i: PhyAddrAccessor.cpp.i
@@ -239,7 +287,7 @@ PhyAddrAccessor.i: PhyAddrAccessor.cpp.i
 
 # target to preprocess a source file
 PhyAddrAccessor.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/PhyAddrAccessor.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/PhyAddrAccessor.cpp.i
 .PHONY : PhyAddrAccessor.cpp.i
 
 PhyAddrAccessor.s: PhyAddrAccessor.cpp.s
@@ -247,7 +295,7 @@ PhyAddrAccessor.s: PhyAddrAccessor.cpp.s
 
 # target to generate assembly for a file
 PhyAddrAccessor.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/PhyAddrAccessor.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/PhyAddrAccessor.cpp.s
 .PHONY : PhyAddrAccessor.cpp.s
 
 kpoolmemmgr.o: kpoolmemmgr.cpp.o
@@ -255,7 +303,7 @@ kpoolmemmgr.o: kpoolmemmgr.cpp.o
 
 # target to build an object file
 kpoolmemmgr.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr.cpp.o
 .PHONY : kpoolmemmgr.cpp.o
 
 kpoolmemmgr.i: kpoolmemmgr.cpp.i
@@ -263,7 +311,7 @@ kpoolmemmgr.i: kpoolmemmgr.cpp.i
 
 # target to preprocess a source file
 kpoolmemmgr.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr.cpp.i
 .PHONY : kpoolmemmgr.cpp.i
 
 kpoolmemmgr.s: kpoolmemmgr.cpp.s
@@ -271,7 +319,7 @@ kpoolmemmgr.s: kpoolmemmgr.cpp.s
 
 # target to generate assembly for a file
 kpoolmemmgr.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr.cpp.s
 .PHONY : kpoolmemmgr.cpp.s
 
 kpoolmemmgr_HCBv2.o: kpoolmemmgr_HCBv2.cpp.o
@@ -279,7 +327,7 @@ kpoolmemmgr_HCBv2.o: kpoolmemmgr_HCBv2.cpp.o
 
 # target to build an object file
 kpoolmemmgr_HCBv2.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr_HCBv2.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr_HCBv2.cpp.o
 .PHONY : kpoolmemmgr_HCBv2.cpp.o
 
 kpoolmemmgr_HCBv2.i: kpoolmemmgr_HCBv2.cpp.i
@@ -287,7 +335,7 @@ kpoolmemmgr_HCBv2.i: kpoolmemmgr_HCBv2.cpp.i
 
 # target to preprocess a source file
 kpoolmemmgr_HCBv2.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr_HCBv2.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr_HCBv2.cpp.i
 .PHONY : kpoolmemmgr_HCBv2.cpp.i
 
 kpoolmemmgr_HCBv2.s: kpoolmemmgr_HCBv2.cpp.s
@@ -295,15 +343,39 @@ kpoolmemmgr_HCBv2.s: kpoolmemmgr_HCBv2.cpp.s
 
 # target to generate assembly for a file
 kpoolmemmgr_HCBv2.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr_HCBv2.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/kpoolmemmgr_HCBv2.cpp.s
 .PHONY : kpoolmemmgr_HCBv2.cpp.s
+
+mixed_bitmap.o: mixed_bitmap.cpp.o
+.PHONY : mixed_bitmap.o
+
+# target to build an object file
+mixed_bitmap.cpp.o:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/mixed_bitmap.cpp.o
+.PHONY : mixed_bitmap.cpp.o
+
+mixed_bitmap.i: mixed_bitmap.cpp.i
+.PHONY : mixed_bitmap.i
+
+# target to preprocess a source file
+mixed_bitmap.cpp.i:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/mixed_bitmap.cpp.i
+.PHONY : mixed_bitmap.cpp.i
+
+mixed_bitmap.s: mixed_bitmap.cpp.s
+.PHONY : mixed_bitmap.s
+
+# target to generate assembly for a file
+mixed_bitmap.cpp.s:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/mixed_bitmap.cpp.s
+.PHONY : mixed_bitmap.cpp.s
 
 out_surfaces.o: out_surfaces.cpp.o
 .PHONY : out_surfaces.o
 
 # target to build an object file
 out_surfaces.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/out_surfaces.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/out_surfaces.cpp.o
 .PHONY : out_surfaces.cpp.o
 
 out_surfaces.i: out_surfaces.cpp.i
@@ -311,7 +383,7 @@ out_surfaces.i: out_surfaces.cpp.i
 
 # target to preprocess a source file
 out_surfaces.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/out_surfaces.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/out_surfaces.cpp.i
 .PHONY : out_surfaces.cpp.i
 
 out_surfaces.s: out_surfaces.cpp.s
@@ -319,7 +391,7 @@ out_surfaces.s: out_surfaces.cpp.s
 
 # target to generate assembly for a file
 out_surfaces.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/out_surfaces.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/out_surfaces.cpp.s
 .PHONY : out_surfaces.cpp.s
 
 phygpsmemmgr.o: phygpsmemmgr.cpp.o
@@ -327,7 +399,7 @@ phygpsmemmgr.o: phygpsmemmgr.cpp.o
 
 # target to build an object file
 phygpsmemmgr.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr.cpp.o
 .PHONY : phygpsmemmgr.cpp.o
 
 phygpsmemmgr.i: phygpsmemmgr.cpp.i
@@ -335,7 +407,7 @@ phygpsmemmgr.i: phygpsmemmgr.cpp.i
 
 # target to preprocess a source file
 phygpsmemmgr.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr.cpp.i
 .PHONY : phygpsmemmgr.cpp.i
 
 phygpsmemmgr.s: phygpsmemmgr.cpp.s
@@ -343,7 +415,7 @@ phygpsmemmgr.s: phygpsmemmgr.cpp.s
 
 # target to generate assembly for a file
 phygpsmemmgr.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr.cpp.s
 .PHONY : phygpsmemmgr.cpp.s
 
 phygpsmemmgr_availabe_search.o: phygpsmemmgr_availabe_search.cpp.o
@@ -351,7 +423,7 @@ phygpsmemmgr_availabe_search.o: phygpsmemmgr_availabe_search.cpp.o
 
 # target to build an object file
 phygpsmemmgr_availabe_search.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_availabe_search.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_availabe_search.cpp.o
 .PHONY : phygpsmemmgr_availabe_search.cpp.o
 
 phygpsmemmgr_availabe_search.i: phygpsmemmgr_availabe_search.cpp.i
@@ -359,7 +431,7 @@ phygpsmemmgr_availabe_search.i: phygpsmemmgr_availabe_search.cpp.i
 
 # target to preprocess a source file
 phygpsmemmgr_availabe_search.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_availabe_search.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_availabe_search.cpp.i
 .PHONY : phygpsmemmgr_availabe_search.cpp.i
 
 phygpsmemmgr_availabe_search.s: phygpsmemmgr_availabe_search.cpp.s
@@ -367,15 +439,39 @@ phygpsmemmgr_availabe_search.s: phygpsmemmgr_availabe_search.cpp.s
 
 # target to generate assembly for a file
 phygpsmemmgr_availabe_search.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_availabe_search.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_availabe_search.cpp.s
 .PHONY : phygpsmemmgr_availabe_search.cpp.s
+
+phygpsmemmgr_buddy_about.o: phygpsmemmgr_buddy_about.cpp.o
+.PHONY : phygpsmemmgr_buddy_about.o
+
+# target to build an object file
+phygpsmemmgr_buddy_about.cpp.o:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_buddy_about.cpp.o
+.PHONY : phygpsmemmgr_buddy_about.cpp.o
+
+phygpsmemmgr_buddy_about.i: phygpsmemmgr_buddy_about.cpp.i
+.PHONY : phygpsmemmgr_buddy_about.i
+
+# target to preprocess a source file
+phygpsmemmgr_buddy_about.cpp.i:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_buddy_about.cpp.i
+.PHONY : phygpsmemmgr_buddy_about.cpp.i
+
+phygpsmemmgr_buddy_about.s: phygpsmemmgr_buddy_about.cpp.s
+.PHONY : phygpsmemmgr_buddy_about.s
+
+# target to generate assembly for a file
+phygpsmemmgr_buddy_about.cpp.s:
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_buddy_about.cpp.s
+.PHONY : phygpsmemmgr_buddy_about.cpp.s
 
 phygpsmemmgr_pgcount_modify.o: phygpsmemmgr_pgcount_modify.cpp.o
 .PHONY : phygpsmemmgr_pgcount_modify.o
 
 # target to build an object file
 phygpsmemmgr_pgcount_modify.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgcount_modify.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgcount_modify.cpp.o
 .PHONY : phygpsmemmgr_pgcount_modify.cpp.o
 
 phygpsmemmgr_pgcount_modify.i: phygpsmemmgr_pgcount_modify.cpp.i
@@ -383,7 +479,7 @@ phygpsmemmgr_pgcount_modify.i: phygpsmemmgr_pgcount_modify.cpp.i
 
 # target to preprocess a source file
 phygpsmemmgr_pgcount_modify.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgcount_modify.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgcount_modify.cpp.i
 .PHONY : phygpsmemmgr_pgcount_modify.cpp.i
 
 phygpsmemmgr_pgcount_modify.s: phygpsmemmgr_pgcount_modify.cpp.s
@@ -391,7 +487,7 @@ phygpsmemmgr_pgcount_modify.s: phygpsmemmgr_pgcount_modify.cpp.s
 
 # target to generate assembly for a file
 phygpsmemmgr_pgcount_modify.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgcount_modify.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgcount_modify.cpp.s
 .PHONY : phygpsmemmgr_pgcount_modify.cpp.s
 
 phygpsmemmgr_pgs_set.o: phygpsmemmgr_pgs_set.cpp.o
@@ -399,7 +495,7 @@ phygpsmemmgr_pgs_set.o: phygpsmemmgr_pgs_set.cpp.o
 
 # target to build an object file
 phygpsmemmgr_pgs_set.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgs_set.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgs_set.cpp.o
 .PHONY : phygpsmemmgr_pgs_set.cpp.o
 
 phygpsmemmgr_pgs_set.i: phygpsmemmgr_pgs_set.cpp.i
@@ -407,7 +503,7 @@ phygpsmemmgr_pgs_set.i: phygpsmemmgr_pgs_set.cpp.i
 
 # target to preprocess a source file
 phygpsmemmgr_pgs_set.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgs_set.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgs_set.cpp.i
 .PHONY : phygpsmemmgr_pgs_set.cpp.i
 
 phygpsmemmgr_pgs_set.s: phygpsmemmgr_pgs_set.cpp.s
@@ -415,7 +511,7 @@ phygpsmemmgr_pgs_set.s: phygpsmemmgr_pgs_set.cpp.s
 
 # target to generate assembly for a file
 phygpsmemmgr_pgs_set.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgs_set.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_pgs_set.cpp.s
 .PHONY : phygpsmemmgr_pgs_set.cpp.s
 
 phygpsmemmgr_seg_managment.o: phygpsmemmgr_seg_managment.cpp.o
@@ -423,7 +519,7 @@ phygpsmemmgr_seg_managment.o: phygpsmemmgr_seg_managment.cpp.o
 
 # target to build an object file
 phygpsmemmgr_seg_managment.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_seg_managment.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_seg_managment.cpp.o
 .PHONY : phygpsmemmgr_seg_managment.cpp.o
 
 phygpsmemmgr_seg_managment.i: phygpsmemmgr_seg_managment.cpp.i
@@ -431,7 +527,7 @@ phygpsmemmgr_seg_managment.i: phygpsmemmgr_seg_managment.cpp.i
 
 # target to preprocess a source file
 phygpsmemmgr_seg_managment.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_seg_managment.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_seg_managment.cpp.i
 .PHONY : phygpsmemmgr_seg_managment.cpp.i
 
 phygpsmemmgr_seg_managment.s: phygpsmemmgr_seg_managment.cpp.s
@@ -439,7 +535,7 @@ phygpsmemmgr_seg_managment.s: phygpsmemmgr_seg_managment.cpp.s
 
 # target to generate assembly for a file
 phygpsmemmgr_seg_managment.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_seg_managment.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phygpsmemmgr_seg_managment.cpp.s
 .PHONY : phygpsmemmgr_seg_managment.cpp.s
 
 phypgsmemmgr_alloc.o: phypgsmemmgr_alloc.cpp.o
@@ -447,7 +543,7 @@ phypgsmemmgr_alloc.o: phypgsmemmgr_alloc.cpp.o
 
 # target to build an object file
 phypgsmemmgr_alloc.cpp.o:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phypgsmemmgr_alloc.cpp.o
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phypgsmemmgr_alloc.cpp.o
 .PHONY : phypgsmemmgr_alloc.cpp.o
 
 phypgsmemmgr_alloc.i: phypgsmemmgr_alloc.cpp.i
@@ -455,7 +551,7 @@ phypgsmemmgr_alloc.i: phypgsmemmgr_alloc.cpp.i
 
 # target to preprocess a source file
 phypgsmemmgr_alloc.cpp.i:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phypgsmemmgr_alloc.cpp.i
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phypgsmemmgr_alloc.cpp.i
 .PHONY : phypgsmemmgr_alloc.cpp.i
 
 phypgsmemmgr_alloc.s: phypgsmemmgr_alloc.cpp.s
@@ -463,7 +559,7 @@ phypgsmemmgr_alloc.s: phypgsmemmgr_alloc.cpp.s
 
 # target to generate assembly for a file
 phypgsmemmgr_alloc.cpp.s:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phypgsmemmgr_alloc.cpp.s
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(MAKE) $(MAKESILENT) -f src/memory/CMakeFiles/Mem_module.dir/build.make src/memory/CMakeFiles/Mem_module.dir/phypgsmemmgr_alloc.cpp.s
 .PHONY : phypgsmemmgr_alloc.cpp.s
 
 # Help Target
@@ -478,6 +574,12 @@ help:
 	@echo "... AddresSpace.o"
 	@echo "... AddresSpace.i"
 	@echo "... AddresSpace.s"
+	@echo "... FreePagesAllocator.o"
+	@echo "... FreePagesAllocator.i"
+	@echo "... FreePagesAllocator.s"
+	@echo "... FreePagesAllocator_BCB.o"
+	@echo "... FreePagesAllocator_BCB.i"
+	@echo "... FreePagesAllocator_BCB.s"
 	@echo "... KspacMapMgr.o"
 	@echo "... KspacMapMgr.i"
 	@echo "... KspacMapMgr.s"
@@ -496,6 +598,9 @@ help:
 	@echo "... kpoolmemmgr_HCBv2.o"
 	@echo "... kpoolmemmgr_HCBv2.i"
 	@echo "... kpoolmemmgr_HCBv2.s"
+	@echo "... mixed_bitmap.o"
+	@echo "... mixed_bitmap.i"
+	@echo "... mixed_bitmap.s"
 	@echo "... out_surfaces.o"
 	@echo "... out_surfaces.i"
 	@echo "... out_surfaces.s"
@@ -505,6 +610,9 @@ help:
 	@echo "... phygpsmemmgr_availabe_search.o"
 	@echo "... phygpsmemmgr_availabe_search.i"
 	@echo "... phygpsmemmgr_availabe_search.s"
+	@echo "... phygpsmemmgr_buddy_about.o"
+	@echo "... phygpsmemmgr_buddy_about.i"
+	@echo "... phygpsmemmgr_buddy_about.s"
 	@echo "... phygpsmemmgr_pgcount_modify.o"
 	@echo "... phygpsmemmgr_pgcount_modify.i"
 	@echo "... phygpsmemmgr_pgcount_modify.s"
@@ -528,6 +636,6 @@ help:
 # No rule that depends on this can have commands that come from listfiles
 # because they might be regenerated.
 cmake_check_build_system:
-	cd /home/pangsong/PS_git/OS_pj_uefi/kernel && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
+	cd /home/PS/PS_git/OS_pj_uefi/kernel && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 .PHONY : cmake_check_build_system
 

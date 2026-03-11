@@ -147,7 +147,7 @@ int main(int argc, char** argv)
         allocations[rec.index].size = rec.size;
     }
 
-    FreePagesAllocator::first_BCB = new FreePagesAllocator::free_pages_in_seg_control_block(
+    FreePagesAllocator::first_BCB = new FreePagesAllocator::BuddyControlBlock(
         0x100000000, 5
     );
     KURD_t init_result = FreePagesAllocator::first_BCB->second_stage_init();

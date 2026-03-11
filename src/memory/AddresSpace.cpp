@@ -39,7 +39,7 @@ KURD_t AddressSpace::invalidate_tlb_of_VM_desc(VM_DESC desc, tlb_invalidate_flag
    fail.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB;
    fatal.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB;
     seg_to_pages_info_pakage_t info_package;
-    int stauts=seg_to_pages_info_get(info_package,desc);
+    int stauts=vm_interval_to_pages_info(info_package,desc);
     if(stauts){
         fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
         return fail;
@@ -114,7 +114,14 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
    success.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
    fail.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
    fatal.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY;
-    if(
+   bool is_reach_va_bottom=false;
+   if(desc.start<ADDR_VM_BOTTOM){
+    uint32_t gap=ADDR_VM_BOTTOM-desc.start;
+    desc.start=ADDR_VM_BOTTOM;
+    desc.phys_start+=gap;
+    is_reach_va_bottom=true;
+   }
+   if(
         desc.start>=desc.end||
         desc.end>(pglv_4_or_5?PAGE_LV4_USERSPACE_SIZE:PAGE_LV5_USERSPACE_SIZE)||
         desc.start%_4KB_SIZE||
@@ -123,10 +130,6 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
     ){
     fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
     return fail;}
-    if(this!=gKernelSpace)if(desc.phys_start<16*_4KB_SIZE){
-        fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY_TRY_TO_MAP_LOW_MEM_WHO_NOT_gKernelSpace;
-        return fail;
-    }
     pgaccess desc_access=desc.access;
     cache_table_idx_struct_t atompages_cache_table_idx=cache_strategy_to_idx(desc_access.cache_strategy);
     phyaddr_t pml4tb_phyaddr_base=pml4_phybase;
@@ -414,10 +417,10 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
         return 0;
     };
     //这里才是正式逻辑
-    seg_to_pages_info_pakage_t package={0};
-    int status = seg_to_pages_info_get(package,desc);
-    if(status==OS_INVALID_PARAMETER){
-        fail.event_code=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY_CANT_SPLIT;
+    seg_to_pages_info_pakage_t package;
+    int status = vm_interval_to_pages_info(package, desc);
+    if(status!=OS_SUCCESS){
+        fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY_CANT_SPLIT;
         return fail;
     }
     uint16_t contain=0;
@@ -425,40 +428,101 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
     if(pglv_4_or_5==PAGE_TBALE_LV::LV_4)
     {
         lock.write_lock();
-        for(int i=0;i<5;i++)
-        {
-            seg_to_pages_info_pakage_t::pages_info_t entry=package.entryies[i];
-            if(entry.page_size_in_byte==_4KB_SIZE){
-                contain=_4lv_pte_4KB_entries_set(entry.vbase,entry.phybase,entry.num_of_pages);
-                if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
-                if(contain!=0)goto sub_step_invalid;
-            }else if(entry.page_size_in_byte==_2MB_SIZE)
-            {
-                contain=_4lv_pde_2MB_entries_set(entry.vbase,entry.phybase,entry.num_of_pages);
-                if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
-                if(contain!=0)goto sub_step_invalid;
-            }else if(entry.page_size_in_byte==_1GB_SIZE)
-            {
-                uint64_t pdpte_equal_offset = entry.vbase / _1GB_SIZE;
-                uint64_t count_to_assign_left = entry.num_of_pages;
-                uint16_t pdpte_idx = pdpte_equal_offset & 0x1FF;
-                uint64_t processed_pages = 0;
-                auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
-                while(count_to_assign_left > 0){
-                    uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pdpte_idx));
-                    phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
-                    vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
-                    contain = _4lv_pdpte_1GB_entries_set(this_phybase, this_vbase, this_count);
+        switch (package.congruence_level) {
+        case congruence_level_1gb: {
+            for(int i=0;i<5;i++) {
+                auto &entry = package.entryies[i];
+                if(entry.num_of_pages==0) continue;
+                uint64_t psize = entry.page_size_in_byte;
+                if(psize==0) goto page_size_invalid;
+                if((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0){
+                    fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+                    goto bad_vmentry_unlock;
+                }
+                switch(entry.page_size_in_byte){
+                case _1GB_SIZE: {
+                    uint64_t count_to_assign_left = entry.num_of_pages;
+                    uint16_t pdpte_idx = (entry.vbase / _1GB_SIZE) & 0x1FF;
+                    uint64_t processed_pages = 0;
+                    auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
+                    while(count_to_assign_left > 0){
+                        uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pdpte_idx));
+                        phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
+                        vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
+                        contain = _4lv_pdpte_1GB_entries_set(this_phybase, this_vbase, this_count);
+                        if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
+                        if(contain!=0)goto sub_step_invalid;
+                        count_to_assign_left -= this_count;
+                        processed_pages += this_count;
+                        pdpte_idx = 0;
+                    }
+                    break;
+                }
+                case _2MB_SIZE:
+                    contain=_4lv_pde_2MB_entries_set(entry.phybase,entry.vbase,static_cast<uint16_t>(entry.num_of_pages));
                     if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
                     if(contain!=0)goto sub_step_invalid;
-                    count_to_assign_left -= this_count;
-                    processed_pages += this_count;
-                    pdpte_idx = 0;
+                    break;
+                case _4KB_SIZE:
+                    contain=_4lv_pte_4KB_entries_set(entry.phybase,entry.vbase,static_cast<uint16_t>(entry.num_of_pages));
+                    if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
+                    if(contain!=0)goto sub_step_invalid;
+                    break;
+                default:
+                    goto page_size_invalid;
                 }
-                
-            }else if(entry.page_size_in_byte!=0){
-                goto page_size_invalid;
             }
+            break;
+        }
+        case congruence_level_2mb: {
+            for(int i=0;i<5;i++) {
+                auto &entry = package.entryies[i];
+                if(entry.num_of_pages==0) continue;
+                uint64_t psize = entry.page_size_in_byte;
+                if(psize==0) goto page_size_invalid;
+                if((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0){
+                    fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+                    goto bad_vmentry_unlock;
+                }
+                switch(entry.page_size_in_byte){
+                case _2MB_SIZE:
+                    for(uint64_t j=0;j<entry.num_of_pages;j++){
+                        contain=_4lv_pde_2MB_entries_set(
+                            entry.phybase + j*_2MB_SIZE,
+                            entry.vbase + j*_2MB_SIZE,
+                            1);
+                        if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
+                        if(contain!=0)goto sub_step_invalid;
+                    }
+                    break;
+                case _4KB_SIZE:
+                    contain=_4lv_pte_4KB_entries_set(entry.phybase,entry.vbase,static_cast<uint16_t>(entry.num_of_pages));
+                    if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
+                    if(contain!=0)goto sub_step_invalid;
+                    break;
+                default:
+                    goto page_size_invalid;
+                }
+            }
+            break;
+        }
+        case congruence_level_4kb: {
+            for(int i=0;i<5;i++) {
+                auto &entry = package.entryies[i];
+                if(entry.page_size_in_byte!=_4KB_SIZE) continue;
+                for(uint64_t j=0;j<entry.num_of_pages;j++){
+                    contain=_4lv_pte_4KB_entries_set(
+                        entry.phybase + j*_4KB_SIZE,
+                        entry.vbase + j*_4KB_SIZE,
+                        1);
+                    if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
+                    if(contain!=0)goto sub_step_invalid;
+                }
+            }
+            break;
+        }
+        default:
+            goto page_size_invalid;
         }
         occupyied_size+=(desc.end-desc.start);
         goto success;
@@ -469,11 +533,18 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
     
     success:
     lock.write_unlock();
+    if(is_reach_va_bottom){
+        success.result=result_code::SUCCESS_BUT_SIDE_EFFECT;
+        success.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::SUCCESS_BUT_SIDE_AFFECTS::REASON_CODE_MAP_LOW_16K;
+    }
     return success;
     page_size_invalid:
     lock.write_unlock();
     fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
     return fatal;
+    bad_vmentry_unlock:
+    lock.write_unlock();
+    return fail;
     sub_step_invalid:
     lock.write_unlock();
     fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_TRY_TO_GET_SUB_PAGE_IN_ATOM_PAGE;
@@ -783,43 +854,114 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
 
 
     // 主流程
-    seg_to_pages_info_pakage_t package = {0};
-    int status = seg_to_pages_info_get(package,desc);
+    seg_to_pages_info_pakage_t package;
+    int status = vm_interval_to_pages_info(package, desc);
     pages_clear_error_status clear_status;
+    if (status != OS_SUCCESS) {
+        fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+        return fail;
+    }
     if (pglv_4_or_5 == PAGE_TBALE_LV::LV_4) {
         lock.write_lock();
-        for (int i = 0; i < 5; i++) {
-            seg_to_pages_info_pakage_t::pages_info_t entry = package.entryies[i];
-            if (entry.page_size_in_byte == _4KB_SIZE) {
-                // 注意：参数顺序与 set 函数一致（传 physbase 以便风格一致）
-                clear_status = _4lv_pte_4KB_entries_clear(entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
-                if (status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
-            } else if (entry.page_size_in_byte == _2MB_SIZE) {
-                clear_status = _4lv_pde_2MB_entries_clear(entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
-                if (status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
-            } else if (entry.page_size_in_byte == _1GB_SIZE) {
-                uint64_t pdpte_equal_offset = entry.vbase / _1GB_SIZE;
-                uint64_t count_to_clear_left = entry.num_of_pages;
-                uint16_t pdpte_idx = pdpte_equal_offset & 0x1FF;
-                uint64_t processed_pages = 0;
-                auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
-                while (count_to_clear_left > 0) {
-                    uint16_t this_count = static_cast<uint16_t>(min(count_to_clear_left, 512 - pdpte_idx));
-                    // 使用 vbase/physbase 计算本段起点
-                    phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
-                    vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
-                    clear_status = _4lv_pdpte_1GB_entries_clear(this_phybase, this_vbase, this_count);
-                    if (status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
-                    count_to_clear_left -= this_count;
-                    processed_pages += this_count;
-                    pdpte_idx = 0;
+        switch (package.congruence_level) {
+        case congruence_level_1gb: {
+            for (int i = 0; i < 5; i++) {
+                auto &entry = package.entryies[i];
+                if (entry.num_of_pages == 0) continue;
+                uint64_t psize = entry.page_size_in_byte;
+                if (psize == 0) goto page_size_invalid;
+                if ((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0) {
+                    fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+                    goto bad_vmentry_unlock;
                 }
-            } else if (entry.page_size_in_byte != 0) {
-                goto page_size_invalid;
+                switch (entry.page_size_in_byte) {
+                case _1GB_SIZE: {
+                    uint64_t count_to_clear_left = entry.num_of_pages;
+                    uint16_t pdpte_idx = (entry.vbase / _1GB_SIZE) & 0x1FF;
+                    uint64_t processed_pages = 0;
+                    auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
+                    while (count_to_clear_left > 0) {
+                        uint16_t this_count = static_cast<uint16_t>(min(count_to_clear_left, 512 - pdpte_idx));
+                        phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
+                        vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
+                        clear_status = _4lv_pdpte_1GB_entries_clear(this_phybase, this_vbase, this_count);
+                        if (clear_status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
+                        count_to_clear_left -= this_count;
+                        processed_pages += this_count;
+                        pdpte_idx = 0;
+                    }
+                    break;
+                }
+                case _2MB_SIZE: {
+                    clear_status = _4lv_pde_2MB_entries_clear(
+                        entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
+                    if (clear_status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
+                    break;
+                }
+                case _4KB_SIZE: {
+                    clear_status = _4lv_pte_4KB_entries_clear(
+                        entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
+                    if (clear_status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
+                    break;
+                }
+                default:
+                    goto page_size_invalid;
+                }
             }
+            break;
+        }
+        case congruence_level_2mb: {
+            for (int i = 0; i < 5; i++) {
+                auto &entry = package.entryies[i];
+                if (entry.num_of_pages == 0) continue;
+                uint64_t psize = entry.page_size_in_byte;
+                if (psize == 0) goto page_size_invalid;
+                if ((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0) {
+                    fail.reason = MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+                    goto bad_vmentry_unlock;
+                }
+                switch (entry.page_size_in_byte) {
+                case _2MB_SIZE: {
+                    for (uint64_t j = 0; j < entry.num_of_pages; j++) {
+                        clear_status = _4lv_pde_2MB_entries_clear(
+                            entry.phybase + j * _2MB_SIZE,
+                            entry.vbase + j * _2MB_SIZE,
+                            1);
+                        if (clear_status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
+                    }
+                    break;
+                }
+                case _4KB_SIZE: {
+                    clear_status = _4lv_pte_4KB_entries_clear(
+                        entry.phybase, entry.vbase, static_cast<uint16_t>(entry.num_of_pages));
+                    if (clear_status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
+                    break;
+                }
+                default:
+                    goto page_size_invalid;
+                }
+            }
+            break;
+        }
+        case congruence_level_4kb: {
+            for (int i = 0; i < 5; i++) {
+                auto &entry = package.entryies[i];
+                if (entry.page_size_in_byte != _4KB_SIZE) continue;
+                for (uint64_t j = 0; j < entry.num_of_pages; j++) {
+                    clear_status = _4lv_pte_4KB_entries_clear(
+                        entry.phybase + j * _4KB_SIZE,
+                        entry.vbase + j * _4KB_SIZE,
+                        1);
+                    if (clear_status != pages_clear_error_status::SUCCESS) goto sub_step_invalid;
+                }
+            }
+            break;
+        }
+        default:
+            goto page_size_invalid;
         }
         occupyied_size-=(desc.end-desc.start);
-        //todo:广播所有核心重新
+        //tod:广播所有核心重新
         goto success;
     } else {
         fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::DISABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_NOT_SUPPORT_LV5_PAGING;
@@ -833,6 +975,9 @@ page_size_invalid:
     lock.write_unlock();
     fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::DISABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
     return fatal;
+bad_vmentry_unlock:
+    lock.write_unlock();
+    return fail;
 sub_step_invalid:
     lock.write_unlock();
     switch (clear_status)
@@ -994,68 +1139,4 @@ KURD_t AddressSpace::build_identity_map_ONLY_IN_gKERNELSPACE()
         .SEG_SIZE_ONLY_UES_IN_BASIC_SEG=0,
     };
     return enable_VM_desc(identity_desc);
-}
-int AddressSpace::seg_to_pages_info_get(seg_to_pages_info_pakage_t &result, VM_DESC desc)
-{
-    VM_DESC vmentry = desc;
-        if (vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.start % _1GB_SIZE != vmentry.phys_start % _1GB_SIZE)
-            return OS_INVALID_PARAMETER;
-
-        // initialize
-        for (int i = 0; i < 5; i++) {
-            result.entryies[i].vbase = 0;
-            result.entryies[i].phybase = 0;
-            result.entryies[i].page_size_in_byte = 0;
-            result.entryies[i].num_of_pages = 0;
-        }
-
-        int idx = 0;
-        vaddr_t _1GB_base = align_up(vmentry.start, _1GB_SIZE);
-        vaddr_t _1GB_end = align_down(vmentry.end, _1GB_SIZE);
-
-        if (_1GB_end > _1GB_base) {
-            result.entryies[idx].vbase = _1GB_base;
-            result.entryies[idx].phybase = vmentry.phys_start + (_1GB_base - vmentry.start);
-            result.entryies[idx].page_size_in_byte = _1GB_SIZE;
-            result.entryies[idx].num_of_pages = (_1GB_end - _1GB_base) / _1GB_SIZE;
-            idx++;
-        }
-
-        auto process_segment = [&](vaddr_t seg_s, vaddr_t seg_e) {
-            if (seg_e <= seg_s) return;
-            vaddr_t _2MB_base = align_up(seg_s, _2MB_SIZE);
-            vaddr_t _2MB_end = align_down(seg_e, _2MB_SIZE);
-
-            if (_2MB_base > seg_s) {
-                if (idx >= 5) return;
-                result.entryies[idx].vbase = seg_s;
-                result.entryies[idx].phybase = vmentry.phys_start + (seg_s - vmentry.start);
-                result.entryies[idx].page_size_in_byte = _4KB_SIZE;
-                result.entryies[idx].num_of_pages = (_2MB_base - seg_s) / _4KB_SIZE;
-                idx++;
-            }
-
-            if (_2MB_end > _2MB_base) {
-                if (idx >= 5) return;
-                result.entryies[idx].vbase = _2MB_base;
-                result.entryies[idx].phybase = vmentry.phys_start + (_2MB_base - vmentry.start);
-                result.entryies[idx].page_size_in_byte = _2MB_SIZE;
-                result.entryies[idx].num_of_pages = (_2MB_end - _2MB_base) / _2MB_SIZE;
-                idx++;
-            }
-
-            if (_2MB_end < seg_e) {
-                if (idx >= 5) return;
-                result.entryies[idx].vbase = _2MB_end;
-                result.entryies[idx].phybase = vmentry.phys_start + (_2MB_end - vmentry.start);
-                result.entryies[idx].page_size_in_byte = _4KB_SIZE;
-                result.entryies[idx].num_of_pages = (seg_e - _2MB_end) / _4KB_SIZE;
-                idx++;
-            }
-        };
-
-        process_segment(vmentry.start, _1GB_base > vmentry.start ? _1GB_base : vmentry.start);
-        process_segment(_1GB_end < vmentry.end ? _1GB_end : vmentry.end, vmentry.end);
-
-        return OS_SUCCESS;
 }

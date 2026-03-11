@@ -6,7 +6,7 @@ global ap_init_patch_idt_pe
 %define PE_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC  0x12
 %include "checkpoint.inc"
 extern pemode_enter_checkpoint
-SECTION .init_rodata
+SECTION .ap_bootstrap_data
 ; IDT定义 - 保护模式32位下的前32个向量
 idt_table_pe:
     ; IDT条目格式 (每个条目8字节):
@@ -128,7 +128,7 @@ idt_table_pe:
 idt_descriptor_pe:
     dw $ - idt_table_pe - 1     ; Limit (size of IDT - 1)
     dd idt_table_pe             ; Base address of IDT
-SECTION .boottext
+SECTION .ap_bootstrap_text
 pe_interrupt_handlers:
 bits 32
     .divide_by_zero:

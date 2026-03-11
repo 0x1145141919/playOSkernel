@@ -93,7 +93,7 @@ int main()
     kio::bsp_kout << "=== Starting FreePagesAllocator BCB Test ===" << kio::kendl;
      
     // 创建第一个BCB实例，用于管理从0x100000000开始的20阶内存区域（约1GB）
-    FreePagesAllocator::first_BCB = new FreePagesAllocator::free_pages_in_seg_control_block(
+    FreePagesAllocator::first_BCB = new FreePagesAllocator::BuddyControlBlock(
         0x100000000, 18
     );
 
@@ -222,7 +222,7 @@ int main()
                 break;
             }
         } else {
-            // 地址有效，进行释放
+            // 地址有效，进行对称释放
             KURD_t free_result = FreePagesAllocator::first_BCB->free_buddy_way(
                 seg.start_addr, 
                 seg.size

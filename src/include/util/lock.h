@@ -1,15 +1,14 @@
 #pragma once
 #include <stdint.h>
+static constexpr uint8_t LOCKED = 1;
+static constexpr uint8_t UNLOCKED = 0;
 class spinlock_cpp_t {
-    uint8_t status;
-    static constexpr uint8_t LOCKED = 1;
-    static constexpr uint8_t UNLOCKED = 0;
-    
+    uint8_t status;  
 public:
     spinlock_cpp_t() : status(UNLOCKED) {}
     
     void lock();
-    
+    bool is_locked();
     void unlock();
 };
 class spinrwlock_cpp_t{

@@ -34,19 +34,20 @@ bool parse_nm_line(const std::string& line, symbol_entry& entry) {
     return true;
 }
 
-constexpr char PJ_ROOT[] = "/home/pangsong/PS_git/OS_pj_uefi/kernel";
-constexpr char FIRST_STAGE_ELF[] = "kernel.elf";
+constexpr char PJ_ROOT[] = "/home/PS/PS_git/OS_pj_uefi/kernel";
+constexpr char KIMAGE_MAIN_ELF[] = "kernel.elf";
+constexpr char INIT_ELF[] = "init.elf";
 constexpr char SORTED_NM_TEXT_LIST[] = "ksymbols_sorted.txt";
 constexpr char KSYMBOLS_BIN[] = "ksymbols.bin";
 
 int main(int argc, char* argv[]) {
     // 构造完整路径
-    std::string elf_path = std::string(PJ_ROOT) + "/" + std::string(FIRST_STAGE_ELF);
+    std::string elf_path = std::string(PJ_ROOT) + "/" + std::string(KIMAGE_MAIN_ELF);
     std::string txt_path = std::string(PJ_ROOT) + "/" + std::string(SORTED_NM_TEXT_LIST);
     std::string bin_path = std::string(PJ_ROOT) + "/" + std::string(KSYMBOLS_BIN);
-    
+    std::string init_elf_path = std::string(PJ_ROOT) + "/" + std::string(INIT_ELF);
     // 先nm|sort对FIRST_STAGE_ELF生成文本中间体到SORTED_NM_TEXT_LIST文件
-    std::string nm_cmd = "nm " + elf_path + " | sort > " + txt_path;
+    std::string nm_cmd = "nm " + elf_path +' '+ init_elf_path + " | sort > " + txt_path;
     
     if (system(nm_cmd.c_str()) != 0) {
         std::cerr << "Error: Failed to run nm command: " << nm_cmd << std::endl;
@@ -86,7 +87,7 @@ int main(int argc, char* argv[]) {
     output_file.close();
 
     // 清理临时文件
-    unlink(txt_path.c_str());
+    //unlink(txt_path.c_str());
     std::cout << "Successfully generated kernel symbols table." << std::endl;
     return 0;
 }

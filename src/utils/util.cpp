@@ -1,6 +1,8 @@
 #include "util/OS_utils.h"
 #include "GS_Slots_index_definitions.h"
 #include "stdint.h"
+#include "memory/Memory.h"
+#include "os_error_definitions.h"
 #ifdef USER_MODE
 #include <x86intrin.h>
 #endif
@@ -181,7 +183,148 @@ extern "C" void __wrap___stack_chk_fail(void)
 {
     __kspace_stack_chk_fail();
 }
-
+/**
+ * @brief 通用函数：将虚拟 - 物理地址区间按照页面大小拆分为多个条目
+ * 
+ * 根据虚拟地址和物理地址的同余关系（congruence），智能地将区间拆分为 1GB/2MB/4KB 的页面组合。
+ * 拆分策略优先使用大页面以减少 TLB 条目数，边界不对齐部分使用小页面填充。
+ * 
+ * @param result 输出参数，存储拆分后的页面信息包
+ * @param vmentry VM 描述符，包含虚拟地址和物理地址信息
+ * @return int OS_SUCCESS 成功，其他错误码见 os_error_definitions.h
+ */
+int vm_interval_to_pages_info(seg_to_pages_info_pakage_t &result, VM_DESC vmentry)
+{
+    constexpr uint32_t _4KB_SIZE=0x1000;
+    constexpr uint32_t _2MB_SIZE=1ULL<<21;
+    constexpr uint32_t _1GB_SIZE=1ULL<<30;    
+  result.clear();
+    
+    // 参数校验
+    if(vmentry.start % _4KB_SIZE || vmentry.end % _4KB_SIZE || vmentry.phys_start % _4KB_SIZE) {
+        // 参数未 4KB 对齐，返回错误
+      return OS_INVALID_PARAMETER;
+    }
+    
+    // 处理边界情况
+    if (vmentry.start >= vmentry.end) {
+      return OS_INVALID_PARAMETER;
+    }
+    
+    // 计算同余级别
+    if(vmentry.start % _1GB_SIZE == vmentry.phys_start % _1GB_SIZE) {
+      result.congruence_level = congruence_level_1gb;
+    } else if(vmentry.start % _2MB_SIZE == vmentry.phys_start % _2MB_SIZE) {
+      result.congruence_level = congruence_level_2mb;
+    } else {
+      result.congruence_level = congruence_level_4kb;
+    }
+    
+    // 辅助 lambda 函数
+    auto paddr = [vbase = vmentry.start, pbase = vmentry.phys_start](vaddr_t vaddr) -> phyaddr_t{
+      return pbase + vaddr - vbase;
+    };
+    
+    auto min = [](vaddr_t a, vaddr_t b) -> vaddr_t{
+      return a < b ? a : b;
+    };
+    
+    auto max = [](vaddr_t a, vaddr_t b) -> vaddr_t{
+      return a > b ? a : b;
+    };
+    
+    switch(result.congruence_level) {
+        case congruence_level_1gb: {
+          vaddr_t _1gb_begin = align_up(vmentry.start, _1GB_SIZE);
+          vaddr_t _1gb_end = align_down(vmentry.end, _1GB_SIZE);
+            
+            if(_1gb_end > _1gb_begin) {
+                // 1GB 区域（中间对齐部分）
+              result.entryies[0].vbase = _1gb_begin;
+              result.entryies[0].phybase = paddr(_1gb_begin);
+              result.entryies[0].num_of_pages = (_1gb_end - _1gb_begin) / _1GB_SIZE;
+              result.entryies[0].page_size_in_byte = _1GB_SIZE;
+                
+              vaddr_t _2mb_begin = align_up(vmentry.start, _2MB_SIZE);
+              vaddr_t _2mb_end = align_down(vmentry.end, _2MB_SIZE);
+                
+                // 2MB 区域（1GB 前后的对齐部分）
+                if(_2mb_begin < _1gb_begin) {
+                  result.entryies[1].vbase = _2mb_begin;
+                  result.entryies[1].phybase = paddr(_2mb_begin);
+                  result.entryies[1].num_of_pages = (min(_2mb_end, _1gb_begin) - _2mb_begin) / _2MB_SIZE;
+                  result.entryies[1].page_size_in_byte = _2MB_SIZE;
+                }
+                if(_1gb_end < _2mb_end) {
+                  result.entryies[2].vbase = _1gb_end;
+                  result.entryies[2].phybase = paddr(_1gb_end);
+                  result.entryies[2].num_of_pages = (_2mb_end - max(_1gb_end, _2mb_begin)) / _2MB_SIZE;
+                  result.entryies[2].page_size_in_byte = _2MB_SIZE;
+                }
+                
+                // 4KB 区域（最前和最后的剩余部分）
+                if(vmentry.start < _2mb_begin) {
+                  result.entryies[3].vbase = vmentry.start;
+                  result.entryies[3].phybase = vmentry.phys_start;
+                  result.entryies[3].num_of_pages = (_2mb_begin - vmentry.start) / _4KB_SIZE;
+                  result.entryies[3].page_size_in_byte = _4KB_SIZE;
+                }
+                if(_2mb_end < vmentry.end) {
+                  result.entryies[4].vbase = _2mb_end;
+                  result.entryies[4].phybase = paddr(_2mb_end);
+                  result.entryies[4].num_of_pages = (vmentry.end - _2mb_end) / _4KB_SIZE;
+                  result.entryies[4].page_size_in_byte = _4KB_SIZE;
+                }
+                break;
+            }
+        }
+        [[fallthrough]];
+        
+        case congruence_level_2mb: {
+          vaddr_t _2mb_begin = align_up(vmentry.start, _2MB_SIZE);
+          vaddr_t _2mb_end = align_down(vmentry.end, _2MB_SIZE);
+            
+            if(_2mb_begin < _2mb_end) {
+                // 2MB 区域（中间对齐部分）
+              result.entryies[0].vbase = _2mb_begin;
+              result.entryies[0].phybase = paddr(_2mb_begin);
+              result.entryies[0].num_of_pages = (_2mb_end - _2mb_begin) / _2MB_SIZE;
+              result.entryies[0].page_size_in_byte = _2MB_SIZE;
+                
+                // 4KB 区域（前后剩余部分）
+                if(vmentry.start < _2mb_begin) {
+                  result.entryies[1].vbase = vmentry.start;
+                  result.entryies[1].phybase = vmentry.phys_start;
+                  result.entryies[1].num_of_pages = (_2mb_begin - vmentry.start) / _4KB_SIZE;
+                  result.entryies[1].page_size_in_byte = _4KB_SIZE;
+                }
+                if(_2mb_end < vmentry.end) {
+                  result.entryies[2].vbase = _2mb_end;
+                  result.entryies[2].phybase = paddr(_2mb_end);
+                  result.entryies[2].num_of_pages = (vmentry.end - _2mb_end) / _4KB_SIZE;
+                  result.entryies[2].page_size_in_byte = _4KB_SIZE;
+                }
+                break;
+            }
+        }
+        [[fallthrough]];
+        
+        case congruence_level_4kb: {
+          result.entryies[0].vbase = vmentry.start;
+          result.entryies[0].phybase = vmentry.phys_start;
+          result.entryies[0].num_of_pages = (vmentry.end - vmentry.start) / _4KB_SIZE;
+          result.entryies[0].page_size_in_byte = _4KB_SIZE;
+            break;
+        }
+        
+        default: {
+            // 不应该到达这里
+          return OS_UNREACHABLE_CODE;
+        }
+    }
+   
+  return OS_SUCCESS;
+}
 void ksystemramcpy(void*src,void*dest,size_t length)
 //最好用于内核内存空间内的内存拷贝，不然会出现未定义行为
 {

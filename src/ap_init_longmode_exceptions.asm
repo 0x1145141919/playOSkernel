@@ -7,7 +7,7 @@ global idt_descriptor_lm
 %define LONG_FINAL_STACK_WITH_ERRCODE_TOP_MAGIC  0x14
 extern longmode_enter_checkpoint
 ; IDT定义 - 长模式64位下的前32个向量
-SECTION .boottext
+SECTION .ap_bootstrap_text
 ; 长模式下的中断处理例程标签
 longmode_interrupt_handlers:
 bits 64
@@ -1273,7 +1273,7 @@ ap_init_patch_idt_lm:
     pop rbx
     pop rax
     ret
-SECTION .init_rodata
+SECTION .ap_bootstrap_data
 idt_table_lm:
     ; IDT条目格式 (每个条目16字节):
     ; 偏移[0:1] - 偏移地址的低16位

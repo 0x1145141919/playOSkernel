@@ -8,6 +8,7 @@
 #include "linker_symbols.h"
 #include "Interrupt_system/loacl_processor.h"
 #include "util/cpuid_intel.h"
+#include "memory/init_memory_info.h"
 #ifdef USER_MODE
 #include <unistd.h>
 #endif 
@@ -207,29 +208,108 @@ void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context:
 
 void Panic::write_will()
 {
-    uint64_t start_addr = (uint64_t)&__heap_bitmap_start;
-    uint64_t end_addr = (uint64_t)&__heap_bitmap_end;
-    
-    // 将起始地址对齐到4KB边界
-    start_addr = (start_addr + 0xFFF) & (~0xFFF);
-    
-    // 遍历__heap_bitmap_start和__heap_bitmap_end之间每个4KB页对齐的地址并复制panic_last_will结构
-    for (uint64_t addr = start_addr; addr + sizeof(panic_last_will) <= end_addr; addr += 0x1000) {
-        panic_last_will* will_ptr = (panic_last_will*)addr;
-        ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
-    }
-    
-    // 同样处理__heap_start到__heap_end之间的内存区域
-    start_addr = (uint64_t)&__heap_start;
-    end_addr = (uint64_t)&__heap_end;
-    
-    // 将起始地址对齐到4KB边界
-    start_addr = (start_addr + 0xFFF) & (~0xFFF);
-    
-    // 遍历__heap_start和__heap_end之间每个4KB页对齐的地址并复制panic_last_will结构
-    for (uint64_t addr = start_addr; addr + sizeof(panic_last_will) <= end_addr; addr += 0x1000) {
-        panic_last_will* will_ptr = (panic_last_will*)addr;
-        ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
+    // 遍历所有 freeSystemRam 类型的物理内存段
+    for(uint64_t seg_idx = 0; seg_idx < phymem_segments_count; seg_idx++) {
+        phymem_segment& seg = phymem_segments[seg_idx];
+        
+        // 只处理 freeSystemRam 类型的内存段
+        if(seg.type != freeSystemRam) {
+            continue;
+        }
+        
+        // 确保起始地址对齐到 4KB
+        phyaddr_t seg_start = (seg.start + 0xFFF) & (~0xFFF);
+        phyaddr_t seg_end = seg.start + seg.size;
+        
+        // 收集该段中被 VM_intervals 占用的区间
+        struct occupied_range_t {
+            phyaddr_t start;
+            phyaddr_t end;
+        };
+        
+        constexpr uint64_t MAX_OCCUPIED_RANGES = 256;
+        occupied_range_t occupied_ranges[MAX_OCCUPIED_RANGES];
+        uint64_t occupied_count = 0;
+        
+        // 查找与该物理段有交集的 VM_intervals
+        for(uint64_t vm_idx = 0; vm_idx < VM_intervals_count; vm_idx++) {
+            loaded_VM_interval& vm = VM_intervals[vm_idx];
+            
+            // 检查是否有交集
+            if(vm.pbase >= seg_end || (vm.pbase + vm.size) <= seg_start) {
+                continue;
+            }
+            
+            // 计算交集范围
+            phyaddr_t intersect_start = (vm.pbase > seg_start) ? vm.pbase : seg_start;
+            phyaddr_t intersect_end = (vm.pbase + vm.size < seg_end) ? (vm.pbase + vm.size) : seg_end;
+            
+            // 保存占用的区间（相对于段的起始位置）
+            if(occupied_count < MAX_OCCUPIED_RANGES) {
+                occupied_ranges[occupied_count].start = intersect_start;
+                occupied_ranges[occupied_count].end = intersect_end;
+                occupied_count++;
+            }
+        }
+        
+        // 对占用区间按起始地址排序（简单冒泡排序）
+        for(uint64_t i = 0; i < occupied_count - 1; i++) {
+            for(uint64_t j = 0; j < occupied_count - i - 1; j++) {
+                if(occupied_ranges[j].start > occupied_ranges[j+1].start) {
+                    occupied_range_t temp = occupied_ranges[j];
+                    occupied_ranges[j] = occupied_ranges[j+1];
+                    occupied_ranges[j+1] = temp;
+                }
+            }
+        }
+        
+        // 在空闲区域写入遗言
+        phyaddr_t current_addr = seg_start;
+        uint64_t next_occupied_index = 0;
+        
+        while(current_addr + sizeof(panic_last_will) <= seg_end) {
+            // 检查是否到达下一个占用区间
+            if(next_occupied_index < occupied_count) {
+                phyaddr_t occupied_start = occupied_ranges[next_occupied_index].start;
+                
+                // 如果当前地址已经过了这个占用区间，跳过它
+                if(current_addr >= occupied_ranges[next_occupied_index].end) {
+                    next_occupied_index++;
+                    continue;
+                }
+                
+                // 如果下一个占用区间在当前地址之前，跳过它
+                if(occupied_start <= current_addr) {
+                    next_occupied_index++;
+                    continue;
+                }
+                
+                // 如果下一个占用区间就在当前地址，跳过整个占用区间
+                if(occupied_start == current_addr) {
+                    current_addr = occupied_ranges[next_occupied_index].end;
+                    next_occupied_index++;
+                    continue;
+                }
+                
+                // 如果当前地址到占用区间之间有足够的空间，写入遗言
+                if(occupied_start >= current_addr + sizeof(panic_last_will)) {
+                    panic_last_will* will_ptr = (panic_last_will*)current_addr;
+                    ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
+                    current_addr += 0x1000;
+                    continue;
+                }
+                
+                // 空间不足，跳到占用区间之后
+                current_addr = occupied_ranges[next_occupied_index].end;
+                next_occupied_index++;
+                continue;
+            }
+            
+            // 没有更多占用区间，写入遗言
+            panic_last_will* will_ptr = (panic_last_will*)current_addr;
+            ksystemramcpy(&will, will_ptr, sizeof(panic_last_will));
+            current_addr += 0x1000;
+        }
     }
 }
 #endif

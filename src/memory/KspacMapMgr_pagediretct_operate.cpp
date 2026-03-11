@@ -11,6 +11,8 @@
 #include "msr_offsets_definitions.h"
 #include "util/kptrace.h"
 #include "util/kout.h"
+#include "memory/init_memory_info.h"
+
 #ifdef USER_MODE
 #include <elf.h>
 #include <stdio.h>
@@ -20,9 +22,8 @@
 #include <unistd.h>
 #endif
 
-PageTableEntryUnion KspaceMapMgr::kspaceUPpdpt[256*512] __attribute__((section(".kspace_uppdpt")));
-shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info={0};
-bool KspaceMapMgr::is_default_pat_config_enabled=false;
+PageTableEntryUnion*KspaceMapMgr::kspaceUPpdpt;
+shared_inval_VMentry_info_t shared_inval_kspace_VMentry_info;
 KURD_t KspaceMapMgr::default_kurd()
 {
     return KURD_t(0,0,module_code::MEMORY,MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR,0,0,err_domain::CORE_MODULE);
@@ -46,19 +47,18 @@ KURD_t KspaceMapMgr::default_fatal()
     kurd=set_fatal_result_level(kurd);
     return kurd;
 }
-KURD_t KspaceMapMgr::Init()
+KURD_t KspaceMapMgr::Init(loaded_VM_interval* kspace_up_layer)
 {
     KURD_t success=default_success();
     KURD_t fail=default_failure();
-    success.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT;
+  success.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT;
     fail.event_code=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT;
-    #ifdef KERNEL_MODE
-    kspace_uppdpt_phyaddr=(phyaddr_t)&_kspace_uppdpt_lma;
-    #endif
+    kspace_uppdpt_phyaddr=kspace_up_layer->pbase;
+    kspaceUPpdpt=(PageTableEntryUnion*)kspace_up_layer->vbase;
     kspace_vm_table=new kspace_vm_table_t();
     KURD_t status=KURD_t();
     //先注册内核映像
-    pgaccess PG_RX{
+   pgaccess PG_RX{
         .is_kernel=1,
         .is_writeable=0,
         .is_readable =1,
@@ -66,107 +66,39 @@ KURD_t KspaceMapMgr::Init()
         .is_global=1,
         .cache_strategy = cache_strategy_t::WB
     };
-    vaddr_t result=0;
-    uint64_t basic_seg_size=PhyAddrAccessor::BASIC_DESC.SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
-#ifdef KERNEL_MODE
-    result=(vaddr_t)pgs_remapp(status,(uint64_t)&KImgphybase,(&text_end-&text_begin),PG_RX,(vaddr_t)&KImgvbase);
-    if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(status,(uint64_t)&_data_lma,(&_data_end-&_data_start),PG_RW,(vaddr_t)&_data_start);
-    if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(status,(uint64_t)&_rodata_lma,(&_rodata_end-&_rodata_start),PG_R,(vaddr_t)&_rodata_start);
-    if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(status,(uint64_t)&_stack_lma,(&__klog_end-&_stack_bottom),PG_RW,(vaddr_t)&_stack_bottom);
-    if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(status,ksymmanager::get_phybase(),align_up(sizeof(symbol_entry)*ksymmanager::get_entry_count(),4096),PG_R,ksymmanager::get_virtbase());
-    if(result==0)goto regist_segment_fault;
-    result=(vaddr_t)pgs_remapp(status,0,basic_seg_size,PG_RW,0,true);
-    if(result==0)goto regist_segment_fault;
-
-    PhyAddrAccessor::BASIC_DESC.start=result;
-#endif
-#ifdef USER_MODE
-    // 需要读取kernel.elf的段信息进行模仿完成内核映像的虚拟映射注册
-    // 在用户空间读取kernel.elf文件，分析其段信息并进行模拟映射
-    
-    // 打开kernel.elf文件
-    const char* elf_path = "/home/pangsong/PS_git/OS_pj_uefi/kernel/kernel.elf";
-    int fd = open(elf_path, O_RDONLY);
-    if (fd < 0) {
-        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
-        return fail;
-    }
-
-    // 获取文件大小
-    struct stat sb;
-    if (fstat(fd, &sb) < 0) {
-        close(fd);
-        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
-        return fail;
-    }
-    
-    // 映射文件到内存
-    void* elf_mapped = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (elf_mapped == MAP_FAILED) {
-        close(fd);
-        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
-        return fail;
-    }
-
-    // ELF头部指针
-    Elf64_Ehdr* ehdr = (Elf64_Ehdr*)elf_mapped;
-    
-    // 验证ELF头部
-    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 || 
-        ehdr->e_ident[EI_MAG1] != ELFMAG1 || 
-        ehdr->e_ident[EI_MAG2] != ELFMAG2 || 
-        ehdr->e_ident[EI_MAG3] != ELFMAG3) {
-        munmap(elf_mapped, sb.st_size);
-        close(fd);
-        fail.result=MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::INIT_RESULTS::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC;
-        return fail;
-    }
-
-    // 获取程序头表
-    Elf64_Phdr* phdr = (Elf64_Phdr*)((char*)elf_mapped + ehdr->e_phoff);
-
-    // 遍历程序头表，映射各段
-    for (int i = 0; i < ehdr->e_phnum; i++) {
-        if (phdr[i].p_type == PT_LOAD && phdr[i].p_memsz > 0&&phdr[i].p_vaddr >= PAGELV4_KSPACE_BASE) {
-            // 根据段的权限设置访问标志
-            pgaccess access;
-            access.is_kernel = 1;
-            access.is_executable = (phdr[i].p_flags & PF_X) ? 1 : 0;
-            access.is_writeable = (phdr[i].p_flags & PF_W) ? 1 : 0;
-            access.is_readable = (phdr[i].p_flags & PF_R) ? 1 : 0;
-            access.is_global = 1;
-            access.cache_strategy = cache_strategy_t::WB;
-
-            // 使用pgs_remapp映射段
-            result = (vaddr_t)pgs_remapp(
+  vaddr_t result=0;
+  uint64_t basic_seg_size=PhyAddrAccessor::BASIC_DESC.SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
+  uint64_t intervals_count=VM_intervals_count;
+    loaded_VM_interval*interval_arr=VM_intervals;
+   void*tmp_result_contain=nullptr;
+    for(uint64_t i=0;i<intervals_count;i++){
+      if(interval_arr[i].vbase>PAGELV4_KSPACE_BASE){
+           tmp_result_contain=pgs_remapp(
                 status,
-                phdr[i].p_paddr,     // 虚拟地址
-                phdr[i].p_memsz,     // 内存大小
-                access,              // 访问权限
-                phdr[i].p_vaddr      // 映射到相同虚拟地址
+              interval_arr[i].pbase,
+              interval_arr[i].size,
+              interval_arr[i].access,
+              interval_arr[i].vbase,
+               false
             );
-            
-            if (error_kurd(status)) {
-                munmap(elf_mapped, sb.st_size);
-                close(fd);
-                goto regist_segment_fault;
+          if(tmp_result_contain==nullptr||error_kurd(status)){
+               goto regist_segment_fault;
             }
         }
     }
-
-    // 清理资源
-    munmap(elf_mapped, sb.st_size);
-    close(fd);
-    
-#endif
-
-    
+   PhyAddrAccessor::BASIC_DESC.start=(vaddr_t)pgs_remapp(
+        status,
+        0,
+       basic_seg_size,
+        PG_RW,
+        0,
+       false
+    );
+  if(PhyAddrAccessor::BASIC_DESC.start==0||error_kurd(status)){
+       goto regist_segment_fault;
+    }
     return success;  
-    regist_segment_fault:
+   regist_segment_fault:
     return status;
 
 }

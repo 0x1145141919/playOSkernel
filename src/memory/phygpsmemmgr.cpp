@@ -307,7 +307,7 @@ void phymemspace_mgr::in_module_panic(KURD_t kurd)
         kurd
     );
 }
-KURD_t phymemspace_mgr::Init()
+KURD_t phymemspace_mgr::Init(init_to_kernel_info*info)
 {
     subtb_alloc_is_pool_way_flag=true;
     KURD_t status=KURD_t();   
@@ -315,171 +315,184 @@ KURD_t phymemspace_mgr::Init()
     KURD_t success=default_success();
     fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_INIT;
     success.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_INIT;
+    
+    // 初始化基本数据结构
     physeg_list=new PHYSEG_LIST_ITEM();
     top_1gb_table=new Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,page_size1gb_t,__builtin_ctz(MAX_PHYADDR_1GB_PGS_COUNT)-9,9>;
-    uint32_t phymemtb_count=gBaseMemMgr.getRootPhysicalMemoryDescriptorTableEntryCount();
-    phy_memDescriptor*base=gBaseMemMgr.getGlobalPhysicalMemoryInfo();
-    
-    for(uint32_t i=0;i<phymemtb_count;i++)
-    {
-        if(base[i].PhysicalStart<0x100000)continue;
-        seg_type_t seg_state;
-        bool will_soon_regist_soon=false;
-        switch(base[i].Type)
-        {   
-            case OS_KERNEL_DATA:will_soon_regist_soon=true;
-            case freeSystemRam:seg_state=DRAM_SEG;break;
-            case EFI_RUNTIME_SERVICES_DATA:
-            case EFI_RUNTIME_SERVICES_CODE:
-            case EFI_ACPI_RECLAIM_MEMORY:
-            case EFI_ACPI_MEMORY_NVS:seg_state=RESERVED_SEG;break;
-            case EFI_MEMORY_MAPPED_IO:
-            case EFI_MEMORY_MAPPED_IO_PORT_SPACE:seg_state=MMIO_SEG;break;
-            case EFI_RESERVED_MEMORY_TYPE:seg_state=RESERVED_SEG;break;
-            case OS_MEMSEG_HOLE:continue;
-            default:seg_state=RESERVED_SEG; 
-            break;
-        } 
-        phy_memDescriptor& seg=base[i];
-        phyaddr_t segbase=seg.PhysicalStart;
-        blackhole_acclaim_flags_t flags = {
-            .a=0
-        };
-        status=blackhole_acclaim(segbase,seg.NumberOfPages,seg_state,flags);//i==8时候出现了错误,问题在于有时候会跨越2mb段会跨越两个1gb表项但是没能正确处理
-        
-        if(status.result != result_code::SUCCESS)return status;
-        if(will_soon_regist_soon){
-            if(seg_state==DRAM_SEG){
-                pages_state_set_flags_t low1mb_pgs_set = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
-                status=pages_state_set(segbase,seg.NumberOfPages,KERNEL_PERSIST,low1mb_pgs_set);
-                if(status.result != result_code::SUCCESS)return status;
-                kio::bsp_kout<<kio::now<<"kernel soon regist at"<<(void*)segbase<<kio::kendl;
-            }
-        }
-    }
     low1mb_mgr=new low1mb_mgr_t();
-    pages_state_set_flags_t low1mb_pgs_set = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
-    status=pages_state_set(0,256,LOW1MB,low1mb_pgs_set);
-    dram_pages_state_set_flags_t dram_set={
-        .state=KERNEL_PERSIST,
-        .op=dram_pages_state_set_flags_t::normal,
-        .params={
-            .if_init_ref_count=1,
+    
+    // ============================================
+    // 第一步：根据 memory_map 注册所有内存段
+    // ============================================
+    for(uint64_t i = 0; i < info->phymem_segment_count; i++) {
+        phymem_segment& seg = info->memory_map[i];
+        
+        // 跳过无效段或低端 1MB（由后续专门处理）
+        if(seg.start < 0x100000) continue;
+        
+        seg_type_t seg_state;
+        switch(seg.type) {
+            case freeSystemRam:
+            case OS_ALLOCATABLE_MEMORY:
+                seg_state = DRAM_SEG;
+                break;
+            case EFI_RUNTIME_SERVICES_CODE:
+            case EFI_RUNTIME_SERVICES_DATA:
+            case EFI_ACPI_RECLAIM_MEMORY:
+            case EFI_ACPI_MEMORY_NVS:
+            case OS_KERNEL_CODE:
+            case OS_KERNEL_DATA:
+            case OS_KERNEL_STACK:
+            case OS_RESERVED_MEMORY:
+                seg_state = RESERVED_SEG;
+                break;
+            case EFI_MEMORY_MAPPED_IO:
+            case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+            case OS_HARDWARE_GRAPHIC_BUFFER:
+                seg_state = MMIO_SEG;
+                break;
+            case EFI_RESERVED_MEMORY_TYPE:
+            case EFI_UNUSABLE_MEMORY:
+            case EFI_PERSISTENT_MEMORY:
+            case EFI_UNACCEPTED_MEMORY_TYPE:
+                seg_state = RESERVED_SEG;
+                break;
+            default:
+                seg_state = RESERVED_SEG;
+                break;
+        }
+        
+        blackhole_acclaim_flags_t flags = {
+            .a = 0
+        };
+        status = blackhole_acclaim(seg.start, seg.size / _4KB_PG_SIZE, seg_state, flags);
+        if(status.result != result_code::SUCCESS) {
+            kio::bsp_kout << "[WARN] Failed to acclaim segment at " 
+                          << (void*)seg.start << ", size: " << seg.size 
+                          << ", type: " << static_cast<uint32_t>(seg.type) 
+                          << ", error: " << status.result << kio::kendl;
+            continue;
+        }
+    }
+    
+    // ============================================
+    // 第二步：注册低端 1MB 为 LOW1MB
+    // ============================================
+    pages_state_set_flags_t low1mb_pgs_set = {
+        .op = pages_state_set_flags_t::normal,
+        .params = {
+            .if_init_ref_count = 1,
+            .if_mmio = 0
         }
     };
-#ifdef KERNEL_MODE
-    VM_DESC& basic_desc_ref= PhyAddrAccessor::BASIC_DESC;
-    basic_desc_ref.SEG_SIZE_ONLY_UES_IN_BASIC_SEG=gBaseMemMgr.getMaxPhyaddr();
-    //内核映像注册
-    pages_state_set_flags_t Kimage_regist_flags = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
-    
-    
-    if(status.result != result_code::SUCCESS) return status;
-    low1mb_mgr_t::low1mb_seg_t trampoile={
-        .base=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&init_text_begin)),
-        .size=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&init_stack_end) - reinterpret_cast<uintptr_t>(&init_text_begin)),
-        .type=low1mb_mgr_t::LOW1MB_TRAMPOILE_SEG
-    };
-    status=low1mb_mgr->regist_seg(trampoile);
-    if(!success_all_kurd(status)) return status;
-    PHYSEG*seg=physeg_list->get_seg_by_addr((phyaddr_t)&KImgphybase,status);
-    if(!success_all_kurd(status) || !seg){
-        return status;
-    }
-    status=dram_pages_state_set(*seg,(phyaddr_t)&KImgphybase,(phyaddr_t)(&text_end-&text_begin)/_4KB_PG_SIZE, dram_set);
+    status = pages_state_set(0, 256, LOW1MB, low1mb_pgs_set);
     if(!success_all_kurd(status)) return status;
     
-    status=dram_pages_state_set(*seg,(phyaddr_t)&_data_lma,(&_data_end-&_data_start)/_4KB_PG_SIZE, dram_set);
-    if(!success_all_kurd(status)) return status;
+    // ============================================
+    // 第三步：根据 loaded_VM_intervals 注册内核加载段
+    // 需要判断物理地址是否低于 1MB 来选择合适的状态
+    // ============================================
+    constexpr phyaddr_t LOW1MB_THRESHOLD = 0x100000; // 1MB
     
-    status=dram_pages_state_set(*seg,(phyaddr_t)&_rodata_lma,(&_rodata_end-&_rodata_start)/_4KB_PG_SIZE, dram_set);
-    if(!success_all_kurd(status)) return status;
-    
-    status=dram_pages_state_set(*seg,(phyaddr_t)&_stack_lma,(&__klog_end-&_stack_bottom)/_4KB_PG_SIZE, dram_set);
-    if(!success_all_kurd(status)) return status;
-    seg->statistics.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
-    statisitcs.kernel_persisit+=(&__klog_end-&text_end)/_4KB_PG_SIZE;
-#endif
-#ifdef USER_MODE
-    //这里要通过读取kernel.elf的段信息来模仿内核态行为
-    const char* elf_path = "/home/pangsong/PS_git/OS_pj_uefi/kernel/kernel.elf";
-    int fd = open(elf_path, O_RDONLY);
-    if (fd < 0) {
-        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
-        return fail;
-    }
-
-    // 获取文件大小
-    struct stat sb;
-    if (fstat(fd, &sb) < 0) {
-        close(fd);
-        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
-        return fail;
-    }
-    
-    // 映射文件到内存
-    void* elf_mapped = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (elf_mapped == MAP_FAILED) {
-        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_SET_FAIL;
-        return fail;
-    }
-
-    // ELF头部指针
-    Elf64_Ehdr* ehdr = (Elf64_Ehdr*)elf_mapped;
-    
-    // 验证ELF头部
-    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 || 
-        ehdr->e_ident[EI_MAG1] != ELFMAG1 || 
-        ehdr->e_ident[EI_MAG2] != ELFMAG2 || 
-        ehdr->e_ident[EI_MAG3] != ELFMAG3) {
-        munmap(elf_mapped, sb.st_size);
-        close(fd);
-        fail.event_code=MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::INIT_RSEUL_RESULTS_CODE::FAIL_REASONS::USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC;
-        return fail;
-    }
-
-    // 获取程序头表
-    Elf64_Phdr* phdr = (Elf64_Phdr*)((char*)elf_mapped + ehdr->e_phoff);
-
-    // 遍历程序头表，模拟内核段注册
-    pages_state_set_flags_t Kimage_regist_flags = {.op=pages_state_set_flags_t::normal,.params={.if_init_ref_count=1,.if_mmio=0}};
-    PHYSEG*seg=physeg_list->get_seg_by_addr((phyaddr_t)phdr[4].p_paddr,status);
-    if(!success_all_kurd(status) || !seg){
-        return status;
-    }
-    
-    for (int i = 4; i < ehdr->e_phnum; i++) {
-        if (phdr[i].p_type == PT_LOAD && phdr[i].p_memsz > 0) {
-            // 计算页数
-            uint64_t page_count = (phdr[i].p_memsz + _4KB_PG_SIZE - 1) / _4KB_PG_SIZE;
-            
-            // 根据段的虚拟地址和类型来确定内存段类型
-            page_state_t page_type = KERNEL_PERSIST; // 默认为内核持久段
-            
-            // 使用pages_state_set注册内存段
-            status = dram_pages_state_set(*seg,phdr[i].p_paddr, page_count, dram_set);
-            if(!success_all_kurd(status)) {
-                munmap(elf_mapped, sb.st_size);
-                close(fd);
-                return status;
+    for(uint64_t i = 0; i < info->loaded_VM_interval_count; i++) {
+        loaded_VM_interval& vm_interval = info->loaded_VM_intervals[i];
+        
+        // 获取对应的物理段
+        PHYSEG* seg = physeg_list->get_seg_by_addr(vm_interval.pbase, status);
+        if(!success_all_kurd(status) || !seg) {
+            kio::bsp_kout << "[WARN] Failed to find segment for VM interval at " 
+                          << (void*)vm_interval.pbase << kio::kendl;
+            continue;
+        }
+        
+        // 计算页数
+        uint64_t page_count = vm_interval.size / _4KB_PG_SIZE;
+        
+        // 根据物理地址位置决定状态
+        page_state_t target_state;
+        if(vm_interval.pbase < LOW1MB_THRESHOLD) {
+            // 低于 1MB 的物理地址，使用 LOW1MB 状态
+            target_state = LOW1MB;
+        } else {
+            // 高于 1MB 的物理地址，使用 KERNEL_PERSIST 状态
+            target_state = KERNEL_PERSIST;
+        }
+        
+        dram_pages_state_set_flags_t dram_set = {
+            .state = target_state,
+            .op = dram_pages_state_set_flags_t::normal,
+            .params = {
+                .if_init_ref_count = 1,
             }
-            seg->statistics.kernel_persisit+=page_count;
-            statisitcs.kernel_persisit+=page_count;
+        };
+        
+        status = dram_pages_state_set(*seg, vm_interval.pbase, page_count, dram_set);
+        if(!success_all_kurd(status)) {
+            kio::bsp_kout << "[WARN] Failed to set state for VM interval at " 
+                          << (void*)vm_interval.pbase << ", pages: " << page_count 
+                          << ", state: " << static_cast<uint32_t>(target_state)
+                          << ", error: " << status.result << kio::kendl;
+            continue;
+        }
+        
+        // 更新统计信息
+        if(target_state == KERNEL_PERSIST) {
+            seg->statistics.kernel_persisit += page_count;
+            statisitcs.kernel_persisit += page_count;
         }
     }
-
-    // 清理资源
-    munmap(elf_mapped, sb.st_size);
-    close(fd);
     
-#endif
-return success;
+    // ============================================
+    // 第四步：特殊处理 - 注册 info 自身和 kmmu_interval 为 KERNEL 状态
+    // ============================================
+    
+    // 4.1 注册 info 自身所在的页框为 KERNEL 状态（后续可能回收）
+    phyaddr_t info_phy_addr = reinterpret_cast<phyaddr_t>(info);
+    // 确保对齐到 4KB
+    info_phy_addr &= ~(_4KB_PG_SIZE - 1);
+    
+    PHYSEG* info_seg = physeg_list->get_seg_by_addr(info_phy_addr, status);
+    if(success_all_kurd(status) && info_seg) {
+        dram_pages_state_set_flags_t info_set = {
+            .state = KERNEL,
+            .op = dram_pages_state_set_flags_t::normal,
+            .params = {
+                .if_init_ref_count = 1,
+            }
+        };
+        status = dram_pages_state_set(*info_seg, info_phy_addr, 1, info_set);
+        if(success_all_kurd(status)) {
+            kio::bsp_kout << "[INFO] Registered info structure at " 
+                          << (void*)info_phy_addr << " as KERNEL state" << kio::kendl;
+        }
+    }
+    
+    // 4.2 注册 kmmu_interval 为 KERNEL 状态（后续可能回收）
+    if(info->kmmu_interval.size > 0) {
+        phyaddr_t kmmu_base = info->kmmu_interval.start;
+        uint64_t kmmu_pages = info->kmmu_interval.size / _4KB_PG_SIZE;
+        
+        PHYSEG* kmmu_seg = physeg_list->get_seg_by_addr(kmmu_base, status);
+        if(success_all_kurd(status) && kmmu_seg) {
+            dram_pages_state_set_flags_t kmmu_set = {
+                .state = KERNEL,
+                .op = dram_pages_state_set_flags_t::normal,
+                .params = {
+                    .if_init_ref_count = 1,
+                }
+            };
+            status = dram_pages_state_set(*kmmu_seg, kmmu_base, kmmu_pages, kmmu_set);
+            if(success_all_kurd(status)) {
+                kio::bsp_kout << "[INFO] Registered kmmu_interval at " 
+                              << (void*)kmmu_base << ", pages: " << kmmu_pages 
+                              << " as KERNEL state" << kio::kendl;
+            }
+        }
+    }
+    
+    return success;
 }
-#ifdef USER_MODE
-phymemspace_mgr::phymemspace_mgr()
-{
-}
-#endif
+
 const char* page_state_to_string(page_state_t state) {
     switch (state) {
         case RESERVED: return "RESERVED";
@@ -617,7 +630,9 @@ int phymemspace_mgr::print_allseg()
 
 phymemspace_mgr::free_segs_t *phymemspace_mgr::free_segs_get()
 {
-    static free_segs_t cached = {0, nullptr};
+    free_segs_t* out = new free_segs_t();
+    out->count = 0;
+    out->entries = nullptr;
     module_global_lock.lock();
 
     auto idx_to_phyaddr = [](uint32_t idx1, uint16_t idx2, uint16_t idx4) -> phyaddr_t {
@@ -715,23 +730,18 @@ phymemspace_mgr::free_segs_t *phymemspace_mgr::free_segs_get()
     uint64_t total_entries = 0;
     scan_free_atomic_runs(false, nullptr, total_entries);
 
-    if (cached.entries) {
-        delete[] cached.entries;
-        cached.entries = nullptr;
-    }
-
-    cached.count = total_entries;
+    out->count = total_entries;
     if (total_entries > 0) {
-        cached.entries = new free_segs_t::entry_t[total_entries];
+        out->entries = new free_segs_t::entry_t[total_entries];
         uint64_t filled_entries = 0;
-        scan_free_atomic_runs(true, cached.entries, filled_entries);
-        if (filled_entries < cached.count) {
-            cached.count = filled_entries;
+        scan_free_atomic_runs(true, out->entries, filled_entries);
+        if (filled_entries < out->count) {
+            out->count = filled_entries;
         }
     }
 
     module_global_lock.unlock();
-    return &cached;
+    return out;
 }
 // ------------------------
 // 仅用于 pages_recycle 的回收前校验
@@ -946,7 +956,7 @@ phymemspace_mgr::phymemmgr_statistics_t phymemspace_mgr::get_statisit_copy()
 {
     return statisitcs;
 }
-void phymemspace_mgr::subtb_alloc_is_pool_way_flag_enable()
+void phymemspace_mgr::subtb_alloc_shift_pages_way()
 {
-    subtb_alloc_is_pool_way_flag = true;
+    subtb_alloc_is_pool_way_flag = false;
 }

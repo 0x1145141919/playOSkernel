@@ -1,7 +1,6 @@
 # 创建内存管理模块的对象文件，用于内核空间
 # 包含内核池内存管理、物理内存段管理等相关功能的实现文件
 set(MEMORY_SOURCE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Memory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_pgcount_modify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_pgs_set.cpp

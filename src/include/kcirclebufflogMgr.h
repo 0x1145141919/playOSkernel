@@ -3,6 +3,7 @@
  */
 #include "stdint.h"
 #include "util/lock.h"
+#include "init_to_kernel_info.h"
  class DmesgRingBuffer
 {
 private:
@@ -11,6 +12,6 @@ private:
     static uint64_t tailIndex;
     static spinrwlock_cpp_t rwlock;
 public:
-    static void Init(/* args */);
+    static void Init(loaded_VM_interval*logbuffer);
     static void putsk(char *str,uint64_t len_in_bytes);
 };

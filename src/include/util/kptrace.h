@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include "../KernelEntryPointDefinetion.h"
+#include "init_to_kernel_info.h"
 #include "memory/Memory.h"
 struct symbol_entry {
     uint64_t address;
@@ -14,7 +14,7 @@ class ksymmanager {//被映射的表项是只读的，写操作会触发页错�
     static uint32_t entry_count;
     static uint32_t entry_size;
     public:
-    static int Init(BootInfoHeader *boot_info);
+    static int Init(loaded_VM_interval* entry,uint64_t file_size);
     static symbol_entry*get_entry_near_addr(vaddr_t addr);//找到引索为n的符号使(symbol_table[n].address<=addr)&&(symbol_table[n+1].address>addr)
     //保证地址随引索的增加而增加，使用二分查找
     static phyaddr_t get_phybase();

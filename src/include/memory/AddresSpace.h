@@ -1,7 +1,6 @@
 #pragma once
 #include "stdint.h"
 #include "memory/Memory.h"
-#include "memory/pgtable45.h"
 #include "memory/kpoolmemmgr.h"
 #include <util/lock.h>
 #include "memmodule_err_definitions.h"
@@ -11,83 +10,7 @@ namespace PAGE_TBALE_LV{
 }
 constexpr uint16_t KERNEL_SPACE_PCID=0;
 extern bool pglv_4_or_5;//true代表4级页表，false代表5级页表,在KspacMapMgr.cpp存在
-enum cache_strategy_t:uint8_t
-{
-    UC=0,
-    WC=1,
-    WT=4,
-    WP=5,
-    WB=6,
-    UC_minus=7
-};
-struct cache_table_idx_struct_t
-{
-    uint8_t PWT:1;
-    uint8_t PCD:1;
-    uint8_t PAT:1;
-};
-struct seg_to_pages_info_pakage_t{
-        struct pages_info_t{
-            vaddr_t vbase;
-            phyaddr_t phybase;
-            uint64_t page_size_in_byte;
-            uint64_t num_of_pages;
-        };
-        pages_info_t entryies[5];//里面的地址顺序是无序的
-};
-struct shared_inval_VMentry_info_t{
-    seg_to_pages_info_pakage_t info_package;
-    bool is_package_valid;
-    uint32_t completed_processors_count;
-};
-union ia32_pat_t
-{
-   uint64_t value;
-   cache_strategy_t  mapped_entry[8];
-};
-struct pgaccess
-{
-    uint8_t is_kernel:1;
-    uint8_t is_writeable:1;
-    uint8_t is_readable:1;
-    uint8_t is_executable:1;
-    uint8_t is_global:1;
-    cache_strategy_t cache_strategy;
-};
-constexpr pgaccess KSPACE_RW_ACCESS={
-    .is_kernel=1,
-    .is_writeable=1,
-    .is_readable=1,
-    .is_executable=0,
-    .is_global=1,
-    .cache_strategy=WB
-};
-struct vphypair_t
-{//三个参数至少4k对齐
-    vaddr_t vaddr;
-    phyaddr_t paddr;
-    uint32_t size;
-};
 
-struct VM_DESC
-{
-    vaddr_t start;    // inclusive
-    vaddr_t end;      // exclusive
-                      // 区间长度 = end - start
-    enum map_type_t : uint8_t {
-        MAP_NONE = 0,     // 未分配物理页（仅占位）
-        MAP_PHYSICAL,     // 连续物理页,只有内核因为立即要求而使用，用户空间不能用
-        MAP_FILE,         // 文件映射
-        MAP_ANON,          // 匿名映射（默认用户空间）
-    } map_type;
-    phyaddr_t phys_start;  // 当 map_type=MAP_PHYSICAL 时有效
-                           // MAP_NONE 没有意义
-    pgaccess access;       // 页权限/缓存策略
-    uint8_t committed_full:1;   // 物理页是否完全已经分配（lazy allocation 用）
-    uint8_t is_vaddr_alloced:1;    // 虚拟地址是否由地址空间管理器分配（否则为固定映射）
-    uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
-    uint64_t SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
-};
 int VM_vaddr_cmp(VM_DESC* a,VM_DESC* b);
 namespace MEMMODULE_LOCAIONS{
     namespace ADDRESSPACE_EVENTS{
@@ -103,7 +26,6 @@ namespace MEMMODULE_LOCAIONS{
                 constexpr uint16_t REASON_CODE_VMENTRY_congruence_vlidation=0x1;
                 constexpr uint16_t REASON_CODE_BAD_VMENTRY=0x3;
                 constexpr uint16_t REASON_CODE_BAD_VMENTRY_CANT_SPLIT=0x4;
-                constexpr uint16_t REASON_CODE_BAD_VMENTRY_TRY_TO_MAP_LOW_MEM_WHO_NOT_gKernelSpace=0x5;
                 constexpr uint16_t REASON_CODE_NOT_SUPPORT_LV5_PAGING=0x100;
                 }
             namespace FATAL_REASONS{
@@ -114,7 +36,10 @@ namespace MEMMODULE_LOCAIONS{
                     //但是调用者必须有意识，出现这个错误码可以考虑重开
                     constexpr uint16_t REASON_CODE_PAGES_SET_FALT=0x2;
                     constexpr uint16_t REASON_CODE_INVALID_PAGE_SIZE=0x4;
-                }            
+                }
+            namespace SUCCESS_BUT_SIDE_AFFECTS{
+                constexpr uint16_t REASON_CODE_MAP_LOW_16K=0x1;
+            }            
         }
         namespace TRAN_TO_PHY_RESULTS_CODE{
             namespace FAIL_REASONS{
@@ -279,6 +204,7 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     static constexpr uint32_t _4KB_SIZE=0x1000;
     static constexpr uint32_t _2MB_SIZE=1ULL<<21;
     static constexpr uint32_t _1GB_SIZE=1ULL<<30;
+    static constexpr uint32_t ADDR_VM_BOTTOM=4*_4KB_SIZE;
     spinrwlock_cpp_t lock;
     KURD_t   default_kurd();
     KURD_t   default_success();
@@ -337,7 +263,7 @@ static KURD_t default_success();
 static KURD_t default_failure();
 static KURD_t default_fatal();
 friend AddressSpace;
-static PageTableEntryUnion kspaceUPpdpt[256*512];
+static PageTableEntryUnion*kspaceUPpdpt;
 static phyaddr_t kspace_uppdpt_phyaddr;
 static constexpr uint64_t PAGELV4_KSPACE_BASE=0xFFFF800000000000;
 static constexpr uint64_t PAGELV5_KSPACE_BASE=0xFF00000000000000;
@@ -347,13 +273,6 @@ static constexpr uint64_t PAGELV5_KSPACE_SIZE=1ULL<<(57-1);
 static constexpr uint32_t _4KB_SIZE=0x1000;
 static constexpr uint32_t _2MB_SIZE=1ULL<<21;
 static constexpr uint32_t _1GB_SIZE=1ULL<<30;
-
-static bool is_default_pat_config_enabled;
-static bool is_phypgsmgr_enabled;//这个位影响页框管理的
-/**
- * is_phypgsmgr_enabled为false时用堆分配页框
- * 为true时用物理页框管理分配页框
- */
 //这个数组按照虚拟地址从小到大排序,规定虚拟地址是主键
 class kspace_vm_table_t
 {
@@ -375,11 +294,12 @@ static constexpr alloc_flags_t specify_alloc_flag={
     };
 private:
     Node* root=nullptr;
+   vaddr_t last_alloc_end=0;  // 缓存上次分配的虚拟地址结尾，用于优化连续分配场景
     Node* left_rotate(Node* x);
     Node* right_rotate(Node* x);
-    void fix_insert(Node* n);
+   void fix_insert(Node* n);
     static Node* subtree_min(Node* x);
-    void fix_remove(Node* x, Node* parent);
+   void fix_remove(Node* x, Node* parent);
     static Node* subtree_max(Node* x);
     static Node* successor(Node* x);
 public:
@@ -419,11 +339,6 @@ static KURD_t _4lv_pte_4KB_entries_set(phyaddr_t phybase,vaddr_t vaddr_base,uint
 
 static void invalidate_seg();
 
-/**
- * 
- */
-static KURD_t seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC vmentry);
-
 static KURD_t enable_VMentry(VM_DESC& vmentry);
 //这个函数的职责是根据vmentry的内容撤销对应的页表项映射，只对对应的页表结构进行操作
 //失效对应tlb项目在函数外部完成
@@ -458,7 +373,7 @@ static void*pgs_remapp(KURD_t&kurd,
     vaddr_t vbase=0,
     bool is_protective=false
 );//虚拟地址为0时从下到上扫描一个虚拟地址空间映射，非0的话校验通过是内核地址则尝试固定地址映射，当然基本要求4k对齐
-static KURD_t Init();
+static KURD_t Init(loaded_VM_interval* kspace_up_layer);
 static KURD_t v_to_phyaddrtraslation(vaddr_t vaddr,phyaddr_t& result);
 friend KURD_t kpoolmemmgr_t::multi_heap_enable();
 friend KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init();

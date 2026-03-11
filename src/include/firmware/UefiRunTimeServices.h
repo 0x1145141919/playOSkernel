@@ -1,6 +1,5 @@
 #include <efi.h>
-
-
+#include <init_to_kernel_info.h>
 class EFI_RT_SVS
 {   
     static EFI_SYSTEM_TABLE *gST;
@@ -22,7 +21,7 @@ class EFI_RT_SVS
             EFI_STATUS status,
             uint64_t data_size,
             void *data_ptr);
-        static int Init(EFI_SYSTEM_TABLE *sti, uint64_t mapver);
+        static int Init(EFI_SYSTEM_TABLE *sti);
         static void rt_hotreset();
         static void rt_coldreset();
         static void rt_shutdown();

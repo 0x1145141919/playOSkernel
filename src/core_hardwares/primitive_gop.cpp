@@ -3,6 +3,7 @@
 #include "memory/phygpsmemmgr.h"
 #include "util/OS_utils.h"
 
+
 namespace {
 static constexpr uint64_t kPageSize = 0x1000;
 
@@ -49,78 +50,33 @@ KURD_t GfxPrim::default_fatal()
     return kurd;
 }
 
-KURD_t GfxPrim::Init(GlobalBasicGraphicInfoType* metainf)
+KURD_t GfxPrim::Init(GlobalBasicGraphicInfoType *metainf, loaded_VM_interval interval)
 {
-    KURD_t success = default_success();
-    KURD_t fail = default_fail();
-    success.event_code = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT;
-    fail.event_code = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT;
-
-    if (metainf == nullptr) {
-        fail.reason = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::PARAM_METAINF_NULLPTR;
-        return fail;
-    }
-    if (s_ready) {
-        fail.reason = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::ALLREADE_INIT;
-        return fail;
-    }
-    if (metainf->FrameBufferBase == 0 || metainf->FrameBufferSize == 0) {
-        fail.reason = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::BAD_PARAM;
-        return fail;
-    }
-    if (!is_4k_aligned(static_cast<uint64_t>(metainf->FrameBufferBase)) ||
-        !is_4k_aligned(static_cast<uint64_t>(metainf->FrameBufferSize))) {
-        fail.reason = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::BAD_PARAM;
-        return fail;
-    }
-    if (metainf->pixelFormat != PixelBlueGreenRedReserved8BitPerColor) {
-        fail.reason = COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::BAD_PARAM;
-        return fail;
-    }
-
-    KURD_t kurd = empty_kurd;
-    pgaccess access = KspaceMapMgr::PG_RW;
-    access.cache_strategy = WC;
-    void* fb_vaddr = KspaceMapMgr::pgs_remapp(
-        kurd,
-        metainf->FrameBufferBase,
-        metainf->FrameBufferSize,
-        access,0,true
-    );
-    if (fb_vaddr == nullptr || error_kurd(kurd)) {
-        return error_kurd(kurd) ? kurd : fail;
-    }
-
-    const uint64_t page_count = metainf->FrameBufferSize / kPageSize;
-    void* backbuffer = __wrapped_pgs_valloc(&kurd, page_count, KERNEL, 12);
-    if (backbuffer == nullptr || error_kurd(kurd)) {
-        KspaceMapMgr::pgs_remapped_free(reinterpret_cast<vaddr_t>(fb_vaddr));
-        return error_kurd(kurd) ? kurd : fail;
-    }
-
-    s_info.width = metainf->horizentalResolution;
-    s_info.height = metainf->verticalResolution;
-    s_info.pitch_pixels = metainf->PixelsPerScanLine;
     s_info.format = metainf->pixelFormat;
-    s_info.fb_bytes = metainf->FrameBufferSize;
-    s_info.fb_paddr = metainf->FrameBufferBase;
-    s_info.fb_vaddr = reinterpret_cast<uintptr_t>(fb_vaddr);
-    s_info.backbuffer = backbuffer;
-    s_ready = true;
-
+    s_info.width=metainf->horizentalResolution;
+    s_info.height=metainf->verticalResolution;
+    s_info.pitch_pixels = metainf->PixelsPerScanLine;
+    s_info.fb_bytes=metainf->FrameBufferSize;
+    s_info.backbuffer = nullptr;
+    s_info.fb_vaddr=interval.vbase;
+    s_info.fb_paddr=metainf->FrameBufferBase;
+    KURD_t success=default_success();
+    success.event_code=COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT;
     return success;
 }
 
 void GfxPrim::PutPixelUnsafe(Vec2i pos, uint32_t color)
 {
-    if (!s_ready || s_info.backbuffer == nullptr) return;
-    uint32_t* base = static_cast<uint32_t*>(s_info.backbuffer);
+    if (!s_ready || s_info.fb_vaddr == 0) return;
+    
+    void* target_buffer = (s_info.backbuffer != nullptr) ? s_info.backbuffer : reinterpret_cast<void*>(s_info.fb_vaddr);
+    uint32_t* base = static_cast<uint32_t*>(target_buffer);
     base[static_cast<uint64_t>(pos.y) * s_info.pitch_pixels + static_cast<uint64_t>(pos.x)] = color;
 }
 
 void GfxPrim::PutPixel(Vec2i pos, uint32_t color)
 {
-    if (!s_ready || s_info.backbuffer == nullptr) return;
+    if (!s_ready || s_info.fb_vaddr == 0) return;
     if (pos.x < 0 || pos.y < 0) return;
     if (static_cast<uint32_t>(pos.x) >= s_info.width || static_cast<uint32_t>(pos.y) >= s_info.height) return;
     PutPixelUnsafe(pos, color);
@@ -128,7 +84,7 @@ void GfxPrim::PutPixel(Vec2i pos, uint32_t color)
 
 void GfxPrim::DrawHLine(Vec2i pos, int len, uint32_t color)
 {
-    if (!s_ready || s_info.backbuffer == nullptr) return;
+    if (!s_ready || s_info.fb_vaddr == 0) return;
     if (pos.y < 0 || static_cast<uint32_t>(pos.y) >= s_info.height) return;
     if (len == 0) return;
 
@@ -144,7 +100,8 @@ void GfxPrim::DrawHLine(Vec2i pos, int len, uint32_t color)
     if (x0 < 0) x0 = 0;
     if (x1 >= static_cast<int>(s_info.width)) x1 = static_cast<int>(s_info.width) - 1;
 
-    uint32_t* base = static_cast<uint32_t*>(s_info.backbuffer);
+    void* target_buffer = (s_info.backbuffer != nullptr) ? s_info.backbuffer : reinterpret_cast<void*>(s_info.fb_vaddr);
+    uint32_t* base = static_cast<uint32_t*>(target_buffer);
     uint64_t row = static_cast<uint64_t>(pos.y) * s_info.pitch_pixels;
     uint32_t* start = base + row + static_cast<uint64_t>(x0);
     uint32_t count = static_cast<uint32_t>(x1 - x0 + 1);
@@ -154,7 +111,7 @@ void GfxPrim::DrawHLine(Vec2i pos, int len, uint32_t color)
 
 void GfxPrim::DrawVLine(Vec2i pos, int len, uint32_t color)
 {
-    if (!s_ready || s_info.backbuffer == nullptr) return;
+    if (!s_ready || s_info.fb_vaddr == 0) return;
     if (pos.x < 0 || static_cast<uint32_t>(pos.x) >= s_info.width) return;
     if (len == 0) return;
 
@@ -170,7 +127,8 @@ void GfxPrim::DrawVLine(Vec2i pos, int len, uint32_t color)
     if (y0 < 0) y0 = 0;
     if (y1 >= static_cast<int>(s_info.height)) y1 = static_cast<int>(s_info.height) - 1;
 
-    uint32_t* base = static_cast<uint32_t*>(s_info.backbuffer);
+    void* target_buffer = (s_info.backbuffer != nullptr) ? s_info.backbuffer : reinterpret_cast<void*>(s_info.fb_vaddr);
+    uint32_t* base = static_cast<uint32_t*>(target_buffer);
     for (int y = y0; y <= y1; ++y) {
         base[static_cast<uint64_t>(y) * s_info.pitch_pixels + static_cast<uint64_t>(pos.x)] = color;
     }
@@ -178,7 +136,7 @@ void GfxPrim::DrawVLine(Vec2i pos, int len, uint32_t color)
 
 void GfxPrim::FillRect(Vec2i pos, Vec2i size, uint32_t color)
 {
-    if (!s_ready || s_info.backbuffer == nullptr) return;
+    if (!s_ready || s_info.fb_vaddr == 0) return;
     if (size.x <= 0 || size.y <= 0) return;
 
     int x0 = pos.x;
@@ -195,7 +153,8 @@ void GfxPrim::FillRect(Vec2i pos, Vec2i size, uint32_t color)
     if (y1 >= static_cast<int>(s_info.height)) y1 = static_cast<int>(s_info.height) - 1;
 
     const uint32_t row_len = static_cast<uint32_t>(x1 - x0 + 1);
-    uint32_t* base = static_cast<uint32_t*>(s_info.backbuffer);
+    void* target_buffer = (s_info.backbuffer != nullptr) ? s_info.backbuffer : reinterpret_cast<void*>(s_info.fb_vaddr);
+    uint32_t* base = static_cast<uint32_t*>(target_buffer);
     uint64_t color64 = (static_cast<uint64_t>(color) << 32) | color;
     for (int y = y0; y <= y1; ++y) {
         uint32_t* row = base + static_cast<uint64_t>(y) * s_info.pitch_pixels + static_cast<uint64_t>(x0);
@@ -205,7 +164,7 @@ void GfxPrim::FillRect(Vec2i pos, Vec2i size, uint32_t color)
 
 void GfxPrim::MoveUp(Vec2i pos, Vec2i size, int dy, uint32_t fill_color)
 {
-    if (!s_ready || s_info.backbuffer == nullptr) return;
+    if (!s_ready || s_info.fb_vaddr == 0) return;
     if (dy <= 0) return;
     if (size.x <= 0 || size.y <= 0) return;
 
@@ -230,15 +189,20 @@ void GfxPrim::MoveUp(Vec2i pos, Vec2i size, int dy, uint32_t fill_color)
 
     const uint32_t row_len = static_cast<uint32_t>(x1 - x0 + 1);
     const uint64_t row_bytes = static_cast<uint64_t>(row_len) * sizeof(uint32_t);
-    uint8_t* base = static_cast<uint8_t*>(s_info.backbuffer);
     const uint64_t pitch_bytes = static_cast<uint64_t>(s_info.pitch_pixels) * sizeof(uint32_t);
 
+    // 统一使用目标缓冲区（backbuffer 或 fb_vaddr）
+    void* target_buffer = (s_info.backbuffer != nullptr) ? s_info.backbuffer : reinterpret_cast<void*>(s_info.fb_vaddr);
+    uint8_t* base = static_cast<uint8_t*>(target_buffer);
+
+    // 从下往上复制，避免数据覆盖问题
     for (int y = 0; y < height - dy; ++y) {
         uint8_t* dst = base + static_cast<uint64_t>(y0 + y) * pitch_bytes + static_cast<uint64_t>(x0) * sizeof(uint32_t);
         uint8_t* src = base + static_cast<uint64_t>(y0 + y + dy) * pitch_bytes + static_cast<uint64_t>(x0) * sizeof(uint32_t);
         ksystemramcpy(src, dst, row_bytes);
     }
 
+    // 填充底部区域
     uint32_t* fill_base = reinterpret_cast<uint32_t*>(base);
     uint64_t color64 = (static_cast<uint64_t>(fill_color) << 32) | fill_color;
     for (int y = height - dy; y < height; ++y) {
@@ -249,7 +213,7 @@ void GfxPrim::MoveUp(Vec2i pos, Vec2i size, int dy, uint32_t fill_color)
 
 void GfxPrim::Blit(Vec2i pos, const GfxImage* img)
 {
-    if (!s_ready || s_info.backbuffer == nullptr || img == nullptr || img->pixels == nullptr) return;
+    if (!s_ready || s_info.fb_vaddr == 0 || img == nullptr || img->pixels == nullptr) return;
     if (img->width == 0 || img->height == 0 || img->stride_bytes == 0) return;
 
     int x0 = pos.x;
@@ -281,7 +245,8 @@ void GfxPrim::Blit(Vec2i pos, const GfxImage* img)
     const uint64_t src_row_bytes = static_cast<uint64_t>(img->stride_bytes);
     const uint64_t dst_pitch_bytes = static_cast<uint64_t>(s_info.pitch_pixels) * bytes_per_pixel;
 
-    uint8_t* dst_base = static_cast<uint8_t*>(s_info.backbuffer);
+    void* target_buffer = (s_info.backbuffer != nullptr) ? s_info.backbuffer : reinterpret_cast<void*>(s_info.fb_vaddr);
+    uint8_t* dst_base = static_cast<uint8_t*>(target_buffer);
     uint8_t* dst = dst_base + static_cast<uint64_t>(y0) * dst_pitch_bytes + static_cast<uint64_t>(x0) * bytes_per_pixel;
     const uint8_t* src = src_base + static_cast<uint64_t>(src_y0) * src_row_bytes + static_cast<uint64_t>(src_x0) * bytes_per_pixel;
 
@@ -293,16 +258,24 @@ void GfxPrim::Blit(Vec2i pos, const GfxImage* img)
     }
 }
 
+KURD_t GfxPrim::enable_ram_buffer() {
+    KURD_t kurd = KURD_t();
+    s_info.backbuffer = __wrapped_pgs_valloc(&kurd, align_up(s_info.fb_bytes, 4096) / 4096, KERNEL, 21);
+    return kurd;
+}
+
 void GfxPrim::Flush()
 {
-    if (!s_ready || s_info.backbuffer == nullptr || s_info.fb_vaddr == 0) return;
+    // 如果没有 backbuffer，不需要 flush（直接写入硬件）
+    if (!s_ready || s_info.fb_vaddr == 0 || s_info.backbuffer == nullptr) return;
     ksystemramcpy(s_info.backbuffer, reinterpret_cast<void*>(s_info.fb_vaddr), s_info.fb_bytes);
     asm volatile("sfence" ::: "memory");
 }
 
 void GfxPrim::FlushRect(Vec2i pos, Vec2i size)
 {
-    if (!s_ready || s_info.backbuffer == nullptr || s_info.fb_vaddr == 0) return;
+    // 如果没有 backbuffer，不需要 flush（直接写入硬件）
+    if (!s_ready || s_info.fb_vaddr == 0 || s_info.backbuffer == nullptr) return;
     if (size.x <= 0 || size.y <= 0) return;
 
     int x0 = pos.x;
@@ -342,6 +315,7 @@ void GfxPrim::FlushRect(Vec2i pos, Vec2i size)
 }
 
 bool GfxPrim::Ready()
+    
 {
     return s_ready;
 }

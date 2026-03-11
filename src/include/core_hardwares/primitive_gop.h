@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "os_error_definitions.h"
+#include "init_to_kernel_info.h"
 #include "efi.h"
 typedef struct{ 
     UINT32 horizentalResolution;
@@ -34,7 +35,56 @@ namespace COREHARDWARES_LOCATIONS{
         }
     }
 };
+namespace COREHARDWARES_LOCATIONS{
+    constexpr uint8_t LOCATION_CODE_INIT_GOP=0x03;
+    namespace INIT_GOP_EVENTS {
+        constexpr uint8_t INIT=0;
+        namespace INIT_RESULTS {
+            namespace FAIL_REASONS{
+                constexpr uint16_t PARAM_METAINF_NULLPTR = 0x01;
+                constexpr uint16_t BAD_PARAM = 0x02;
+                constexpr uint16_t ALLREADE_INIT = 0x03;
+            }
+        }
+    }
+};
 
+class InitGop {
+public: 
+    struct Info {
+        uint32_t width;
+        uint32_t height;
+        uint32_t pitch_pixels;
+        uint32_t format;
+        uint32_t fb_bytes;
+        uintptr_t fb_paddr;
+        uintptr_t fb_vaddr;
+    };
+
+    static KURD_t Init(GlobalBasicGraphicInfoType* metainf);
+    static bool Ready();
+    static const Info GetInfo();
+    static void* FrameBuffer();
+
+    static void Flush();
+    static void FlushRect(Vec2i pos, Vec2i size);
+
+    static void PutPixelUnsafe(Vec2i pos, uint32_t color);
+    static void PutPixel(Vec2i pos, uint32_t color);
+    static void DrawHLine(Vec2i pos, int len, uint32_t color);
+    static void DrawVLine(Vec2i pos, int len, uint32_t color);
+    static void FillRect(Vec2i pos, Vec2i size, uint32_t color);
+    static void MoveUp(Vec2i pos, Vec2i size, int dy, uint32_t fill_color);
+    static void Blit(Vec2i pos, const GfxImage* img);
+    
+private:
+    static Info s_info;
+    static bool s_ready;
+    static KURD_t default_kurd();
+    static KURD_t default_success();
+    static KURD_t default_fail();
+    static KURD_t default_fatal();
+};
 class GfxPrim {
     //只画合法像素，非法越界的部分静默失败
 public: 
@@ -50,8 +100,7 @@ public:
     };
 
     // 唯一入口
-    static KURD_t Init(GlobalBasicGraphicInfoType* metainf);
-    static KURD_t Init(const char* fb_path);//用户空间通过linux的fb模拟
+    static KURD_t Init(GlobalBasicGraphicInfoType* metainf,loaded_VM_interval interval);
     static bool Ready();
     static const Info GetInfo();
     static void* BackBuffer();
@@ -66,13 +115,13 @@ public:
     static void DrawHLine(Vec2i pos, int len, uint32_t color);
     static void DrawVLine(Vec2i pos, int len, uint32_t color);
     static void FillRect(Vec2i pos, Vec2i size, uint32_t color);
-    // Screen move (backbuffer only)
+    // Screen move (有backbuffer时只在backbuffer上，无backbuffer时在 only)
     static void MoveUp(Vec2i pos, Vec2i size, int dy, uint32_t fill_color);
 
     // Image blit
     // Blit：底层用ksysramcopy复制，调用者应该知晓像素格式合适渲染
     static void Blit(Vec2i pos, const GfxImage* img);
-    
+    static KURD_t enable_ram_buffer();
 private:
     static Info s_info;
     static bool s_ready;

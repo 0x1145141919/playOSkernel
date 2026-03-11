@@ -72,16 +72,16 @@ struct TextCursor {
 class textconsole_GoP {
 public:
     // 唯一入口
-    static KURD_t Init(//屏幕分辨率大小查询GfxPrim，并且起始向量默认为（0,0）
+    static KURD_t Init(//屏幕分辨率大小查询GfxPrim，并且起始向量默认为（0,0），初始化后处于直接位图渲染模式
         const unsigned char* font_bitmap,
         Vec2i cell_size,
         uint32_t font_color,
         uint32_t background_color
     );
-
+    static KURD_t enable_font_render();//在切换好地址空间以及内存相关子系统初始化好之后才可以进行，申请 glyph_cache 并预渲染字符，切换到缓存渲染模式
     static bool Ready();
     static void PutChar(char ch);
-    static void PutString(const char* s);
+    static void PutString(const char* s,uint64_t len);
     static void Clear();
     static bool RuntimeInitServiceThread();
     static bool RuntimeSubmitString(const char* s, uint64_t len, bool urgent = false);
@@ -104,6 +104,7 @@ private:
     static tc_ring runtime_ring;
     static bool ready;
     static uint16_t glyph_index[256];
+    static bool is_font_rendered; // true: 使用 glyph_cache 缓存渲染模式，false: 直接位图渲染模式
     static KURD_t default_kurd();
     static KURD_t default_success();
     static KURD_t default_fail();

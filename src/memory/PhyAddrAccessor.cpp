@@ -6,20 +6,9 @@
 
 // 定义PhyAddrAccessor的静态成员变量
 // 根据编译时宏定义选择合适的页表根地址
-#ifdef PGLV_4
-extern "C" {
-    extern uint8_t pml4_table_init;
-}
-phyaddr_t PhyAddrAccessor::init_pgtb_root = (phyaddr_t)&pml4_table_init;
-#endif
 
-#ifdef PGLV_5
-extern "C" {
-    extern uint8_t pml5_table_init;
-    extern uint8_t pml4_table_init;
-}
-phyaddr_t PhyAddrAccessor::init_pgtb_root = (phyaddr_t)&pml5_table_init;
-#endif
+
+
 
 #ifdef USER_MODE
     PhyAddrAccessor gAccessor;
@@ -46,12 +35,13 @@ phyaddr_t PhyAddrAccessor::init_pgtb_root = (phyaddr_t)&pml5_table_init;
 #endif
 VM_DESC PhyAddrAccessor::BASIC_DESC={0};
 VM_DESC PhyAddrAccessor::cache_tb[CACHE_VMDESC_MAX]={0};
+extern "C" uint32_t assigned_cr3;
 bool PhyAddrAccessor::is_init_cr3()
 {
     #ifdef KERNEL_MODE
     uint64_t cr3=0;
     asm ("mov %%cr3,%0" : "=r"(cr3));
-    return cr3==init_pgtb_root;
+    return cr3==assigned_cr3;
     #endif
     #ifdef USER_MODE
     return false;

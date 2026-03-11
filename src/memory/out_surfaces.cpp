@@ -15,10 +15,24 @@ namespace MEMMODULE_LOCAIONS{
         uint8_t EVENT_CODE_KEYWORD_DELETE=5;
     }
 }
+
 phyaddr_t __wrapped_pgs_alloc(KURD_t *kurd_out, uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2)
 {
     
-    Alloc_result result=FreePagesAllocator::alloc(_4kbpgscount*0x1000, alloc_params{.numa=0,.flags_bits=0,.align_log2=alignment_log2});
+    Alloc_result result=FreePagesAllocator::alloc(
+        _4kbpgscount*0x1000,
+        alloc_params{
+            .numa=0,
+            .constrain_base=0,
+            .constrain_interval_size=0,
+            .up_phyaddr_limit=0,
+            .no_addr_constrain_bit=1,
+            .try_lock_always_try=0,
+            .no_up_limit_bit=1,
+            .force_first_bcb=0,
+            .align_log2=alignment_log2
+        }
+    );
     if(result.base==0||result.result.result!=result_code::SUCCESS){
         //尝试用phymemspace_mgr::pages_linear_scan_and_alloc
         Alloc_result result={0};
@@ -64,7 +78,20 @@ void* __wrapped_heap_realloc(void*addr,uint64_t size,KURD_t*kurd,alloc_flags_t f
 }
 void* __wrapped_pgs_valloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2) {
     
-    Alloc_result result=FreePagesAllocator::alloc(_4kbpgscount*0x1000, alloc_params{.numa=0,.flags_bits=0,.align_log2=alignment_log2});
+    Alloc_result result=FreePagesAllocator::alloc(
+        _4kbpgscount*0x1000,
+        alloc_params{
+            .numa=0,
+            .constrain_base=0,
+            .constrain_interval_size=0,
+            .up_phyaddr_limit=0,
+            .no_addr_constrain_bit=1,
+            .try_lock_always_try=0,
+            .no_up_limit_bit=1,
+            .force_first_bcb=0,
+            .align_log2=alignment_log2
+        }
+    );
     if(result.base==0||result.result.result!=result_code::SUCCESS){
         //尝试用phymemspace_mgr::pages_linear_scan_and_alloc
         result.base=phymemspace_mgr::pages_linear_scan_and_alloc(_4kbpgscount,result.result,TYPE,alignment_log2);

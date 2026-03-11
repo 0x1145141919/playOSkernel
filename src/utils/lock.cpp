@@ -1,5 +1,4 @@
 #include "util/lock.h"
-
 static inline void cpu_relax()
 {
 #if defined(__x86_64__) || defined(__i386__)
@@ -20,9 +19,13 @@ void spinlock_cpp_t::lock()
         }
 }
 
+bool spinlock_cpp_t::is_locked()
+{
+    return __atomic_load_n(&status, __ATOMIC_RELAXED) == LOCKED;
+}
 void spinlock_cpp_t::unlock()
- {
-        __atomic_clear(&status, __ATOMIC_RELEASE);
+{
+    __atomic_clear(&status, __ATOMIC_RELEASE);
 }
 
 

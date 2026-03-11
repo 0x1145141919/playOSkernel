@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h> 
-#include <util/lock.h>
+#include "lock.h"
 #include "os_error_definitions.h"
 //这是个字节内不反转的位图实现
 //使用每一项为宽度1bit的位图

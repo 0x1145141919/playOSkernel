@@ -12,6 +12,7 @@
 #include "Interrupt_system/loacl_processor.h"
 #ifdef USER_MODE
 #include "stdlib.h"
+#include "kpoolmemmgr.h"
 #endif  
 
 
@@ -52,7 +53,14 @@ KURD_t kpoolmemmgr_t::default_fatal()
     kurd=set_fatal_result_level(kurd);
     return  kurd;
 }
-KURD_t kpoolmemmgr_t::multi_heap_enable()//只能由BSP在SCHDULE阶段之前调用
+KURD_t kpoolmemmgr_t::Init(loaded_VM_interval *first_static_heap, loaded_VM_interval *first_static_heap_bitmap)
+{
+    first_linekd_heap.first_linekd_heap_Init(first_static_heap,first_static_heap_bitmap);
+    KURD_t success=default_success();
+    return success;
+}
+KURD_t kpoolmemmgr_t::multi_heap_enable() 
+//只能由BSP在SCHDULE阶段之前调用
 {
     KURD_t success=default_success();
     KURD_t fail=default_fail();
@@ -363,11 +371,6 @@ void kpoolmemmgr_t::clear(void* ptr)
     }
 }
 
-int kpoolmemmgr_t::Init()
-{
-    is_muli_heap_enabled = false;
-    return first_linekd_heap.first_linekd_heap_Init();
-}
 
 void kpoolmemmgr_t::kfree(void* ptr)
 {

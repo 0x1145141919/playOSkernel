@@ -7,20 +7,13 @@ phyaddr_t ksymmanager::phybase;
  symbol_entry* ksymmanager::symbol_table;//虚拟地址
 uint32_t ksymmanager::entry_count;
 uint32_t ksymmanager::entry_size;
-int ksymmanager::Init(BootInfoHeader *boot_info)
+int ksymmanager::Init(loaded_VM_interval* entry,uint64_t file_size)
 {
-    if(phybase!=0)return OS_BAD_FUNCTION;
-    phybase=boot_info->ksymbols_table_phy_ptr;
-    entry_count=boot_info->ksymbols_entry_count;
-    entry_size=boot_info->ksymbols_entry_size;
-    if(entry_size!=sizeof(symbol_entry)){
-        kio::bsp_kout<<"ksymbols_entry_count!=sizeof(symbol_entry)"<<kio::kendl;
-        asm volatile("hlt");
-    }
-    #ifdef PGLV_4
-    virtbase=0xffff800000000000+phybase;
-    #endif
-    symbol_table=(symbol_entry*)phybase;
+    phybase = entry->pbase;
+    virtbase = entry->vbase;
+    symbol_table = (symbol_entry*)virtbase;
+    entry_size = file_size;
+    entry_count = entry_size/sizeof(symbol_entry);
     return OS_SUCCESS;
 }
 symbol_entry *ksymmanager::get_entry_near_addr(vaddr_t addr)
