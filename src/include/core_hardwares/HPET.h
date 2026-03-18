@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
-#include "memory/Memory.h"
-#include "os_error_definitions.h"
+#include "memory/memory_base.h"
+#include "abi/os_error_definitions.h"
 namespace COREHARDWARES_LOCATIONS{
     constexpr uint8_t LOCATION_CODE_HPET=0x01;
     namespace HPET_READONLY_DRIVERS_EVENTS {

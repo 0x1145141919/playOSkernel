@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
-#include "init_to_kernel_info.h"
-#include "memory/Memory.h"
+#include "abi/boot.h"
+#include "memory/memory_base.h"
 struct symbol_entry {
     uint64_t address;
     char name[119];

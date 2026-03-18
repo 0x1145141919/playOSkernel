@@ -89,29 +89,29 @@ int main(int argc, char** argv)
     const char* test_set_path = (argc > 1) ? argv[1] : "test_set_A.bin";
     const char* op_log_path = (argc > 2) ? argv[2] : "operation_log_B.bin";
 
-    kio::bsp_kout.Init();
-    kio::bsp_kout.shift_dec();
+    bsp_kout.Init();
+    bsp_kout.shift_dec();
 
     mapped_file test_set_mf = map_file_ro(test_set_path);
     if (test_set_mf.data == MAP_FAILED) {
-        kio::bsp_kout << "Failed to map " << test_set_path << kio::kendl;
+        bsp_kout<< "Failed to map " << test_set_path << kendl;
         return 1;
     }
     mapped_file op_log_mf = map_file_ro(op_log_path);
     if (op_log_mf.data == MAP_FAILED) {
-        kio::bsp_kout << "Failed to map " << op_log_path << kio::kendl;
+        bsp_kout<< "Failed to map " << op_log_path << kendl;
         unmap_file(test_set_mf);
         return 1;
     }
 
     if ((test_set_mf.size % sizeof(test_set_record)) != 0) {
-        kio::bsp_kout << "Invalid test set size: " << test_set_mf.size << kio::kendl;
+        bsp_kout<< "Invalid test set size: " << test_set_mf.size << kendl;
         unmap_file(op_log_mf);
         unmap_file(test_set_mf);
         return 1;
     }
     if ((op_log_mf.size % sizeof(op_record)) != 0) {
-        kio::bsp_kout << "Invalid op log size: " << op_log_mf.size << kio::kendl;
+        bsp_kout<< "Invalid op log size: " << op_log_mf.size << kendl;
         unmap_file(op_log_mf);
         unmap_file(test_set_mf);
         return 1;
@@ -120,7 +120,7 @@ int main(int argc, char** argv)
     const size_t test_set_count = test_set_mf.size / sizeof(test_set_record);
     const size_t op_log_count = op_log_mf.size / sizeof(op_record);
     if (test_set_count == 0) {
-        kio::bsp_kout << "Empty test set" << kio::kendl;
+        bsp_kout<< "Empty test set" << kendl;
         unmap_file(op_log_mf);
         unmap_file(test_set_mf);
         return 1;
@@ -137,7 +137,7 @@ int main(int argc, char** argv)
     for (size_t i = 0; i < test_set_count; ++i) {
         const test_set_record& rec = test_set[i];
         if (rec.index >= test_set_count) {
-            kio::bsp_kout << "Invalid test_set index: " << rec.index << kio::kendl;
+            bsp_kout<< "Invalid test_set index: " << rec.index << kendl;
             delete[] allocations;
             unmap_file(op_log_mf);
             unmap_file(test_set_mf);
@@ -152,7 +152,7 @@ int main(int argc, char** argv)
     );
     KURD_t init_result = FreePagesAllocator::first_BCB->second_stage_init();
     if (init_result.result != result_code::SUCCESS) {
-        kio::bsp_kout << "Second stage init failed" << kio::kendl;
+        bsp_kout<< "Second stage init failed" << kendl;
         delete[] allocations;
         unmap_file(op_log_mf);
         unmap_file(test_set_mf);
@@ -163,7 +163,7 @@ int main(int argc, char** argv)
     for (std::size_t i = 0; i < op_log_count; ++i) {
         const op_record& rec = op_log[i];
         if (rec.index >= test_set_count) {
-            kio::bsp_kout << "Invalid op index at record " << i << ": " << rec.index << kio::kendl;
+            bsp_kout<< "Invalid op index at record " << i << ": " << rec.index << kendl;
             mismatches++;
             continue;
         }
@@ -175,14 +175,14 @@ int main(int argc, char** argv)
             bool ok = (alloc_result.result == result_code::SUCCESS && addr != 0);
             bool expect_ok = (rec.result_code == static_cast<uint32_t>(result_code::SUCCESS) && rec.addr != 0);
             if (ok != expect_ok || (ok && addr != rec.addr)) {
-                kio::bsp_kout << "ALLOC mismatch at record " << i
+                bsp_kout<< "ALLOC mismatch at record " << i
                               << " cycle=" << rec.cycle
                               << " index=" << rec.index
                               << " expect_addr=" << rec.addr
                               << " got_addr=" << addr
                               << " expect_code=" << rec.result_code
                               << " got_code=" << static_cast<uint32_t>(alloc_result.result)
-                              << kio::kendl;
+                              << kendl;
                 mismatches++;
             }
             if (ok) {
@@ -193,25 +193,25 @@ int main(int argc, char** argv)
             bool ok = (free_result.result == result_code::SUCCESS);
             bool expect_ok = (rec.result_code == static_cast<uint32_t>(result_code::SUCCESS));
             if (ok != expect_ok) {
-                kio::bsp_kout << "FREE mismatch at record " << i
+                bsp_kout<< "FREE mismatch at record " << i
                               << " cycle=" << rec.cycle
                               << " index=" << rec.index
                               << " expect_code=" << rec.result_code
                               << " got_code=" << static_cast<uint32_t>(free_result.result)
-                              << kio::kendl;
+                              << kendl;
                 mismatches++;
             }
             if (ok) {
                 seg.start_addr = 1;
             }
         } else {
-            kio::bsp_kout << "Unknown op at record " << i << kio::kendl;
+            bsp_kout<< "Unknown op at record " << i << kendl;
             mismatches++;
         }
     }
 
-    kio::bsp_kout << "Replay completed. Records=" << op_log_count
-                  << " mismatches=" << mismatches << kio::kendl;
+    bsp_kout<< "Replay completed. Records=" << op_log_count
+                  << " mismatches=" << mismatches << kendl;
 
     if (FreePagesAllocator::first_BCB) {
         FreePagesAllocator::first_BCB->free_pages_flush();

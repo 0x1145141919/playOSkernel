@@ -1,7 +1,6 @@
 #pragma once
 #include "../init/include/util/Ktemplats.h"
-#include "../init/include/initEntryPointDefinitions.h"
-#include "init_to_kernel_info.h"
+#include "abi/boot.h"
 #include <stdint.h>
 
 

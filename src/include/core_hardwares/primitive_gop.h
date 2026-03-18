@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
-#include "os_error_definitions.h"
-#include "init_to_kernel_info.h"
+#include "abi/os_error_definitions.h"
+#include "abi/boot.h"
 #include "efi.h"
 typedef struct{ 
     UINT32 horizentalResolution;

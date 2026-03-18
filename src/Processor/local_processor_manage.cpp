@@ -1,22 +1,24 @@
 #include "Interrupt_system/loacl_processor.h"
 #include "Interrupt_system/AP_Init_error_observing_protocol.h"
-#include "msr_offsets_definitions.h"
+#include "abi/arch/x86-64/msr_offsets_definitions.h"
+#include "abi/arch/x86-64/GS_Slots_index_definitions.h"
 #include "firmware/gSTResloveAPIs.h"
 #include "firmware/ACPI_APIC.h"
 #include "util/kout.h"
 #include "linker_symbols.h"
 #include "Interrupt_system/fixed_interrupt_vectors.h"
-#include "util/cpuid_intel.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 #include "util/OS_utils.h"
 #include "memory/AddresSpace.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/phyaddr_accessor.h"
+#include "memory/FreePagesAllocator.h"
+#include "memory/kpoolmemmgr.h"
 #include "core_hardwares/lapic.h"
 #include "util/bitmap.h"
-#include "msr_offsets_definitions.h"
 #include "panic.h"
 #include <util/kptrace.h>
-#include "time.h"
+#include "ktime.h"
 
 x64_local_processor *x86_smp_processors_container::local_processor_interrupt_mgr_array[x86_smp_processors_container::max_processor_count];
 constexpr TSSDescriptorEntry kspace_TSS_entry = {
@@ -77,47 +79,6 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
     tss_entry.base2=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>24)&base2_mask;
     tss_entry.base3=static_cast<uint32_t>(reinterpret_cast<uint64_t>(&this->tss)>>32)&base3_mask;
     KURD_t kurd=KURD_t();
-    phyaddr_t rsp0top=__wrapped_pgs_alloc(
-        &kurd,
-        total_stack_size/0x1000,
-        KERNEL,12
-    );
-    if(!rsp0top||kurd.result!=result_code::SUCCESS){
-        panic_info_inshort inshort={
-            .is_bug=true,
-            .is_policy=true,
-            .is_hw_fault=false,
-            .is_mem_corruption=false,
-            .is_escalated=false        
-        };
-        Panic::panic(default_panic_behaviors_flags,
-            "[x64_local_processor]stacks phymem initial fail\n",
-        nullptr,&inshort,kurd);
-    }
-    vaddr_t rsp0=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,rsp0top,RSP0_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist1=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,rsp0top+RSP0_STACKSIZE,DF_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist2=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,rsp0top+RSP0_STACKSIZE+DF_STACKSIZE,MC_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist3=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE,NMI_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    vaddr_t ist4=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,rsp0top+RSP0_STACKSIZE+DF_STACKSIZE+MC_STACKSIZE+NMI_STACKSIZE,BP_DBG_STACKSIZE,KSPACE_RW_ACCESS,0,true);
-    if (!rsp0 || !ist1 || !ist2 || !ist3|| !ist4||kurd.result!=result_code::SUCCESS) {
-        panic_info_inshort inshort={
-            .is_bug=true,
-            .is_policy=true,
-            .is_hw_fault=false,
-            .is_mem_corruption=false,
-            .is_escalated=false        
-        };
-        Panic::panic(default_panic_behaviors_flags,
-            "[x64_local_processor]stack remap failed\n",
-        nullptr,&inshort,kurd);
-    }
-    constexpr uint16_t RESERVED_1PG_SIZE=0x1000;
-    tss.rsp0=rsp0+RSP0_STACKSIZE-RESERVED_1PG_SIZE;
-    tss.ist[0]=0;
-    tss.ist[1]=ist1+DF_STACKSIZE-RESERVED_1PG_SIZE;
-    tss.ist[2]=ist2+MC_STACKSIZE-RESERVED_1PG_SIZE;
-    tss.ist[3]=ist3+NMI_STACKSIZE-RESERVED_1PG_SIZE;
-    tss.ist[4]=ist4+BP_DBG_STACKSIZE-RESERVED_1PG_SIZE;
     GDTR gdtr={
         .limit=sizeof(gdt)-1,
         .base=reinterpret_cast<uint64_t>(&gdt)        
@@ -156,12 +117,30 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
     gs_slot[L_PROCESSOR_GS_IDX]=(uint64_t)this;//应该用rdrand搞一个随机值
     gs_slot[PROCESSOR_ID_GS_INDEX]=static_cast<uint64_t>(this->processor_id);
     wrmsr(msr::syscall::IA32_GS_BASE,(uint64_t)&gs_slot);
+    tss.rsp0=stack_alloc(&kurd,8);
+    tss.ist[0]=0;
+    tss.ist[1]=stack_alloc(&kurd,2);
+    tss.ist[2]=stack_alloc(&kurd,3);
+    tss.ist[3]=stack_alloc(&kurd,3);
+    tss.ist[4]=stack_alloc(&kurd,3);
+    if (!tss.rsp0 || !tss.ist[1] || !tss.ist[2] || !tss.ist[3]|| !tss.ist[4]||kurd.result!=result_code::SUCCESS) {
+        panic_info_inshort inshort={
+            .is_bug=true,
+            .is_policy=true,
+            .is_hw_fault=false,
+            .is_mem_corruption=false,
+            .is_escalated=false        
+        };
+        Panic::panic(default_panic_behaviors_flags,
+            "[x64_local_processor]stack remap failed\n",
+        nullptr,&inshort,kurd);
+    }
     if(is_x2apic_supported()){
         uint64_t ia32_apic_base=rdmsr(msr::apic::IA32_APIC_BASE);
         ia32_apic_base|=(1<<11);
         ia32_apic_base|=(1<<10);
         uint64_t tpr = 1;
-        asm volatile("mov  %0,%%cr8" : "=r"(tpr));
+        asm volatile("mov %0, %%cr8" : : "r"(tpr) : "memory");
         wrmsr(msr::apic::IA32_APIC_BASE,ia32_apic_base);
         wrmsr(msr::apic::IA32_X2APIC_SVR,0x1ff);
     }else{

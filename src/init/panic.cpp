@@ -2,11 +2,11 @@
 #include "firmware/UefiRunTimeServices.h"
 #include "util/kout.h"
 #include "util/OS_utils.h"
-#include "msr_offsets_definitions.h"
+#include "abi/arch/x86-64/msr_offsets_definitions.h"
 #include "core_hardwares/lapic.h"
 #include "linker_symbols.h"
 #include "Interrupt_system/loacl_processor.h"
-#include "util/cpuid_intel.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 #ifdef USER_MODE
 #include <unistd.h>
 #endif 
@@ -187,67 +187,67 @@ KURD_t Panic::will_check()
  * 转储 panic_context 中的 CPU 寄存器信息
  */
 void Panic::dumpregisters(panic_context::x64_context* regs) {
-    kio::bsp_kout << "================= CPU REGISTERS DUMP =================" << kio::kendl;
-    kio::bsp_kout << "General Purpose Registers:" << kio::kendl;
-    kio::bsp_kout.shift_hex();
-    kio::bsp_kout << "RAX: 0x" << regs->rax << kio::kendl;
-    kio::bsp_kout << "RBX: 0x" << regs->rbx << kio::kendl;
-    kio::bsp_kout << "RCX: 0x" << regs->rcx << kio::kendl;
-    kio::bsp_kout << "RDX: 0x" << regs->rdx << kio::kendl;
-    kio::bsp_kout << "RSI: 0x" << regs->rsi << kio::kendl;
-    kio::bsp_kout << "RDI: 0x" << regs->rdi << kio::kendl;
-    kio::bsp_kout << "RSP: 0x" << regs->rsp << kio::kendl;
-    kio::bsp_kout << "RBP: 0x" << regs->rbp << kio::kendl;
-    kio::bsp_kout << "R8:  0x" << regs->r8 << kio::kendl;
-    kio::bsp_kout << "R9:  0x" << regs->r9 << kio::kendl;
-    kio::bsp_kout << "R10: 0x" << regs->r10 << kio::kendl;
-    kio::bsp_kout << "R11: 0x" << regs->r11 << kio::kendl;
-    kio::bsp_kout << "R12: 0x" << regs->r12 << kio::kendl;
-    kio::bsp_kout << "R13: 0x" << regs->r13 << kio::kendl;
-    kio::bsp_kout << "R14: 0x" << regs->r14 << kio::kendl;
-    kio::bsp_kout << "R15: 0x" << regs->r15 << kio::kendl;
+    bsp_kout<< "================= CPU REGISTERS DUMP =================" << kendl;
+    bsp_kout<< "General Purpose Registers:" << kendl;
+    bsp_kout.shift_hex();
+    bsp_kout<< "RAX: 0x" << regs->rax << kendl;
+    bsp_kout<< "RBX: 0x" << regs->rbx << kendl;
+    bsp_kout<< "RCX: 0x" << regs->rcx << kendl;
+    bsp_kout<< "RDX: 0x" << regs->rdx << kendl;
+    bsp_kout<< "RSI: 0x" << regs->rsi << kendl;
+    bsp_kout<< "RDI: 0x" << regs->rdi << kendl;
+    bsp_kout<< "RSP: 0x" << regs->rsp << kendl;
+    bsp_kout<< "RBP: 0x" << regs->rbp << kendl;
+    bsp_kout<< "R8:  0x" << regs->r8 << kendl;
+    bsp_kout<< "R9:  0x" << regs->r9 << kendl;
+    bsp_kout<< "R10: 0x" << regs->r10 << kendl;
+    bsp_kout<< "R11: 0x" << regs->r11 << kendl;
+    bsp_kout<< "R12: 0x" << regs->r12 << kendl;
+    bsp_kout<< "R13: 0x" << regs->r13 << kendl;
+    bsp_kout<< "R14: 0x" << regs->r14 << kendl;
+    bsp_kout<< "R15: 0x" << regs->r15 << kendl;
     
-    kio::bsp_kout << "Control Registers:" << kio::kendl;
-    kio::bsp_kout << "CR0: 0x" << regs->cr0 << kio::kendl;
-    kio::bsp_kout << "CR2: 0x" << regs->cr2 << kio::kendl;
-    kio::bsp_kout << "CR3: 0x" << regs->cr3 << kio::kendl;
-    kio::bsp_kout << "CR4: 0x" << regs->cr4 << kio::kendl;
-    kio::bsp_kout << "EFER: 0x" << regs->IA32_EFER << kio::kendl;
+    bsp_kout<< "Control Registers:" << kendl;
+    bsp_kout<< "CR0: 0x" << regs->cr0 << kendl;
+    bsp_kout<< "CR2: 0x" << regs->cr2 << kendl;
+    bsp_kout<< "CR3: 0x" << regs->cr3 << kendl;
+    bsp_kout<< "CR4: 0x" << regs->cr4 << kendl;
+    bsp_kout<< "EFER: 0x" << regs->IA32_EFER << kendl;
     
-    kio::bsp_kout << "Segment Registers:" << kio::kendl;
-    kio::bsp_kout << "CS: 0x" << regs->cs << kio::kendl;
-    kio::bsp_kout << "DS: 0x" << regs->ds << kio::kendl;
-    kio::bsp_kout << "ES: 0x" << regs->es << kio::kendl;
-    kio::bsp_kout << "FS: 0x" << regs->fs << kio::kendl;
-    kio::bsp_kout << "GS: 0x" << regs->gs << kio::kendl;
-    kio::bsp_kout << "SS: 0x" << regs->ss << kio::kendl;
+    bsp_kout<< "Segment Registers:" << kendl;
+    bsp_kout<< "CS: 0x" << regs->cs << kendl;
+    bsp_kout<< "DS: 0x" << regs->ds << kendl;
+    bsp_kout<< "ES: 0x" << regs->es << kendl;
+    bsp_kout<< "FS: 0x" << regs->fs << kendl;
+    bsp_kout<< "GS: 0x" << regs->gs << kendl;
+    bsp_kout<< "SS: 0x" << regs->ss << kendl;
     
-    kio::bsp_kout << "Other Registers:" << kio::kendl;
-    kio::bsp_kout << "RFLAGS: 0x" << regs->rflags << kio::kendl;
-    kio::bsp_kout << "RIP: 0x" << regs->rip << kio::kendl;
-    kio::bsp_kout << "FS_BASE: 0x" << regs->fs_base << kio::kendl;
-    kio::bsp_kout << "GS_BASE: 0x" << regs->gs_base << kio::kendl;
+    bsp_kout<< "Other Registers:" << kendl;
+    bsp_kout<< "RFLAGS: 0x" << regs->rflags << kendl;
+    bsp_kout<< "RIP: 0x" << regs->rip << kendl;
+    bsp_kout<< "FS_BASE: 0x" << regs->fs_base << kendl;
+    bsp_kout<< "GS_BASE: 0x" << regs->gs_base << kendl;
     
-    kio::bsp_kout << "Descriptor Tables:" << kio::kendl;
-    kio::bsp_kout << "GDTR: Limit=0x" << regs->gdtr.limit << ", Base=0x" << regs->gdtr.base << kio::kendl;
-    kio::bsp_kout << "IDTR: Limit=0x" << regs->idtr.limit << ", Base=0x" << regs->idtr.base << kio::kendl;
+    bsp_kout<< "Descriptor Tables:" << kendl;
+    bsp_kout<< "GDTR: Limit=0x" << regs->gdtr.limit << ", Base=0x" << regs->gdtr.base << kendl;
+    bsp_kout<< "IDTR: Limit=0x" << regs->idtr.limit << ", Base=0x" << regs->idtr.base << kendl;
     
     // 如果是硬件中断，打印额外信息
     if (regs->specific.is_hadware_interrupt) {
-        kio::bsp_kout << "Hardware Interrupt Information:" << kio::kendl;
-        kio::bsp_kout << "Hardware Error Code: 0x" << regs->specific.hardware_errorcode << kio::kendl;
-        kio::bsp_kout << "Interrupt Vector Number: 0x" << (uint32_t)regs->specific.interrupt_vec_num << kio::kendl;
+        bsp_kout<< "Hardware Interrupt Information:" << kendl;
+        bsp_kout<< "Hardware Error Code: 0x" << regs->specific.hardware_errorcode << kendl;
+        bsp_kout<< "Interrupt Vector Number: 0x" << (uint32_t)regs->specific.interrupt_vec_num << kendl;
     }
     
-    kio::bsp_kout << "=====================================================" << kio::kendl;
+    bsp_kout<< "=====================================================" << kendl;
 }
 void Panic::panic(panic_behaviors_flags behaviors, char *message, panic_context::x64_context *context,panic_info_inshort*panic_info, KURD_t kurd)
 {
     will.kernel_final_state=GlobalStatus;
     GlobalStatus=kernel_state::PANIC;
-    kio::bsp_kout<<"PANIC: "<<kio::kendl;
-    kio::bsp_kout<<kurd<<kio::kendl;
-    if(message)kio::bsp_kout<<message<<kio::kendl;
+    bsp_kout<<"PANIC: "<<kendl;
+    bsp_kout<<kurd<<kendl;
+    if(message)bsp_kout<<message<<kendl;
     if(context)dumpregisters(context);
     asm volatile("cli");
     asm volatile("hlt");

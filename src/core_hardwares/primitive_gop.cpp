@@ -1,5 +1,5 @@
 #include "core_hardwares/primitive_gop.h"
-#include "memory/AddresSpace.h"
+#include "memory/FreePagesAllocator.h"
 #include "memory/phygpsmemmgr.h"
 #include "util/OS_utils.h"
 
@@ -62,6 +62,7 @@ KURD_t GfxPrim::Init(GlobalBasicGraphicInfoType *metainf, loaded_VM_interval int
     s_info.fb_paddr=metainf->FrameBufferBase;
     KURD_t success=default_success();
     success.event_code=COREHARDWARES_LOCATIONS::GOP_PRIMITIVE_DRIVERS_EVENTS::INIT;
+    s_ready=true;
     return success;
 }
 
@@ -260,7 +261,7 @@ void GfxPrim::Blit(Vec2i pos, const GfxImage* img)
 
 KURD_t GfxPrim::enable_ram_buffer() {
     KURD_t kurd = KURD_t();
-    s_info.backbuffer = __wrapped_pgs_valloc(&kurd, align_up(s_info.fb_bytes, 4096) / 4096, KERNEL, 21);
+    s_info.backbuffer = __wrapped_pgs_valloc(&kurd, align_up(s_info.fb_bytes, 4096) / 4096, page_state_t::kernel_pinned, 21);
     return kurd;
 }
 

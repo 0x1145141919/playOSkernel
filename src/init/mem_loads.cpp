@@ -1,14 +1,15 @@
-#include "../init/include/initEntryPointDefinitions.h"
+#include "abi/boot.h"
 #include "../init/include/kernel_mmu.h"
 #include "../init/include/pages_alloc.h"
 #include "../init/include/util/textConsole.h"
 #include "../init/include/util/kout.h"
 #include "../init/include/core_hardwares/PortDriver.h"
 #include "../init/include/panic.h"
+#include "../init/include/load_kernel.h"
 #include "../init/include/init_linker_symbols.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "core_hardwares/primitive_gop.h"
-#include "init_to_kernel_info.h"
+#include "abi/boot.h"
 uint64_t va_alloc(uint64_t size,uint8_t align_log2);
 int setup_low_identity_maps(kernel_mmu* kmmu, BootInfoHeader* header)
 {
@@ -53,15 +54,15 @@ int setup_low_identity_maps(kernel_mmu* kmmu, BootInfoHeader* header)
 
         int result = kmmu->map(identity_map_interval, access);
         if (result != 0) {
-            kio::bsp_kout << "[WARN] Identity map failed for segment type: ";
-            kio::bsp_kout << static_cast<uint32_t>(seg.type);
-            kio::bsp_kout << ", start: 0x";
-            kio::bsp_kout << seg.start;
-            kio::bsp_kout << ", size: 0x";
-            kio::bsp_kout << seg.size;
-            kio::bsp_kout << ", error code: ";
-            kio::bsp_kout << result;
-            kio::bsp_kout << kio::kendl;
+            bsp_kout<< "[WARN] Identity map failed for segment type: ";
+            bsp_kout<< static_cast<uint32_t>(seg.type);
+            bsp_kout<< ", start: 0x";
+            bsp_kout<< seg.start;
+            bsp_kout<< ", size: 0x";
+            bsp_kout<< seg.size;
+            bsp_kout<< ", error code: ";
+            bsp_kout<< result;
+            bsp_kout<< kendl;
             continue;
         }
     }
@@ -73,6 +74,7 @@ int map_symbols_file(kernel_mmu* kmmu, load_kernel_info_pack& pak, loaded_file_e
     uint64_t aligned_size = align_up(symbol_file->file_size, 4096);
     vaddr_t new_base = va_alloc(aligned_size,21);
     phyaddr_t pbase = basic_allocator::pages_alloc(aligned_size,21);
+    ksystemramcpy((void*)symbol_file->raw_data,(void*)pbase , symbol_file->file_size);
     pgaccess access;
     access.is_kernel = 1;
     access.is_writeable = 1;

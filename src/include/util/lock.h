@@ -11,6 +11,14 @@ public:
     bool is_locked();
     void unlock();
 };
+class spinlock_guard {
+    spinlock_cpp_t& lock_ref;
+public:
+    explicit spinlock_guard(spinlock_cpp_t& lock);
+    ~spinlock_guard();
+    spinlock_guard(const spinlock_guard&) = delete;
+    spinlock_guard& operator=(const spinlock_guard&) = delete;
+};
 class spinrwlock_cpp_t{
     spinlock_cpp_t readlock;
     spinlock_cpp_t writelock;
@@ -21,6 +29,22 @@ public:
     void read_unlock();
     void write_lock();
     void write_unlock();
+};
+class spinrwlock_read_guard {
+    spinrwlock_cpp_t& lock_ref;
+public:
+    explicit spinrwlock_read_guard(spinrwlock_cpp_t& lock);
+    ~spinrwlock_read_guard();
+    spinrwlock_read_guard(const spinrwlock_read_guard&) = delete;
+    spinrwlock_read_guard& operator=(const spinrwlock_read_guard&) = delete;
+};
+class spinrwlock_write_guard {
+    spinrwlock_cpp_t& lock_ref;
+public:
+    explicit spinrwlock_write_guard(spinrwlock_cpp_t& lock);
+    ~spinrwlock_write_guard();
+    spinrwlock_write_guard(const spinrwlock_write_guard&) = delete;
+    spinrwlock_write_guard& operator=(const spinrwlock_write_guard&) = delete;
 };
 class trylock_cpp_t {
     uint8_t status;

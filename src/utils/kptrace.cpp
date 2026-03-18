@@ -1,7 +1,11 @@
 #include "util/kptrace.h"
 #include "util/kout.h"
-#include "os_error_definitions.h"
-#include "pt_regs.h"
+#include "abi/os_error_definitions.h"
+#include "abi/arch/x86-64/pt_regs.h"
+#include "abi/boot.h"
+#ifdef USER_MODE
+#include <dlfcn.h>
+#endif
 phyaddr_t ksymmanager::phybase;
  vaddr_t ksymmanager::virtbase;
  symbol_entry* ksymmanager::symbol_table;//虚拟地址
@@ -74,7 +78,7 @@ void self_trace()
 {
     void* rbp;
     asm volatile ("movq %%rbp, %0" : "=r"(rbp));
-    kio::bsp_kout << "self Trace:" << kio::kendl;
+    bsp_kout<< "self Trace:" << kendl;
     else_trace(rbp);
 }
 
@@ -98,16 +102,23 @@ void else_trace(void* rbp)//递归,但是会忽略掉最近一层调用
             break;
         }
         
-        // 获取靠近当前返回地址的符号
-        symbol_entry* sym = ksymmanager::get_entry_near_addr(frame->rip);
-        
-        kio::bsp_kout << "#" << frame_count << " RIP: 0x" << (void*)(frame->rip);
-        
-        if (sym != nullptr) {
-            kio::bsp_kout << " Symbol: " << sym->name << " (+0x" << (void*)(frame->rip - sym->address) << ")";
-        }
-        
-        kio::bsp_kout << kio::kendl;
+    bsp_kout<< "#" << frame_count << " RIP: " << (void*)(frame->rip);
+#ifdef KERNEL_MODE
+    // 获取靠近当前返回地址的符号
+    symbol_entry* sym = ksymmanager::get_entry_near_addr(frame->rip);
+    if (sym != nullptr) {
+        bsp_kout<< " Symbol: " << sym->name << " (+" << (void*)(frame->rip - sym->address) << ")";
+    }
+#endif
+#ifdef USER_MODE
+    Dl_info info;
+    if (dladdr((void*)frame->rip, &info) && info.dli_sname) {
+        uintptr_t sym_addr = reinterpret_cast<uintptr_t>(info.dli_saddr);
+        uintptr_t rip_addr = static_cast<uintptr_t>(frame->rip);
+        bsp_kout<< " Symbol: " << info.dli_sname << " (+" << (void*)(rip_addr - sym_addr) << ")";
+    }
+#endif
+    bsp_kout<< kendl;
         
         // 移动到下一个栈帧
         StackFrame* next_frame = frame->rbp;

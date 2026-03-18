@@ -2,12 +2,6 @@
 # 包含内核池内存管理、物理内存段管理等相关功能的实现文件
 set(MEMORY_SOURCE 
     ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_pgcount_modify.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_pgs_set.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_seg_managment.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_availabe_search.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/phypgsmemmgr_alloc.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/phygpsmemmgr_buddy_about.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kpoolmemmgr.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kpoolmemmgr_HCBv2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AddresSpace.cpp

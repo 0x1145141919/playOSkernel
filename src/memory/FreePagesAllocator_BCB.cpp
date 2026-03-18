@@ -1,27 +1,11 @@
 #include "memory/FreePagesAllocator.h"
+#include "memory/phygpsmemmgr.h"
 #include "util/kout.h"
 #include "util/OS_utils.h"
 #include "panic.h"
-
-
-namespace {
-class bcb_lock_guard_t {
-private:
-    spinlock_cpp_t& lock_;
-public:
-    explicit bcb_lock_guard_t(spinlock_cpp_t& lock) : lock_(lock)
-    {
-        lock_.lock();
-    }
-    ~bcb_lock_guard_t()
-    {
-        lock_.unlock();
-    }
-};
-}
 bool FreePagesAllocator::BuddyControlBlock::is_addr_belong_to_this_BCB_no_lock(phyaddr_t addr)
 {
-    return (addr<=this->base) && (this->base+(1ull<<(max_supprt_order+12)));
+    return (addr>=this->base) && (addr<(this->base+(1ull<<(max_supprt_order+12))));
 }
 FreePagesAllocator::BuddyControlBlock*FreePagesAllocator::first_BCB;
 KURD_t FreePagesAllocator::BuddyControlBlock::default_success()
@@ -33,7 +17,7 @@ KURD_t FreePagesAllocator::BuddyControlBlock::default_success()
 }
 bool FreePagesAllocator::BuddyControlBlock::can_alloc(uint8_t order)
 {
-    bcb_lock_guard_t guard(lock);
+
     for(uint8_t current_order=order;current_order<=max_supprt_order;++current_order){
         if(statistics.free_count[current_order]>0){
             return true;
@@ -45,10 +29,26 @@ bool FreePagesAllocator::BuddyControlBlock::is_bcb_avaliable()
 {
     return !lock.is_locked();
 }
-void FreePagesAllocator::BuddyControlBlock::first_bcb_specified_init(loaded_VM_interval *first_BCB_bitmap)
+void FreePagesAllocator::BuddyControlBlock::first_bcb_specified_init()
 {
     order_freepage_existency_bitmaps=new mixed_bitmap_t(1ull<<(max_supprt_order+1));
-    order_freepage_existency_bitmaps->first_bcb_specified_init(first_BCB_bitmap);
+    order_freepage_existency_bitmaps->first_bcb_specified_init();
+    order_bases[0]=0;
+    for(uint8_t order=0;order<max_supprt_order;order++){
+        order_bases[order+1]=order_bases[order]+(1ULL<<(max_supprt_order-order));
+        //bsp_kout<<"order_bases["<<order<<"]="<<order_bases[order]<<kendl;
+    }
+    #ifdef REPALY_MODE
+    replay_internal_init();
+    #endif
+    //bsp_kout<<max_supprt_order<<kendl;
+    free_page_without_merge(0,max_supprt_order);
+    #ifdef REPALY_MODE
+    KURD_t replay_kurd = replay_validate_tree_no_lock("second_stage_init");
+    if (!success_all_kurd(replay_kurd)) {
+        return replay_kurd;
+    }
+    #endif
 }
 KURD_t FreePagesAllocator::BuddyControlBlock::default_fatal()
 {
@@ -108,12 +108,12 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_node
         return kurd;
     };
     if (order > MAX_SUPPORT_ORDER) {
-        kio::bsp_kout << "Replay validate invalid order at " << tag << kio::kendl;
+        bsp_kout<< "Replay validate invalid order at " << tag << kendl;
         return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INVALID_ORDER);
     }
     const uint64_t count = 1ULL << (MAX_SUPPORT_ORDER - order);
     if (idx >= count) {
-        kio::bsp_kout << "Replay validate invalid index at " << tag << kio::kendl;
+        bsp_kout<< "Replay validate invalid index at " << tag << kendl;
         return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INVALID_INDEX);
     }
 
@@ -121,13 +121,13 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_node
     bool parent_internal = false;
     if (order > 0) {
         if (!order_Internal_bitmap[order]) {
-            kio::bsp_kout << "Replay validate missing internal bitmap at " << tag << kio::kendl;
+            bsp_kout<< "Replay validate missing internal bitmap at " << tag << kendl;
             return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INTERNAL_BITMAP_MISSING);
         }
         parent_internal = order_Internal_bitmap[order]->bit_get(idx);
     }
     if (parent_free && parent_internal) {
-        kio::bsp_kout << "Replay validate conflict parent free/internal at " << tag << kio::kendl;
+        bsp_kout<< "Replay validate conflict parent free/internal at " << tag << kendl;
         return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INTERNAL_CONFLICT);
     }
     if (order == 0) {
@@ -142,7 +142,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_node
     bool right_internal = false;
     if (order > 1) {
         if (!order_Internal_bitmap[order - 1]) {
-            kio::bsp_kout << "Replay validate missing internal bitmap at " << tag << kio::kendl;
+            bsp_kout<< "Replay validate missing internal bitmap at " << tag << kendl;
             return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_INTERNAL_BITMAP_MISSING);
         }
         left_internal = order_Internal_bitmap[order - 1]->bit_get(left_idx);
@@ -151,14 +151,14 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_node
 
     if (parent_free) {
         if (left_free || right_free || left_internal || right_internal) {
-            kio::bsp_kout << "Replay validate parent free but child used at " << tag << kio::kendl;
+            bsp_kout<< "Replay validate parent free but child used at " << tag << kendl;
             return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_PARENT_FREE_CHILD_USED);
         }
         return make_success();
     }
     if (!parent_internal) {
         if (left_free || right_free || left_internal || right_internal) {
-            kio::bsp_kout << "Replay validate parent used but child used at " << tag << kio::kendl;
+            bsp_kout<< "Replay validate parent used but child used at " << tag << kendl;
             return make_fatal(REPLAY_FATAL::FAIL_REASON_CODE_PARENT_USED_CHILD_USED);
         }
         return make_success();
@@ -183,7 +183,7 @@ KURD_t FreePagesAllocator::free_pages_in_seg_control_block::replay_validate_tree
 #endif
 uint8_t FreePagesAllocator::BuddyControlBlock::get_max_order()
 {
-    bcb_lock_guard_t guard(lock);
+
     return this->max_supprt_order;
 }
 
@@ -248,7 +248,7 @@ uint8_t FreePagesAllocator::BuddyControlBlock::size_to_order(uint64_t size)
 }
 phyaddr_t FreePagesAllocator::BuddyControlBlock::allocate_buddy_way(uint64_t size, KURD_t &result,uint8_t align_log2)
 {
-    bcb_lock_guard_t guard(lock);
+
     KURD_t success=default_success();
     KURD_t error=default_error();
     KURD_t fatal=default_fatal();
@@ -268,7 +268,7 @@ phyaddr_t FreePagesAllocator::BuddyControlBlock::allocate_buddy_way(uint64_t siz
     KURD_t kurd;
     //kurd=free_pages_flush();
     if(!success_all_kurd(kurd)){
-            kio::bsp_kout<<"free page allocator fatal error"<<kio::kendl;
+            bsp_kout<<"free page allocator fatal error"<<kendl;
             print_basic_info_no_lock();
             result=kurd;
             return 0;
@@ -355,7 +355,7 @@ phyaddr_t FreePagesAllocator::BuddyControlBlock::allocate_buddy_way(uint64_t siz
         }
     }
 
-    //kio::bsp_kout<<"higher order free page found,validation start"<<kio::kendl;
+    //bsp_kout<<"higher order free page found,validation start"<<kendl;
     statistics.alloc_times_fail++;
     error.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::ALLOCATE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_NO_AVALIABLE_BUDDY;
     result=error;
@@ -384,9 +384,12 @@ FreePagesAllocator::BuddyControlBlock::BuddyControlBlock(phyaddr_t base, uint8_t
     this->is_splited_bitmap_valid=is_splited_bitmap_valid;
     ksetmem_8(&statistics, 0, sizeof(statistics));
 }
+FreePagesAllocator::BuddyControlBlock::BuddyControlBlock()
+{
+}
 KURD_t FreePagesAllocator::BuddyControlBlock::second_stage_init()
 {
-    bcb_lock_guard_t guard(lock);
+
     KURD_t success=default_success();
     KURD_t error=default_error();
     KURD_t fatal=default_fatal();
@@ -411,7 +414,7 @@ KURD_t FreePagesAllocator::BuddyControlBlock::second_stage_init()
         return replay_kurd;
     }
     #endif
-    return success;
+    return contain;
 }
 void FreePagesAllocator::BuddyControlBlock::free_page_without_merge(uint64_t in_bcb_idx, uint8_t order)
 {
@@ -523,7 +526,6 @@ bool FreePagesAllocator::BuddyControlBlock::is_addr_belong_to_this_BCB(phyaddr_t
 }
 KURD_t FreePagesAllocator::BuddyControlBlock::free_buddy_way(phyaddr_t base, uint64_t size)
 {
-    bcb_lock_guard_t guard(lock);
     bool base_belong=is_addr_belong_to_this_BCB_no_lock(base);
     bool top_belong=is_addr_belong_to_this_BCB_no_lock(base+size-1);
     if(base_belong&&top_belong){
@@ -534,6 +536,11 @@ KURD_t FreePagesAllocator::BuddyControlBlock::free_buddy_way(phyaddr_t base, uin
         KURD_t fail=default_error();
         fail.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FREE;
         fail.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FREE_RESULTS_CODE::FAIL_REASONS_CODE::FAIL_REASON_CODE_BASE_NOT_BELONG;
+        uint64_t bcb_size = (1ull<<(max_supprt_order+12));
+        bsp_kout<<"[ERROR] Bad free request - release seg: ["
+            <<HEX<<base<<" , "<<(base+size-1)<<"] (size: "<<size<<")"
+            <<" does not belong to BCB: ["<<this->base<<" , "<<(this->base+bcb_size-1)<<"] (size: "<<bcb_size<<")"
+            <<" base_belong:"<<base_belong<<" top_belong:"<<top_belong;
         return fail;
     }
 }
@@ -585,7 +592,7 @@ bool FreePagesAllocator::BuddyControlBlock::is_reclusive_fold_success(uint64_t i
 }
 void FreePagesAllocator::BuddyControlBlock::top_fold()
 {
-    bcb_lock_guard_t guard(lock);
+
     is_reclusive_fold_success(0,max_supprt_order);
 }
 void FreePagesAllocator::BuddyControlBlock::print_basic_info_no_lock()
@@ -593,30 +600,30 @@ void FreePagesAllocator::BuddyControlBlock::print_basic_info_no_lock()
     /**
      * 打印base，MAX_SUPPORT_ORDER，suggest_order_free_page_index[DESINGED_MAX_SUPPORT_ORDER]数组的有效条目
      */
-    kio::bsp_kout << "[FreePagesAllocator::free_pages_in_seg_control_block Info]" << kio::kendl;
-    kio::bsp_kout << "Base Address: 0x";
-    kio::bsp_kout.shift_hex();  // 切换到十六进制模式
-    kio::bsp_kout << base << kio::kendl;
-    kio::bsp_kout.shift_dec();  // 切换回十进制模式
-    kio::bsp_kout << "Max Support Order: ";
-    kio::bsp_kout << (uint32_t)max_supprt_order << kio::kendl;
-    kio::bsp_kout << "Suggest Order Free Page Index Cache:" << kio::kendl;
+    bsp_kout<< "[FreePagesAllocator::free_pages_in_seg_control_block Info]" << kendl;
+    bsp_kout<< "Base Address: 0x";
+    bsp_kout.shift_hex();  // 切换到十六进制模式
+    bsp_kout<< base << kendl;
+    bsp_kout.shift_dec();  // 切换回十进制模式
+    bsp_kout<< "Max Support Order: ";
+    bsp_kout<< (uint32_t)max_supprt_order << kendl;
+    bsp_kout<< "Suggest Order Free Page Index Cache:" << kendl;
     for(uint8_t i = 0; i <=max_supprt_order; i++){
-        kio::bsp_kout<<"order "<<i<< " free_count:"<<statistics.free_count[i]<<kio::kendl;
+        bsp_kout<<"order "<<i<< " free_count:"<<statistics.free_count[i]<<kendl;
     }
     for (uint8_t i = 0; i <=max_supprt_order; i++) {
         bool any=false;
         for (uint8_t j = 0; j < PER_ORDER_CACHE_SUGGEST_COUNT; ++j) {
             if (suggest_order_free_page_index[i][j] != INVALID_INBCB_INDEX) {
                 if (!any) {
-                    kio::bsp_kout << "  [" << (uint32_t)i << "] = ";
+                    bsp_kout<< "  [" << (uint32_t)i << "] = ";
                     any = true;
                 }
-                kio::bsp_kout << suggest_order_free_page_index[i][j] << " ";
+                bsp_kout<< suggest_order_free_page_index[i][j] << " ";
             }
         }
         if (any) {
-            kio::bsp_kout << kio::kendl;
+            bsp_kout<< kendl;
         }
         
     }
@@ -624,12 +631,11 @@ void FreePagesAllocator::BuddyControlBlock::print_basic_info_no_lock()
 }
 void FreePagesAllocator::BuddyControlBlock::print_basic_info()
 {
-    bcb_lock_guard_t guard(lock);
     print_basic_info_no_lock();
 }
 void FreePagesAllocator::BuddyControlBlock::print_bitmap_info_no_lock()
 {
-    kio::bsp_kout << "[Bitmap Info for all Orders]" << kio::kendl;
+    bsp_kout<< "[Bitmap Info for all Orders]" << kendl;
     
     for (uint8_t order = 0; order < max_supprt_order; order++) {
         print_bitmap_order_info_compress_no_lock(order);
@@ -637,7 +643,6 @@ void FreePagesAllocator::BuddyControlBlock::print_bitmap_info_no_lock()
 }
 void FreePagesAllocator::BuddyControlBlock::print_bitmap_info()
 {
-    bcb_lock_guard_t guard(lock);
     print_bitmap_info_no_lock();
 }
 void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_info_compress_no_lock(uint8_t order)
@@ -646,15 +651,14 @@ void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_info_compress_no_
 }
 void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_info_compress(uint8_t order)
 {
-    bcb_lock_guard_t guard(lock);
     print_bitmap_order_info_compress_no_lock(order);
 }
 void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress_no_lock(uint8_t order, uint64_t base, uint64_t length)
 {
-    kio::bsp_kout << "[Bitmap Order " << (uint32_t)order << " Interval Compress Print]" << kio::kendl;
+    bsp_kout<< "[Bitmap Order " << (uint32_t)order << " Interval Compress Print]" << kendl;
     
     if (order >= max_supprt_order) {
-        kio::bsp_kout << "Invalid order!" << kio::kendl;
+        bsp_kout<< "Invalid order!" << kendl;
         return;
     }
     
@@ -662,7 +666,7 @@ void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress
     
     // 确保base和length不超过有效范围
     if (base >= max_count) {
-        kio::bsp_kout << "Base index out of range!" << kio::kendl;
+        bsp_kout<< "Base index out of range!" << kendl;
         return;
     }
     
@@ -687,11 +691,11 @@ void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress
             interval_start = i;
         } else if (value != current_state) {
             // 状态发生变化，输出上一个区间
-            kio::bsp_kout << "[" << interval_start << "," << i-1 << "]=";
+            bsp_kout<< "[" << interval_start << "," << i-1 << "]=";
             if (current_state) {
-                kio::bsp_kout << "EXIST" << kio::kendl;
+                bsp_kout<< "EXIST" << kendl;
             } else {
-                kio::bsp_kout << "NOT_EXIST" << kio::kendl;
+                bsp_kout<< "NOT_EXIST" << kendl;
             }
             
             // 更新状态，开始新区间
@@ -704,22 +708,123 @@ void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress
     
     // 输出最后一个区间
     if (scanning) {
-        kio::bsp_kout << "[" << interval_start << "," << i-1 << "]=";
+        bsp_kout<< "[" << interval_start << "," << i-1 << "]=";
         if (current_state) {
-            kio::bsp_kout << "EXIST" << kio::kendl;
+            bsp_kout<< "EXIST" << kendl;
         } else {
-            kio::bsp_kout << "NOT_EXIST" << kio::kendl;
+            bsp_kout<< "NOT_EXIST" << kendl;
         }
     }
 }
 void FreePagesAllocator::BuddyControlBlock::print_bitmap_order_interval_compress(uint8_t order, uint64_t base, uint64_t length)
 {
-    bcb_lock_guard_t guard(lock);
     print_bitmap_order_interval_compress_no_lock(order, base, length);
 }
+
+void FreePagesAllocator::BuddyControlBlock::print_all_statistics()
+{
+    
+    bsp_kout << kendl;
+    bsp_kout << "========================================" << kendl;
+    bsp_kout << "[BuddyControlBlock Full Statistics Report]" << kendl;
+    bsp_kout << "========================================" << kendl;
+    
+    // 基本信息
+    bsp_kout << "[Basic Information]" << kendl;
+    bsp_kout << "Base Address: 0x";
+    bsp_kout.shift_hex();
+    bsp_kout << base << kendl;
+    bsp_kout.shift_dec();
+    bsp_kout << "Max Support Order: " << (uint32_t)max_supprt_order << kendl;
+    bsp_kout << "Is Split Bitmap Valid: " << (is_splited_bitmap_valid ? "Yes" : "No") << kendl;
+    bsp_kout << kendl;
+    
+    // 各阶空闲页统计
+    bsp_kout << "[Free Page Count per Order]" << kendl;
+    for (uint8_t i = 0; i <= max_supprt_order; i++) {
+        bsp_kout << "Order " << (uint32_t)i << ": " << statistics.free_count[i] << " pages" << kendl;
+    }
+    bsp_kout << kendl;
+    
+    // 缓存命中率统计（使用整数百分比）
+    bsp_kout << "[Cache Hit/Miss Statistics]" << kendl;
+    for (uint8_t i = 0; i <= max_supprt_order; i++) {
+        uint64_t total = statistics.suggest_hit[i] + statistics.suggest_miss[i];
+        uint64_t hit_rate_percent = (total > 0) ? 
+            (statistics.suggest_hit[i] * 100 / total) : 0;
+        bsp_kout << "Order " << (uint32_t)i << ": Hit=" << statistics.suggest_hit[i] 
+                 << ", Miss=" << statistics.suggest_miss[i]
+                 << ", Hit Rate=" << hit_rate_percent << "%" << kendl;
+    }
+    bsp_kout << kendl;
+    
+    // 分配/释放操作统计
+    bsp_kout << "[Allocation/Deallocation Operations]" << kendl;
+    bsp_kout << "Successful Allocations: " << statistics.alloc_times_success << kendl;
+    bsp_kout << "Failed Allocations: " << statistics.alloc_times_fail << kendl;
+    bsp_kout << "Successful Deallocation: " << statistics.free_times_success << kendl;
+    
+    uint64_t total_alloc = statistics.alloc_times_success + statistics.alloc_times_fail;
+    uint64_t alloc_success_rate_percent = (total_alloc > 0) ? 
+        (statistics.alloc_times_success * 100 / total_alloc) : 0;
+    bsp_kout << "Allocation Success Rate: " << alloc_success_rate_percent << "%" << kendl;
+    bsp_kout << kendl;
+    
+    // 扫描和折叠统计
+    bsp_kout << "[Scan and Fold Statistics]" << kendl;
+    bsp_kout << "Total Scan Count: " << statistics.scan_count << kendl;
+    bsp_kout << "Successful Fold Count: " << statistics.fold_count_success << kendl;
+    bsp_kout << "Failed Fold Count: " << statistics.fold_count_fail << kendl;
+    
+    uint64_t total_fold = statistics.fold_count_success + statistics.fold_count_fail;
+    uint64_t fold_success_rate_percent = (total_fold > 0) ? 
+        (statistics.fold_count_success * 100 / total_fold) : 0;
+    bsp_kout << "Fold Success Rate: " << fold_success_rate_percent << "%" << kendl;
+    bsp_kout << kendl;
+    
+    // 分裂操作统计
+    bsp_kout << "[Page Split Statistics]" << kendl;
+    bsp_kout << "Total Split Count: " << statistics.split_count << kendl;
+    bsp_kout << kendl;
+    
+    // 缓存条目详情
+    bsp_kout << "[Suggest Order Cache Details]" << kendl;
+    for (uint8_t i = 0; i <= max_supprt_order; i++) {
+        bool any = false;
+        bsp_kout << "Order " << (uint32_t)i << " cache entries: ";
+        for (uint8_t j = 0; j < PER_ORDER_CACHE_SUGGEST_COUNT; ++j) {
+            if (suggest_order_free_page_index[i][j] != INVALID_INBCB_INDEX) {
+                if (!any) {
+                    any = true;
+                } else {
+                    bsp_kout << ", ";
+                }
+                bsp_kout << suggest_order_free_page_index[i][j];
+            }
+        }
+        if (!any) {
+            bsp_kout << "(empty)";
+        }
+        bsp_kout << kendl;
+    }
+    bsp_kout << kendl;
+    
+    // 性能汇总
+    bsp_kout << "[Performance Summary]" << kendl;
+    uint64_t total_ops = statistics.alloc_times_success + statistics.alloc_times_fail + statistics.free_times_success;
+    bsp_kout << "Total Operations: " << total_ops << kendl;
+    if (total_ops > 0) {
+        uint64_t avg_scan_per_op_int = statistics.scan_count / total_ops;
+        uint64_t avg_scan_per_op_fraction = (statistics.scan_count % total_ops * 100) / total_ops;
+        bsp_kout << "Average Scans per Operation: " << avg_scan_per_op_int 
+                 << "." << avg_scan_per_op_fraction << kendl;
+    }
+    bsp_kout << "========================================" << kendl;
+    bsp_kout << kendl;
+}
+
 KURD_t FreePagesAllocator::BuddyControlBlock::free_pages_flush()
 {
-    bcb_lock_guard_t guard(lock);
     KURD_t success=default_success();
     KURD_t fatal=default_fatal();
     success.event_code=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT;
@@ -731,8 +836,8 @@ KURD_t FreePagesAllocator::BuddyControlBlock::free_pages_flush()
                 actual_free_count++;
         }
         if(actual_free_count!=statistics.free_count[i]){
-            kio::bsp_kout << "FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush() violation" << kio::kendl;
-            kio::bsp_kout << "Order " << (uint32_t)i << ": Expected free count: " << statistics.free_count[i] << ", Actual free count: " << actual_free_count << kio::kendl;
+            bsp_kout<< "FreePagesAllocator::free_pages_in_seg_control_block::free_pages_flush() violation" << kendl;
+            bsp_kout<< "Order " << (uint32_t)i << ": Expected free count: " << statistics.free_count[i] << ", Actual free count: " << actual_free_count << kendl;
             //statistics.free_count[i]=actual_free_count;
             fatal.reason=MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::FLUSH_FREE_COUNT_RESULTS_CODE::FATAL_REASONS_CODE::COSISTENCY_VIOLATION;
             //Panic::panic(default_panic_behaviors_flags,nullptr,nullptr,nullptr,fatal);
@@ -741,4 +846,47 @@ KURD_t FreePagesAllocator::BuddyControlBlock::free_pages_flush()
     }
     if(fatal.reason)return fatal;
     return success;
+}
+
+void FreePagesAllocator::print_all_bcb_statistics()
+{
+    bsp_kout << kendl;
+    bsp_kout << "============================================" << kendl;
+    bsp_kout << "[FreePagesAllocator - All BCB Statistics]" << kendl;
+    bsp_kout << "============================================" << kendl;
+    
+    // 打印 main_BCBS 数组中每个 BCB 的统计信息
+    if (mainBCBS != nullptr && main_BCB_count > 0) {
+        bsp_kout << kendl;
+        bsp_kout << ">>> [main_BCBS Array Statistics] <<<" << kendl;
+        bsp_kout << "Total main_BCB count: " << main_BCB_count << kendl;
+        
+        for (uint64_t i = 0; i < main_BCB_count; i++) {
+            bsp_kout << kendl;
+            bsp_kout << "--- main_BCBS[" << i << "] ---" << kendl;
+            mainBCBS[i].print_all_statistics();
+        }
+    } else {
+        bsp_kout << "[INFO] main_BCBS is empty or not initialized, skipping..." << kendl;
+    }
+    
+    // 打印 vice_BCBS 数组中每个 BCB 的统计信息
+    if (vice_BCBS != nullptr && vice_BCB_count > 0) {
+        bsp_kout << kendl;
+        bsp_kout << ">>> [vice_BCBS Array Statistics] <<<" << kendl;
+        bsp_kout << "Total vice_BCB count: " << vice_BCB_count << kendl;
+        
+        for (uint64_t i = 0; i < vice_BCB_count; i++) {
+            bsp_kout << kendl;
+            bsp_kout << "--- vice_BCBS[" << i << "] ---" << kendl;
+            vice_BCBS[i].print_all_statistics();
+        }
+    } else {
+        bsp_kout << "[INFO] vice_BCBS is empty or not initialized, skipping..." << kendl;
+    }
+    
+    bsp_kout << "============================================" << kendl;
+    bsp_kout << "[All BCB Statistics Print Complete]" << kendl;
+    bsp_kout << "============================================" << kendl;
+    bsp_kout << kendl;
 }

@@ -3,23 +3,236 @@
 #include "kcirclebufflogMgr.h"
 #include "core_hardwares/PortDriver.h"
 #include "util/OS_utils.h"
-#include "time.h"
+#include "ktime.h"
 #include "panic.h"
+#include "memory/memmodule_err_definitions.h"
+#include "util/arch/x86-64/cpuid_intel.h"
+#include "memory/AddresSpace.h"
+#include "memory/kpoolmemmgr.h"
+#include "memory/FreePagesAllocator.h"
+#include "memory/phygpsmemmgr.h"
 #ifdef USER_MODE
 #include <cstring> 
 #include <unistd.h>
  #endif
-kio::kout kio::bsp_kout;
-kio::endl kio::kendl;
-kio::now_time kio::now;
+kio::kout bsp_kout;
+kio::endl kendl;
+kio::now_time now;
 void (*kio::kout::top_module_KURD_interpreter[256]) (KURD_t info);
 void kio::defalut_KURD_module_interpator(KURD_t kurd)
 {
     result_t result={
         .kernel_result=kurd
     };
-    kio::bsp_kout<<"default_KURD_module_interpator the raw:"<<result.raw<<kendl;
+    bsp_kout<<"default_KURD_module_interpator the raw:"<<result.raw<<kendl;
 }
+
+
+static void __print_event_hex(uint8_t event_code)
+{
+    bsp_kout<< "[event:0x";
+    bsp_kout.shift_hex();
+    bsp_kout<< event_code;
+    bsp_kout.shift_dec();
+    bsp_kout<< "]";
+}
+
+static void __print_memmodule_kurd(KURD_t kurd)
+{
+    switch (kurd.in_module_location) {
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_ADDRESSPACE:
+            bsp_kout<< "[mem_loc:ADDRESSPACE]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY:
+                    bsp_kout<< "[event:ENABLE_VMENTRY]"; break;
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_DISABLE_VMENTRY:
+                    bsp_kout<< "[event:DISABLE_VMENTRY]"; break;
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_TRAN_TO_PHY:
+                    bsp_kout<< "[event:TRAN_TO_PHY]"; break;
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB:
+                    bsp_kout<< "[event:INVALIDATE_TLB]"; break;
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE:
+                    bsp_kout<< "[event:BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE]"; break;
+                case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_UNREGIST:
+                    bsp_kout<< "[event:UNREGIST]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR:
+            bsp_kout<< "[mem_loc:KSPACE_MAP_MGR]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_ENABLE_VMENTRY:
+                    bsp_kout<< "[event:ENABLE_VMENTRY]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_DISABLE_VMENTRY:
+                    bsp_kout<< "[event:DISABLE_VMENTRY]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_TRAN_TO_PHY_ENTRY:
+                    bsp_kout<< "[event:TRAN_TO_PHY_ENTRY]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB:
+                    bsp_kout<< "[event:INVALIDATE_TLB]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET:
+                    bsp_kout<< "[event:PAGES_SET]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR:
+                    bsp_kout<< "[event:PAGES_CLEAR]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_SEG_TO_INFO_PACKAGE:
+                    bsp_kout<< "[event:SEG_TO_INFO_PACKAGE]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_VM_SEARCH_BY_ADDR:
+                    bsp_kout<< "[event:VM_SEARCH_BY_ADDR]"; break;
+                case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_UNREGIST:
+                    bsp_kout<< "[event:UNREGIST]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR:
+            bsp_kout<< "[mem_loc:KPOOLMEMMGR]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_ALLOC:
+                    bsp_kout<< "[event:ALLOC]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_REALLOC:
+                    bsp_kout<< "[event:REALLOC]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT:
+                    bsp_kout<< "[event:PER_PROCESSOR_HEAP_INIT]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR_HCB:
+            bsp_kout<< "[mem_loc:KPOOLMEMMGR_HCB]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_CLEAR:
+                    bsp_kout<< "[event:CLEAR]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_ALLOC:
+                    bsp_kout<< "[event:ALLOC]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_FREE:
+                    bsp_kout<< "[event:FREE]"; break;
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC:
+                    bsp_kout<< "[event:INHEAP_REALLOC]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR_HCB_BITMAP:
+            bsp_kout<< "[mem_loc:KPOOLMEMMGR_HCB_BITMAP]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_BITMAP_EVENTS::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR:
+            bsp_kout<< "[mem_loc:FREEPAGES_ALLOCATOR]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_INIT_SECOND_STAGE:
+                    bsp_kout<< "[event:INIT_SECOND_STAGE]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_ALLOC:
+                    bsp_kout<< "[event:ALLOC]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_FREE:
+                    bsp_kout<< "[event:FREE]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_TRANSPARNENT_PAGE:
+            bsp_kout<< "[mem_loc:TRANSPARNENT_PAGE]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::TRANSPARNENT_PAGE_EVENTS::EVENT_CODE_SPILT:
+                    bsp_kout<< "[event:SPILT]"; break;
+                case MEMMODULE_LOCAIONS::TRANSPARNENT_PAGE_EVENTS::EVENT_CODE_MERGE:
+                    bsp_kout<< "[event:MERGE]"; break;
+                case MEMMODULE_LOCAIONS::TRANSPARNENT_PAGE_EVENTS::EVENT_CODE_MERGE_FREE:
+                    bsp_kout<< "[event:MERGE_FREE]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK:
+            bsp_kout<< "[mem_loc:FREEPAGES_ALLOCATOR_BCB]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY:
+                    bsp_kout<< "[event:ALLOCATE_BUDY_WAY]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_CONANICO_FREE:
+                    bsp_kout<< "[event:CONANICO_FREE]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_SPLIT_PAGE:
+                    bsp_kout<< "[event:SPLIT_PAGE]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT:
+                    bsp_kout<< "[event:FLUSH_FREE_COUNT]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_TOP_FOLD:
+                    bsp_kout<< "[event:TOP_FOLD]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FREE_PAGES_FLUSH:
+                    bsp_kout<< "[event:FREE_PAGES_FLUSH]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FREE:
+                    bsp_kout<< "[event:FREE]"; break;
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_REPLAY_VALIDATE:
+                    bsp_kout<< "[event:REPLAY_VALIDATE]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP:
+            bsp_kout<< "[mem_loc:FREEPAGES_ALLOCATOR_BCB_BITMAP]";
+            switch (kurd.event_code) {
+                case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP::EVENT_CODE_INIT:
+                    bsp_kout<< "[event:INIT]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR_VMENTRY_RBTREE:
+            bsp_kout<< "[mem_loc:KSPACE_MAP_MGR_VMENTRY_RBTREE]";
+            __print_event_hex(kurd.event_code);
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR_PGS_PAGE_TABLE:
+            bsp_kout<< "[mem_loc:KSPACE_MAP_MGR_PGS_PAGE_TABLE]";
+            __print_event_hex(kurd.event_code);
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_BASE_MEMMGR:
+            bsp_kout<< "[mem_loc:BASE_MEMMGR]";
+            __print_event_hex(kurd.event_code);
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_PHYMEM_ACCESSOR:
+            bsp_kout<< "[mem_loc:PHYMEM_ACCESSOR]";
+            __print_event_hex(kurd.event_code);
+            break;
+        case MEMMODULE_LOCAIONS::LOCATION_CODE_OUT_SURFACES:
+            bsp_kout<< "[mem_loc:OUT_SURFACES]";
+            switch (kurd.event_code) {
+                case 0:
+                    bsp_kout<< "[event:PAGES_VALLOC]"; break;
+                case 1:
+                    bsp_kout<< "[event:PAGES_VFREE]"; break;
+                case 2:
+                    bsp_kout<< "[event:PAGES_ALLOC]"; break;
+                case 3:
+                    bsp_kout<< "[event:PAGES_FREE]"; break;
+                case 4:
+                    bsp_kout<< "[event:KEYWORD_NEW]"; break;
+                case 5:
+                    bsp_kout<< "[event:KEYWORD_DELETE]"; break;
+                default:
+                    __print_event_hex(kurd.event_code); break;
+            }
+            break;
+        default:
+            bsp_kout<< "[mem_loc:unknown]";
+            __print_event_hex(kurd.event_code);
+            break;
+    }
+}
+
 void kio::kout::print_numer(
     uint64_t *num_ptr, 
     numer_system_select numer_system, 
@@ -371,6 +584,7 @@ void kio::kout::Init()
     for(int i = 0; i < 256; i++){
         top_module_KURD_interpreter[i]=defalut_KURD_module_interpator;
     }
+    top_module_KURD_interpreter[module_code::MEMORY]=__print_memmodule_kurd;
     
     #ifdef KERNEL_MODE
     kout_backend dmesg_buffer_handlers={
@@ -557,4 +771,15 @@ bool kio::kout::mask_backend(uint64_t index)
         }
     }
     return false;
+}
+
+kio::kout &kio::kout::operator<<(numer_system_select radix)
+{   
+     switch (radix) {
+        case BIN: shift_bin(); break;
+        case DEC: shift_dec(); break;
+        case HEX: shift_hex(); break;
+        default: shift_dec(); break;
+    }
+    return *this;
 }

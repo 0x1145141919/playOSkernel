@@ -70,7 +70,7 @@ void basic_allocator::fill_memory_holes()
             
             EFI_MEMORY_DESCRIPTORX64 hole_desc;
             ksetmem_8(&hole_desc, 0, sizeof(EFI_MEMORY_DESCRIPTORX64));
-            hole_desc.Type = EFI_RESERVED_MEMORY_TYPE;
+            hole_desc.Type = PHY_MEM_TYPE::OS_MEMSEG_HOLE;
             hole_desc.PhysicalStart = current_end;
             hole_desc.NumberOfPages = hole_pages;
             hole_desc.Attribute = 0;
@@ -463,6 +463,11 @@ int basic_allocator::Init(EFI_MEMORY_DESCRIPTORX64* memory_map_ptr, uint16_t ent
         pure_mem_view[idx].type = static_cast<PHY_MEM_TYPE>(desc.Type);
         ++idx;
     }
+    for(idx=pure_view_entry_count-1;idx>=0;idx--)
+    {
+        if(pure_mem_view[idx].start==0x100000000&&pure_mem_view[idx].type==freeSystemRam)break;
+    }    
+    pure_view_entry_count=idx+1;
     privious_alloc_end=0x100000;
     return 0;
 }
@@ -488,14 +493,14 @@ phymem_segment *basic_allocator::get_pure_memory_view(uint64_t *entry_count_ptr)
 void basic_allocator::print_now_segs()
 {
    if (!memory_map) {
-       kio::bsp_kout << "[WARN] memory_map is nullptr, nothing to print" << kio::kendl;
+       bsp_kout<< "[WARN] memory_map is nullptr, nothing to print" << kendl;
         return;
     }
     
-   kio::bsp_kout << kio::kendl;
-   kio::bsp_kout << "========================================" << kio::kendl;
-   kio::bsp_kout << "[INFO] Current Memory Map Segments (" << memory_map->size() << " entries)" << kio::kendl;
-   kio::bsp_kout << "========================================" << kio::kendl;
+   bsp_kout<< kendl;
+   bsp_kout<< "========================================" << kendl;
+   bsp_kout<< "[INFO] Current Memory Map Segments (" << memory_map->size() << " entries)" << kendl;
+   bsp_kout<< "========================================" << kendl;
     
    uint64_t index = 0;
     for (auto it = memory_map->begin(); it != memory_map->end(); ++it) {
@@ -588,8 +593,8 @@ void basic_allocator::print_now_segs()
        uint64_t physical_end = physical_start + size_bytes;
        uint64_t attribute = desc.Attribute;
         
-       kio::bsp_kout.shift_hex();  // 切换到十六进制
-       kio::bsp_kout << "  [" << index << "] " 
+       bsp_kout.shift_hex();  // 切换到十六进制
+       bsp_kout<< "  [" << index << "] " 
                      << type_str 
                      << " | PA: 0x" << physical_start 
                      << " - 0x" << (physical_end > 0 ? physical_end - 1 : 0)
@@ -597,12 +602,12 @@ void basic_allocator::print_now_segs()
                      << " (" << (size_bytes / 1024) << " KB)"
                      << " | Pages: " << desc.NumberOfPages
                      << " | Attr: 0x" << attribute
-                     << kio::kendl;
-     kio::bsp_kout.shift_dec();  // 恢复十进制
+                     << kendl;
+     bsp_kout.shift_dec();  // 恢复十进制
         
         ++index;
     }
     
-   kio::bsp_kout << "========================================" << kio::kendl;
-   kio::bsp_kout << kio::kendl;
+   bsp_kout<< "========================================" << kendl;
+   bsp_kout<< kendl;
 }

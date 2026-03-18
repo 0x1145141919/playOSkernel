@@ -48,32 +48,27 @@ KURD_t HPET_driver_only_read_time_stamp::second_stage_init()
             fail.reason=COREHARDWARES_LOCATIONS::HPET_READONLY_DRIVERS_EVENTS::INIT_RESULTS::FAIL_REASONS::ACPI_ADDR_NOT_ALIGN;
             return fail;
         }
-    //先找物理页框系统注册mmio物理页
-    status=phymemspace_mgr::pages_mmio_regist(phy_reg_base,1);
-    if(status.event_code==MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::EVENT_CODE_MMIO_REGIST||
-    status.reason==MEMMODULE_LOCAIONS::PHYMEMSPACE_MGR_EVENTS_CODE::MMIO_REGIST_RESULTS_CODE::FAIL_REASONS::REASON_CODE_MMIOSEG_NOT_EXIST)//说明不落在一个mmio段内
-        {
-            status=phymemspace_mgr::blackhole_acclaim(
-                phy_reg_base,
-                1,
-                MMIO_SEG,
-                phymemspace_mgr::blackhole_acclaim_flags_t{0}
-            );
-            if(status.result!=result_code::SUCCESS)
-                return status;
-            status=phymemspace_mgr::pages_mmio_regist(phy_reg_base,1);
-            if(status.result!=result_code::SUCCESS)
-                return status;
-        }
-    pgaccess access=KspaceMapMgr::PG_RW;
+    //先找物理页框系统注册 mmio 物理页
+    page&hpet=phymemspace_mgr::mem_map[table->Base_Address>>12];
+    hpet.head.type=static_cast<uint64_t>(page_state_t::mmio);
+    hpet.refcount=1;
+    hpet.head.ptr=((uint64_t)this>>4);
+    pgaccess access=KspacePageTable::PG_RW;
     access.cache_strategy=UC;
-    virt_reg_base=(vaddr_t)KspaceMapMgr::pgs_remapp(status,
-        phy_reg_base,
-        4096,
-        access
-    );
-    if(virt_reg_base==0)
+    this->virt_reg_base= kspace_vm_table->alloc_available_space(4096,0);
+    if(virt_reg_base==0){
+        //
+    }
+    vm_interval interval={
+        .vbase=virt_reg_base,
+        .pbase=phy_reg_base,
+        .size=4096,
+        .access=access
+    };
+    status=KspacePageTable::enable_VMentry(interval);
+    if(error_kurd(status)){
         return status;
+    }
     uint64_t gen_cap_id_reg=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_General_Capabilities_and_ID));
     hpet_timer_period_fs=gen_cap_id_reg>>HPET::regs::COUNTER_CLK_PERIOD_LEFT_OFFSET;
     comparator_count=((gen_cap_id_reg>>HPET::regs::COMPARATOR_COUNT_LEFT_OFFSET)&HPET::regs::COMPARATOR_COUNT_MASK)+1;
@@ -99,12 +94,23 @@ KURD_t HPET_driver_only_read_time_stamp::second_stage_init()
 HPET_driver_only_read_time_stamp::~HPET_driver_only_read_time_stamp()
 {
     KURD_t status = KURD_t();
-    status=phymemspace_mgr::pages_mmio_unregist(phy_reg_base,1);
-    if(status.result!=result_code::SUCCESS)
+    pgaccess access=KspacePageTable::PG_RW;
+    access.cache_strategy=UC;
+    int result= kspace_vm_table->remove(virt_reg_base);
+    if(result!=OS_SUCCESS){
         return;
-    status=KspaceMapMgr::pgs_remapped_free(virt_reg_base);
-    if(status.result!=result_code::SUCCESS)
+    }
+    vm_interval interval={
+        .vbase=virt_reg_base,
+        .pbase=phy_reg_base,
+        .size=4096,
+        .access=access
+    };
+    status=KspacePageTable::disable_VMentry(interval);
+    if(error_kurd(status)){
+        //
         return;
+    }
     uint64_t gen_config_reg=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_General_Config));
     gen_config_reg &= ~HPET::regs::GCONFIG_ENABLE_BIT;
     atomic_write64_rdbk((void*)(virt_reg_base+HPET::regs::offset_General_Config), gen_config_reg);

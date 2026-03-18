@@ -124,6 +124,6 @@ constexpr uint32_t COLOR_BLUE    = 0xFF0000FF;
 
 ## 依赖
 
-- `os_error_definitions.h` - 错误码定义
+- `abi/os_error_definitions.h` - 错误码定义
 - `efi.h` - UEFI 类型定义
 - `util/OS_utils.h` - 内存操作函数 (ksetmem_64, ksystemramcpy)

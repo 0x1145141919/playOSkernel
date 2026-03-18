@@ -1,6 +1,6 @@
 #include "init_fs.h"
 #include "memory/kpoolmemmgr.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "util/OS_utils.h"
 
 int init_fs_t::write_inode(uint64_t block_group_index, uint64_t inode_index, Inode *inode)

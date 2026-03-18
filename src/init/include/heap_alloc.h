@@ -154,13 +154,13 @@ class INIT_HCB//堆控制块，必须是连续物理地址空间的连续内存
             using bitmap_t::bits_set;
             using bitmap_t::bytes_set;
             using bitmap_t::u64s_set;
-            using bitmap_t::continual_avaliable_bits_search;
-            using bitmap_t::continual_avaliable_bytes_search;
-            using bitmap_t::continual_avaliable_u64s_search;
             using bitmap_t::get_bitmap_used_bit;
             using bitmap_t::count_bitmap_used_bit;
             using bitmap_t::used_bit_count_add;
             using bitmap_t::used_bit_count_sub;
+            int continual_avaliable_bits_search(uint64_t bit_count,uint64_t&result_base_idx);
+            int continual_avaliable_bytes_search(uint64_t byte_count,uint64_t&result_base_idx);
+            int continual_avaliable_u64s_search(uint64_t u64_count,uint64_t&result_base_idx);
             HCB_bitmap_error_code_t continual_avaliable_u64s_search_higher_alignment(uint64_t u64idx_align_log2,uint64_t u64_count,uint64_t&result_base_idx);
             bool target_bit_seg_is_avaliable(uint64_t bit_idx,uint64_t bit_count,HCB_bitmap_error_code_t&err);//考虑用 uint64_t 来优化扫描，扫描的时候要加锁
             HCB_bitmap_error_code_t bit_seg_set(uint64_t bit_idx,uint64_t bit_count,bool value);//优化的 set 函数，中间会解析，然后调用对应的 bits_set，bytes_set，u64s_set，并且会参数检查，加锁

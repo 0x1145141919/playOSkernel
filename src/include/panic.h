@@ -1,6 +1,6 @@
 #pragma once
-#include "pt_regs.h"
-#include "os_error_definitions.h"
+#include "abi/arch/x86-64/pt_regs.h"
+#include "abi/os_error_definitions.h"
 #include <cstdarg>
 enum kernel_state:uint8_t{
     ENTER=0,

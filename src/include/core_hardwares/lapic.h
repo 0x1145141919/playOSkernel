@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "Interrupt_system/fixed_interrupt_vectors.h"
 namespace LAPIC_PARAMS_ENUM{
     enum TIMER_MODE_T:uint8_t

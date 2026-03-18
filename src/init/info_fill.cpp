@@ -1,5 +1,5 @@
-#include "../init/include/initEntryPointDefinitions.h"
-#include "../init/include/kernel_mmu.h"
+#include "abi/boot.h"
+#include "../init/include/load_kernel.h"
 #include "../init/include/pages_alloc.h"
 #include "../init/include/util/textConsole.h"
 #include "../init/include/util/kout.h"
@@ -8,7 +8,7 @@
 #include "../init/include/init_linker_symbols.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "core_hardwares/primitive_gop.h"
-#include "init_to_kernel_info.h"
+#include "abi/boot.h"
 static const char* memory_type_to_string(PHY_MEM_TYPE type) {
     switch (type) {
         case EFI_RESERVED_MEMORY_TYPE: return "EFI_RESERVED_MEMORY_TYPE";
@@ -59,7 +59,6 @@ static const char* vm_id_to_string(uint32_t vm_id) {
         case VM_ID_FIRST_HEAP_BITMAP: return "VM_ID_FIRST_HEAP_BITMAP";
         case VM_ID_FIRST_HEAP: return "VM_ID_FIRST_HEAP";
         case VM_ID_LOGBUFFER: return "VM_ID_LOGBUFFER";
-        case VM_ID_FIRST_BCB_BITMAP: return "VM_ID_FIRST_BCB_BITMAP";
         case VM_ID_KSYMBOLS: return "VM_ID_KSYMBOLS";
         case VM_ID_UP_KSPACE_PDPT: return "VM_ID_UP_KSPACE_PDPT";
         case VM_ID_GRAPHIC_BUFFER: return "VM_ID_GRAPHIC_BUFFER";
@@ -69,38 +68,38 @@ static const char* vm_id_to_string(uint32_t vm_id) {
 
 static void print_init_to_kernel_info(const init_to_kernel_info* info)
 {
-    kio::bsp_kout << kio::kendl;
-    kio::bsp_kout << "========================================" << kio::kendl;
-    kio::bsp_kout << "[INFO] init_to_kernel_info Details:" << kio::kendl;
-    kio::bsp_kout << "========================================" << kio::kendl;
-    kio::bsp_kout<<kio::HEX_shift << "  magic: 0x" << info->magic << kio::kendl;
-    kio::bsp_kout<<kio::DEC_shift << "  self_pages_count: " << info->self_pages_count << " pages (0x" << (info->self_pages_count * 4096) << " bytes)" << kio::kendl;
-    kio::bsp_kout<<kio::HEX_shift << "  gST_ptr: 0x" << reinterpret_cast<uint64_t>(info->gST_ptr) << kio::kendl;
-    kio::bsp_kout << "  ksymbols_file_size: " << info->ksymbols_file_size << " bytes (0x" << info->ksymbols_file_size << ")" << kio::kendl;
-    kio::bsp_kout<<kio::HEX_shift  << "  kmmu_root_table: 0x" << info->kmmu_root_table << kio::kendl;
-    kio::bsp_kout << "  kmmu_interval:" << kio::kendl;
-    kio::bsp_kout<<kio::HEX_shift  << "    start: 0x" << info->kmmu_interval.start << kio::kendl;
-    kio::bsp_kout<<kio::HEX_shift  << "    size: 0x" << info->kmmu_interval.size << " bytes" << kio::kendl;
-    kio::bsp_kout << "    type: " << static_cast<uint32_t>(info->kmmu_interval.type) << kio::kendl;
-    kio::bsp_kout<<kio::DEC_shift << "  phymem_segment_count: " << info->phymem_segment_count << kio::kendl;
-    kio::bsp_kout<<kio::DEC_shift << "  loaded_VM_interval_count: " << info->loaded_VM_interval_count << kio::kendl;
-    kio::bsp_kout<<kio::DEC_shift << "  pass_through_device_info_count: " << info->pass_through_device_info_count << kio::kendl;
+    bsp_kout<< kendl;
+    bsp_kout<< "========================================" << kendl;
+    bsp_kout<< "[INFO] init_to_kernel_info Details:" << kendl;
+    bsp_kout<< "========================================" << kendl;
+    bsp_kout<<HEX << "  magic: 0x" << info->magic << kendl;
+    bsp_kout<<DEC << "  self_pages_count: " << info->self_pages_count << " pages (0x" << (info->self_pages_count * 4096) << " bytes)" << kendl;
+    bsp_kout<<HEX << "  gST_ptr: 0x" << reinterpret_cast<uint64_t>(info->gST_ptr) << kendl;
+    bsp_kout<< "  ksymbols_file_size: " << info->ksymbols_file_size << " bytes (0x" << info->ksymbols_file_size << ")" << kendl;
+    bsp_kout<<HEX  << "  kmmu_root_table: 0x" << info->kmmu_root_table << kendl;
+    bsp_kout<< "  kmmu_interval:" << kendl;
+    bsp_kout<<HEX  << "    start: 0x" << info->kmmu_interval.start << kendl;
+    bsp_kout<<HEX  << "    size: 0x" << info->kmmu_interval.size << " bytes" << kendl;
+    bsp_kout<< "    type: " << static_cast<uint32_t>(info->kmmu_interval.type) << kendl;
+    bsp_kout<<DEC << "  phymem_segment_count: " << info->phymem_segment_count << kendl;
+    bsp_kout<<DEC << "  loaded_VM_interval_count: " << info->loaded_VM_interval_count << kendl;
+    bsp_kout<<DEC << "  pass_through_device_info_count: " << info->pass_through_device_info_count << kendl;
 
-    kio::bsp_kout << kio::kendl;
-    kio::bsp_kout << "--- Memory Map (" << info->phymem_segment_count << " entries) ---" << kio::kendl;
+    bsp_kout<< kendl;
+    bsp_kout<< "--- Memory Map (" << info->phymem_segment_count << " entries) ---" << kendl;
     for(uint64_t i = 0; i < info->phymem_segment_count; i++){
-        kio::bsp_kout<<kio::HEX_shift << "  [" << i << "] start: 0x" << info->memory_map[i].start 
-                     <<kio::DEC_shift  << ", size: 0x" << info->memory_map[i].size 
-                      << ", type: " << memory_type_to_string(info->memory_map[i].type) << kio::kendl;
+        bsp_kout<<HEX << "  [" << i << "] start: 0x" << info->memory_map[i].start 
+                     <<DEC  << ", size:" << info->memory_map[i].size 
+                      << ", type: " << memory_type_to_string(info->memory_map[i].type) << kendl;
     }
 
-    kio::bsp_kout << kio::kendl;
-    kio::bsp_kout << "--- Loaded VM Intervals (" << info->loaded_VM_interval_count << " entries) ---" << kio::kendl;
+    bsp_kout<< kendl;
+    bsp_kout<< "--- Loaded VM Intervals (" << info->loaded_VM_interval_count << " entries) ---" << kendl;
     for(uint64_t i = 0; i < info->loaded_VM_interval_count; i++){
-        kio::bsp_kout <<kio::HEX_shift<< "  [" << i << "] pbase: 0x" << info->loaded_VM_intervals[i].pbase 
+        bsp_kout<<HEX<< "  [" << i << "] pbase: 0x" << info->loaded_VM_intervals[i].pbase 
                       << ", vbase: 0x" << info->loaded_VM_intervals[i].vbase 
                       << ", size: 0x" << info->loaded_VM_intervals[i].size 
-                      << kio::DEC_shift <<" PAGES_COUNT: "<< info->loaded_VM_intervals[i].size/0x1000
+                      << DEC <<" PAGES_COUNT: "<< info->loaded_VM_intervals[i].size/0x1000
                       << ", VM_id: " << vm_id_to_string(info->loaded_VM_intervals[i].VM_interval_specifyid)
                       << ", access: kernel=" << static_cast<uint32_t>(info->loaded_VM_intervals[i].access.is_kernel)
                       << ", wr=" << static_cast<uint32_t>(info->loaded_VM_intervals[i].access.is_writeable)
@@ -108,29 +107,29 @@ static void print_init_to_kernel_info(const init_to_kernel_info* info)
                       << ", exec=" << static_cast<uint32_t>(info->loaded_VM_intervals[i].access.is_executable)
                       << ", glob=" << static_cast<uint32_t>(info->loaded_VM_intervals[i].access.is_global)
                       << ", cache=" << cache_strategy_to_string(info->loaded_VM_intervals[i].access.cache_strategy)
-                      << kio::kendl;
+                      << kendl;
     }
 
-    kio::bsp_kout << kio::kendl;
-    kio::bsp_kout << "--- Pass-through Devices (" << info->pass_through_device_info_count << " entries) ---" << kio::kendl;
+    bsp_kout<< kendl;
+    bsp_kout<< "--- Pass-through Devices (" << info->pass_through_device_info_count << " entries) ---" << kendl;
     for(uint64_t i = 0; i < info->pass_through_device_info_count; i++){
-        kio::bsp_kout << "  [" << i << "] device_info: 0x" << info->pass_through_devices[i].device_info 
-                      << ", specify_data: 0x" << reinterpret_cast<uint64_t>(info->pass_through_devices[i].specify_data) << kio::kendl;
+        bsp_kout<< "  [" << i << "] device_info: 0x" << info->pass_through_devices[i].device_info 
+                      << ", specify_data: 0x" << reinterpret_cast<uint64_t>(info->pass_through_devices[i].specify_data) << kendl;
         if(info->pass_through_devices[i].device_info == PASS_THROUGH_DEVICE_GRAPHICS_INFO && 
            info->pass_through_devices[i].specify_data != nullptr){
             GlobalBasicGraphicInfoType* gfx = reinterpret_cast<GlobalBasicGraphicInfoType*>(info->pass_through_devices[i].specify_data);
-            kio::bsp_kout.shift_dec();
-            kio::bsp_kout << "      -> Graphics Info:" << kio::kendl;
-            kio::bsp_kout <<kio::HEX_shift<< "         FrameBufferBase: 0x" << (void*)gfx->FrameBufferBase << kio::kendl;
-            kio::bsp_kout <<kio::DEC_shift<< "         FrameBufferSize: 0x" << gfx->FrameBufferSize << " bytes" << kio::kendl;
-            kio::bsp_kout << "         Resolution: " << gfx->horizentalResolution << "x" << gfx->verticalResolution << kio::kendl;
-            kio::bsp_kout << "         PixelsPerScanLine: " << gfx->PixelsPerScanLine << kio::kendl;
-            kio::bsp_kout << "         PixelFormat: " << static_cast<uint32_t>(gfx->pixelFormat) << kio::kendl;
+            bsp_kout.shift_dec();
+            bsp_kout<< "      -> Graphics Info:" << kendl;
+            bsp_kout<<HEX<< "         FrameBufferBase: 0x" << (void*)gfx->FrameBufferBase << kendl;
+            bsp_kout<<DEC<< "         FrameBufferSize: 0x" << gfx->FrameBufferSize << " bytes" << kendl;
+            bsp_kout<< "         Resolution: " << gfx->horizentalResolution << "x" << gfx->verticalResolution << kendl;
+            bsp_kout<< "         PixelsPerScanLine: " << gfx->PixelsPerScanLine << kendl;
+            bsp_kout<< "         PixelFormat: " << static_cast<uint32_t>(gfx->pixelFormat) << kendl;
         }
     }
 
-    kio::bsp_kout << "========================================" << kio::kendl;
-    kio::bsp_kout << kio::kendl;
+    bsp_kout<< "========================================" << kendl;
+    bsp_kout<< kendl;
 }
 
 init_to_kernel_info* build_init_to_kernel_info(
@@ -161,11 +160,11 @@ init_to_kernel_info* build_init_to_kernel_info(
     uint64_t total_required_bytes = info_aligned_size + total_additional_size;
     uint64_t allocated_bytes = 4096 * default_info_alloc_pages_count;
     if(total_required_bytes > allocated_bytes){
-        kio::bsp_kout << "[ERROR] init_to_kernel_info allocation overflow: required 0x";
-        kio::bsp_kout << total_required_bytes;
-        kio::bsp_kout << " bytes, but only allocated 0x";
-        kio::bsp_kout << allocated_bytes;
-        kio::bsp_kout << " bytes (" << default_info_alloc_pages_count << " pages)" << kio::kendl;
+        bsp_kout<< "[ERROR] init_to_kernel_info allocation overflow: required 0x";
+        bsp_kout<< total_required_bytes;
+        bsp_kout<< " bytes, but only allocated 0x";
+        bsp_kout<< allocated_bytes;
+        bsp_kout<< " bytes (" << default_info_alloc_pages_count << " pages)" << kendl;
         return nullptr;
     }
 
@@ -200,11 +199,11 @@ init_to_kernel_info* build_init_to_kernel_info(
         uint64_t specify_data_offset = pass_through_devices_size;
         uint64_t total_used_after_info = info_aligned_size + memory_map_size + loaded_VM_intervals_size + specify_data_offset + total_specify_data_size;
         if(total_used_after_info > allocated_bytes){
-            kio::bsp_kout << "[ERROR] pass_through_devices specify_data overflow: required 0x";
-            kio::bsp_kout << total_used_after_info;
-            kio::bsp_kout << " bytes, but only allocated 0x";
-            kio::bsp_kout << allocated_bytes;
-            kio::bsp_kout << " bytes" << kio::kendl;
+            bsp_kout<< "[ERROR] pass_through_devices specify_data overflow: required 0x";
+            bsp_kout<< total_used_after_info;
+            bsp_kout<< " bytes, but only allocated 0x";
+            bsp_kout<< allocated_bytes;
+            bsp_kout<< " bytes" << kendl;
             return nullptr;
         }
 

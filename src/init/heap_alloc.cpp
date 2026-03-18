@@ -127,6 +127,166 @@ INIT_HCB::HCB_bitmap::~HCB_bitmap()
 {
     
 }
+int INIT_HCB::HCB_bitmap::continual_avaliable_bits_search(uint64_t bit_count, uint64_t &result_base_idx)
+{
+    if (bit_count == 0) {
+        return OS_SUCCESS;
+    }
+    uint64_t bit_scanner_end = bitmap_size_in_64bit_units << 6;
+    uint64_t seg_base_bit_idx = 0;
+    bool seg_value = bit_get(0);
+    uint64_t seg_length = 1;
+
+    while (seg_base_bit_idx + seg_length < bit_scanner_end) {
+        uint64_t current_bit_idx = seg_base_bit_idx + seg_length;
+
+        if ((current_bit_idx & 0x3F) == 0) {
+            uint64_t* to_scan_u64 = reinterpret_cast<uint64_t*>(
+                byte_bitmap_base + (current_bit_idx >> 3));
+
+            if (seg_value) {
+                if (*to_scan_u64 == U64_FULL_UNIT) {
+                    seg_length += 64;
+                    continue;
+                }
+            } else {
+                if (*to_scan_u64 == 0x00) {
+                    seg_length += 64;
+                    if (seg_length >= bit_count) {
+                        result_base_idx = seg_base_bit_idx;
+                        return OS_SUCCESS;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        bool new_bit_value = bit_get(current_bit_idx);
+
+        if (seg_value == new_bit_value) {
+            seg_length++;
+            if (!seg_value && seg_length >= bit_count) {
+                result_base_idx = seg_base_bit_idx;
+                return OS_SUCCESS;
+            }
+        } else {
+            if (!seg_value && seg_length >= bit_count) {
+                result_base_idx = seg_base_bit_idx;
+                return OS_SUCCESS;
+            }
+            seg_base_bit_idx = current_bit_idx;
+            seg_value = new_bit_value;
+            seg_length = 1;
+        }
+    }
+
+    if (!seg_value && seg_length >= bit_count) {
+        result_base_idx = seg_base_bit_idx;
+        return OS_SUCCESS;
+    }
+
+    return OS_NOT_EXIST;
+}
+
+int INIT_HCB::HCB_bitmap::continual_avaliable_bytes_search(uint64_t byte_count, uint64_t &result_base_idx)
+{
+    if (byte_count == 0) {
+        return OS_SUCCESS;
+    }
+    const uint64_t total_bytes = bitmap_size_in_64bit_units * 8;
+    uint64_t seg_base_byte_idx = 0;
+    bool seg_value = !!byte_bitmap_base[0];
+    uint64_t seg_length = 1;
+
+    while (seg_base_byte_idx + seg_length < total_bytes) {
+        uint64_t current_byte_idx = seg_base_byte_idx + seg_length;
+
+        if ((current_byte_idx & 0x7) == 0) {
+            uint64_t* to_scan_u64 = reinterpret_cast<uint64_t*>(
+                byte_bitmap_base + current_byte_idx);
+
+            if (seg_value) {
+                if (*to_scan_u64 == U64_FULL_UNIT) {
+                    seg_length += 8;
+                    continue;
+                }
+            } else {
+                if (*to_scan_u64 == 0x00ULL) {
+                    seg_length += 8;
+                    if (seg_length >= byte_count) {
+                        result_base_idx = seg_base_byte_idx;
+                        return OS_SUCCESS;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        bool new_value = !!byte_bitmap_base[current_byte_idx];
+
+        if (seg_value == new_value) {
+            seg_length++;
+            if (!seg_value && seg_length >= byte_count) {
+                result_base_idx = seg_base_byte_idx;
+                return OS_SUCCESS;
+            }
+        } else {
+            if (!seg_value && seg_length >= byte_count) {
+                result_base_idx = seg_base_byte_idx;
+                return OS_SUCCESS;
+            }
+            seg_base_byte_idx = current_byte_idx;
+            seg_value = new_value;
+            seg_length = 1;
+        }
+    }
+
+    if (!seg_value && seg_length >= byte_count) {
+        result_base_idx = seg_base_byte_idx;
+        return OS_SUCCESS;
+    }
+
+    return OS_NOT_EXIST;
+}
+
+int INIT_HCB::HCB_bitmap::continual_avaliable_u64s_search(uint64_t u64_count, uint64_t &result_base_idx)
+{
+    if (u64_count == 0) {
+        return OS_SUCCESS;
+    }
+    const uint64_t total_u64s = bitmap_size_in_64bit_units;
+    uint64_t seg_base_u64_idx = 0;
+    bool seg_value = !!bitmap[0];
+    uint64_t seg_length = 1;
+
+    while (seg_base_u64_idx + seg_length < total_u64s) {
+        uint64_t current_u64_idx = seg_base_u64_idx + seg_length;
+        bool new_value = !!bitmap[current_u64_idx];
+
+        if (seg_value == new_value) {
+            seg_length++;
+            if (!seg_value && seg_length >= u64_count) {
+                result_base_idx = seg_base_u64_idx;
+                return OS_SUCCESS;
+            }
+        } else {
+            if (!seg_value && seg_length >= u64_count) {
+                result_base_idx = seg_base_u64_idx;
+                return OS_SUCCESS;
+            }
+            seg_base_u64_idx = current_u64_idx;
+            seg_value = new_value;
+            seg_length = 1;
+        }
+    }
+
+    if (!seg_value && seg_length >= u64_count) {
+        result_base_idx = seg_base_u64_idx;
+        return OS_SUCCESS;
+    }
+
+    return OS_NOT_EXIST;
+}
 INIT_HCB::HCB_bitmap_error_code_t
  INIT_HCB::HCB_bitmap::
 continual_avaliable_u64s_search_higher_alignment(

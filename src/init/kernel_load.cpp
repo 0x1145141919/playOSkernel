@@ -1,10 +1,10 @@
-#include "../init/include/initEntryPointDefinitions.h"
+#include "abi/boot.h"
 #include "../init/include/heap_alloc.h"
-#include "../init/include/kernel_mmu.h"
+#include "../init/include/load_kernel.h"
 #include "../init/include/pages_alloc.h"
 #include "../init/include/util/kout.h"
 #include "../init/include/panic.h"
-#include "init_to_kernel_info.h"
+#include "memory/page_struct.h"
 #include <elf.h>
 
 
@@ -96,9 +96,9 @@ constexpr uint64_t VM_INTERVAL_ALLOC_FACTOR = 3;  // 每段预留 3 个槽位
  */
 int kernel_load(load_kernel_info_pack&pak){
     // 参数校验
-    kio::bsp_kout.shift_hex();
+    bsp_kout.shift_hex();
     if (!pak.kmmu || !pak.kernel_file_entry.raw_data) {
-        kio::bsp_kout << "[ERROR] kernel_load: invalid parameters" << kio::kendl;
+        bsp_kout<< "[ERROR] kernel_load: invalid parameters" << kendl;
         return -1;
     }
     
@@ -113,13 +113,13 @@ int kernel_load(load_kernel_info_pack&pak){
         ehdr->e_ident[EI_MAG1] != ELFMAG1 || 
         ehdr->e_ident[EI_MAG2] != ELFMAG2 || 
         ehdr->e_ident[EI_MAG3] != ELFMAG3) {
-        kio::bsp_kout << "[ERROR] Invalid ELF magic number" << kio::kendl;
+        bsp_kout<< "[ERROR] Invalid ELF magic number" << kendl;
         return -2;
     }
     
-    kio::bsp_kout << "[INFO] ELF file detected:" << kio::kendl;
-    kio::bsp_kout << "  - Program headers: " << static_cast<uint32_t>(ehdr->e_phnum) << kio::kendl;
-    kio::bsp_kout << "  - Entry point: 0x" << reinterpret_cast<void*>(ehdr->e_entry) << kio::kendl;
+    bsp_kout<< "[INFO] ELF file detected:" << kendl;
+    bsp_kout<< "  - Program headers: " << static_cast<uint32_t>(ehdr->e_phnum) << kendl;
+    bsp_kout<< "  - Entry point: 0x" << reinterpret_cast<void*>(ehdr->e_entry) << kendl;
     
     
     // 计算 program header 表起始位置
@@ -135,19 +135,19 @@ int kernel_load(load_kernel_info_pack&pak){
     }
     
     if (load_segment_count == 0) {
-        kio::bsp_kout << "[ERROR] No PT_LOAD segments found" << kio::kendl;
+        bsp_kout<< "[ERROR] No PT_LOAD segments found" << kendl;
         return -4;
     }
     
-    kio::bsp_kout << "[INFO] Found " << load_segment_count << " PT_LOAD segments" << kio::kendl;
+    bsp_kout<< "[INFO] Found " << load_segment_count << " PT_LOAD segments" << kendl;
     
     // 在堆上分配 VM_entries 数组
     // 考虑内核的其他映射需求，按段数乘以系数分配槽位
     uint64_t vm_entries_capacity = load_segment_count * VM_INTERVAL_ALLOC_FACTOR;
     pak.VM_entries = new loaded_VM_interval[vm_entries_capacity];
     if (!pak.VM_entries) {
-        kio::bsp_kout << "[ERROR] Failed to allocate VM_entries array (capacity: " 
-                      << vm_entries_capacity << ")" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to allocate VM_entries array (capacity: " 
+                      << vm_entries_capacity << ")" << kendl;
         return -3;
     }
     
@@ -199,12 +199,12 @@ int kernel_load(load_kernel_info_pack&pak){
             // 调用 basic_allocator 分配符合对齐要求的物理地址
             phyaddr_t alloc_pa = basic_allocator::pages_alloc(seg_size, align_log2);
            if (alloc_pa == ~0ull) {
-               kio::bsp_kout << "[WARN] Failed to allocate random PA for segment " 
-                              << pak.VM_entry_count << ", using default" << kio::kendl;
+               bsp_kout<< "[WARN] Failed to allocate random PA for segment " 
+                              << pak.VM_entry_count << ", using default" << kendl;
             } else {
                 seg_start = alloc_pa;
-               kio::bsp_kout << "[INFO] Allocated random PA: 0x" << seg_start 
-                              << " (align: " << static_cast<uint32_t>(align_log2) << ")" << kio::kendl;
+               bsp_kout<< "[INFO] Allocated random PA: 0x" << seg_start 
+                              << " (align: " << static_cast<uint32_t>(align_log2) << ")" << kendl;
                 
                 // 标记该区域为已分配
                 mem_interval pa_interval{seg_start, seg_size};
@@ -220,14 +220,14 @@ int kernel_load(load_kernel_info_pack&pak){
         // 计算文件内容的源地址
         uint8_t* file_content = elf_base + phdr->p_offset;
         
-        kio::bsp_kout << "[INFO] Loading segment " << pak.VM_entry_count << ":" << kio::kendl;
-        kio::bsp_kout << "  - Physical addr: 0x" << seg_start << kio::kendl;
-        kio::bsp_kout << "  - Virtual addr: 0x" << phdr->p_vaddr << kio::kendl;
-        kio::bsp_kout << "  - File size: 0x" << phdr->p_filesz << kio::kendl;
-        kio::bsp_kout << "  - Memory size: 0x" << seg_size << kio::kendl;
-        kio::bsp_kout << "  - Flags: " << (param.r ? "R" : "-") 
+        bsp_kout<< "[INFO] Loading segment " << pak.VM_entry_count << ":" << kendl;
+        bsp_kout<< "  - Physical addr: 0x" << seg_start << kendl;
+        bsp_kout<< "  - Virtual addr: 0x" << phdr->p_vaddr << kendl;
+        bsp_kout<< "  - File size: 0x" << phdr->p_filesz << kendl;
+        bsp_kout<< "  - Memory size: 0x" << seg_size << kendl;
+        bsp_kout<< "  - Flags: " << (param.r ? "R" : "-") 
                       << (param.w ? "W" : "-") 
-                      << (param.x ? "X" : "-") << kio::kendl;
+                      << (param.x ? "X" : "-") << kendl;
         
         // 创建 VM interval
       loaded_VM_interval& vm_interval = pak.VM_entries[pak.VM_entry_count];
@@ -243,10 +243,10 @@ int kernel_load(load_kernel_info_pack&pak){
         vm_interval.access.is_writeable = param.w;
         vm_interval.access.is_readable = param.r;
         vm_interval.access.is_executable = param.x;
-        vm_interval.access.is_global = 0;
+        vm_interval.access.is_global = seg_vaddr>=0xFFFF800000000000;
         vm_interval.access.cache_strategy = cache_strategy_t::WB;  // 内核代码/数据使用 WB 策略
         
-        kio::bsp_kout << "  - VM_interval_specifyid: " << vm_interval.VM_interval_specifyid << kio::kendl;
+        bsp_kout<< "  - VM_interval_specifyid: " << vm_interval.VM_interval_specifyid << kendl;
         
         // 将文件内容复制到目标物理地址（假设恒等映射环境）
        if (phdr->p_filesz > 0) {
@@ -262,9 +262,9 @@ int kernel_load(load_kernel_info_pack&pak){
            uint8_t* zero_start = reinterpret_cast<uint8_t*>(seg_start + phdr->p_filesz);
            uint64_t zero_size = seg_size - phdr->p_filesz;
             
-           kio::bsp_kout << "[INFO] Clearing segment tail: 0x" << zero_size 
+           bsp_kout<< "[INFO] Clearing segment tail: 0x" << zero_size 
                           << " bytes (p_memsz: 0x" << seg_size 
-                          << ", p_filesz: 0x" << phdr->p_filesz << ")" << kio::kendl;
+                          << ", p_filesz: 0x" << phdr->p_filesz << ")" << kendl;
             
             // 使用 ksetmem_8 接口清零
             ksetmem_8(zero_start, 0, zero_size);
@@ -272,7 +272,7 @@ int kernel_load(load_kernel_info_pack&pak){
         int result=pak.kmmu->map(vinterval{vm_interval.pbase,vm_interval.vbase,align_up(vm_interval.size,4096)},vm_interval.access);
         // 递增计数器
         if(result!=OS_SUCCESS){
-            kio::bsp_kout << "kernel_load: map failed" << kio::kendl;
+            bsp_kout<< "kernel_load: map failed" << kendl;
             asm volatile ("hlt");
         }
         pak.VM_entry_count++;
@@ -280,13 +280,13 @@ int kernel_load(load_kernel_info_pack&pak){
     auto anonymous_mem_map=[&](uint64_t size,uint8_t align_log2,uint32_t assigned_id)->int{
         // 参数校验
         if (size == 0 || align_log2 < 12) {
-            kio::bsp_kout << "[ERROR] anonymous_mem_map: invalid parameters" << kio::kendl;
+            bsp_kout<< "[ERROR] anonymous_mem_map: invalid parameters" << kendl;
             return -1;
         }
         
         // 检查是否有足够的槽位
         if (pak.VM_entry_count >= vm_entries_capacity) {
-            kio::bsp_kout << "[ERROR] anonymous_mem_map: no available VM_entries slots" << kio::kendl;
+            bsp_kout<< "[ERROR] anonymous_mem_map: no available VM_entries slots" << kendl;
             return -2;
         }
         
@@ -296,30 +296,30 @@ int kernel_load(load_kernel_info_pack&pak){
         }
         
         // 1. 分配物理地址（使用 basic_allocator）
-        phyaddr_t alloc_pa = basic_allocator::pages_alloc(size, align_log2);
+        phyaddr_t alloc_pa = basic_allocator::pages_alloc(align_up(size,4096), align_log2);
         if (alloc_pa == ~0ull) {
-            kio::bsp_kout << "[ERROR] anonymous_mem_map: failed to allocate PA, size: 0x" 
-                          << size << kio::kendl;
+            bsp_kout<< "[ERROR] anonymous_mem_map: failed to allocate PA, size: 0x" 
+                          << size << kendl;
             return -3;
         }
         
         // 标记该区域为已分配
-        mem_interval pa_interval{alloc_pa, size};
+        mem_interval pa_interval{alloc_pa, align_up(size,4096)};
         int pa_set_result = basic_allocator::pages_set(pa_interval, PHY_MEM_TYPE::OS_ALLOCATABLE_MEMORY);
         if (pa_set_result != OS_SUCCESS) {
-            kio::bsp_kout << "[WARN] anonymous_mem_map: pages_set failed for PA, but continuing..." << kio::kendl;
+            bsp_kout<< "[WARN] anonymous_mem_map: pages_set failed for PA, but continuing..." << kendl;
         }
-        
+        ksetmem_8((void*)alloc_pa, 0, size);
         // 2. 分配虚拟地址（统一走 va_alloc 单调递减接口）
-        uint64_t alloc_va = va_alloc(size, align_log2);
+        uint64_t alloc_va = va_alloc(align_up(size,4096), align_log2);
         uint64_t alignment = 1ULL << align_log2;
         
-        kio::bsp_kout << "[INFO] Anonymous memory mapping:" << kio::kendl;
-        kio::bsp_kout << "  - Physical addr: 0x" << alloc_pa << kio::kendl;
-        kio::bsp_kout << "  - Virtual addr: 0x" << alloc_va << kio::kendl;
-        kio::bsp_kout << "  - Size: 0x" << size << kio::kendl;
-        kio::bsp_kout << "  - Align: " << static_cast<uint32_t>(align_log2) << " (0x" << alignment << ")" << kio::kendl;
-        kio::bsp_kout << "  - Assigned ID: " << assigned_id << kio::kendl;
+        bsp_kout<< "[INFO] Anonymous memory mapping:" << kendl;
+        bsp_kout<< "  - Physical addr: 0x" << alloc_pa << kendl;
+        bsp_kout<< "  - Virtual addr: 0x" << alloc_va << kendl;
+        bsp_kout<< "  - Size: 0x" << size << kendl;
+        bsp_kout<< "  - Align: " << static_cast<uint32_t>(align_log2) << " (0x" << alignment << ")" << kendl;
+        bsp_kout<< "  - Assigned ID: " << assigned_id << kendl;
         
         // 3. 创建 VM interval 并添加到数组
         loaded_VM_interval& vm_interval = pak.VM_entries[pak.VM_entry_count];
@@ -333,7 +333,7 @@ int kernel_load(load_kernel_info_pack&pak){
         vm_interval.access.is_writeable = 1;
         vm_interval.access.is_readable = 1;
         vm_interval.access.is_executable = 0;
-        vm_interval.access.is_global = 0;
+        vm_interval.access.is_global = 1;
         vm_interval.access.cache_strategy = cache_strategy_t::WB;
         
         // 4. 递增计数器
@@ -341,12 +341,12 @@ int kernel_load(load_kernel_info_pack&pak){
         int result=pak.kmmu->map(vinterval{vm_interval.pbase,vm_interval.vbase,vm_interval.size},vm_interval.access);
         // 递增计数器
         if(result!=OS_SUCCESS){
-            kio::bsp_kout << "kernel_load: map failed" << kio::kendl;
+            bsp_kout<< "kernel_load: map failed" << kendl;
             asm volatile ("hlt");
         }
         
-        kio::bsp_kout << "[INFO] Anonymous memory mapped successfully, total entries: " 
-                      << pak.VM_entry_count << "/" << vm_entries_capacity << kio::kendl;
+        bsp_kout<< "[INFO] Anonymous memory mapped successfully, total entries: " 
+                      << pak.VM_entry_count << "/" << vm_entries_capacity << kendl;
         
         return 0;
     };
@@ -354,7 +354,7 @@ int kernel_load(load_kernel_info_pack&pak){
     // ============================================
     // 加载匿名内存区域（按照 VM_ID 顺序调用）
     // ============================================
-    kio::bsp_kout << "[INFO] Loading anonymous memory regions..." << kio::kendl;
+    bsp_kout<< "[INFO] Loading anonymous memory regions..." << kendl;
     // 1. BSP 初始栈 (VM_ID_BSP_INIT_STACK = 0x1001)
     int stack_result = anonymous_mem_map(
         BSP_INIT_STACK_SIZE, 
@@ -362,7 +362,7 @@ int kernel_load(load_kernel_info_pack&pak){
         VM_ID_BSP_INIT_STACK
     );
     if (stack_result != 0) {
-        kio::bsp_kout << "[ERROR] Failed to load BSP init stack" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to load BSP init stack" << kendl;
     }
     
     // 2. 第一堆位图 (VM_ID_FIRST_HEAP_BITMAP = 0x1002)
@@ -372,17 +372,7 @@ int kernel_load(load_kernel_info_pack&pak){
         VM_ID_FIRST_HEAP_BITMAP
     );
     if (heap_bitmap_result != 0) {
-        kio::bsp_kout << "[ERROR] Failed to load first heap bitmap" << kio::kendl;
-    }
-    
-    // 3. BCB 位图 (VM_ID_FIRST_BCB_BITMAP = 0x1005)
-    int bcb_bitmap_result = anonymous_mem_map(
-        FIRST_BCB_BITMAP_SIZE, 
-        FIRST_BCB_BITMAP_ALIGN_LOG2, 
-        VM_ID_FIRST_BCB_BITMAP
-    );
-    if (bcb_bitmap_result != 0) {
-        kio::bsp_kout << "[ERROR] Failed to load BCB bitmap" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to load first heap bitmap" << kendl;
     }
     
     // 4. 上层内核空间页目录指针表 (VM_ID_UP_KSPACE_PDPT = 0x2001)
@@ -392,7 +382,7 @@ int kernel_load(load_kernel_info_pack&pak){
         VM_ID_UP_KSPACE_PDPT
     );
     if (pdpt_result != 0) {
-        kio::bsp_kout << "[ERROR] Failed to load upper kernel space PDPT" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to load upper kernel space PDPT" << kendl;
     }
     
     // 5. 第一堆 (VM_ID_FIRST_HEAP = 0x1003)
@@ -402,7 +392,7 @@ int kernel_load(load_kernel_info_pack&pak){
         VM_ID_FIRST_HEAP
     );
     if (heap_result != 0) {
-        kio::bsp_kout << "[ERROR] Failed to load first heap" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to load first heap" << kendl;
     }
     
     // 6. 日志缓冲区 (VM_ID_LOGBUFFER = 0x1004)
@@ -412,19 +402,28 @@ int kernel_load(load_kernel_info_pack&pak){
         VM_ID_LOGBUFFER
     );
     if (logbuffer_result != 0) {
-        kio::bsp_kout << "[ERROR] Failed to load log buffer" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to load log buffer" << kendl;
     }
-    
-    
-    
-    kio::bsp_kout << "[INFO] All anonymous memory regions loaded successfully." << kio::kendl;
+    uint64_t entry_count=0;
+    phymem_segment*base=basic_allocator::get_pure_memory_view(&entry_count);
+    uint64_t max_memory=base[entry_count-1].start+base[entry_count-1].size;
+    uint64_t pages_count=max_memory>>12;
+    int mem_map_result = anonymous_mem_map(
+        pages_count*sizeof(page), 
+        21, 
+        VM_ID_MEM_MAP
+    );
+    if(mem_map_result!=0){
+        bsp_kout<< "[ERROR] Failed to load main frame array" << kendl;
+    }
+    bsp_kout<< "[INFO] All anonymous memory regions loaded successfully." << kendl;
     
     // ============================================
     // 设置内核入口点和栈底地址
     // ============================================
     // 内核入口虚拟地址（从 ELF header 获取）
     pak.entry_vaddr = reinterpret_cast<vaddr_t>(ehdr->e_entry);
-    kio::bsp_kout << "[INFO] Kernel entry vaddr: 0x" << pak.entry_vaddr << kio::kendl;
+    bsp_kout<< "[INFO] Kernel entry vaddr: 0x" << pak.entry_vaddr << kendl;
     
     // 查找 BSP 初始栈的 VM_interval 以计算栈底地址
     vaddr_t bsp_stack_vbase = 0;
@@ -438,16 +437,16 @@ int kernel_load(load_kernel_info_pack&pak){
     if(bsp_stack_vbase != 0){
         // 栈底地址 = 栈基址 + 栈大小（栈向下生长，栈底在高地址）
         pak.stack_bottom = bsp_stack_vbase + BSP_INIT_STACK_SIZE;
-        kio::bsp_kout << "[INFO] BSP stack bottom: 0x" << pak.stack_bottom 
+        bsp_kout<< "[INFO] BSP stack bottom: 0x" << pak.stack_bottom 
                       << " (base: 0x" << bsp_stack_vbase 
-                      << ", size: " << BSP_INIT_STACK_SIZE << ")" << kio::kendl;
+                      << ", size: " << BSP_INIT_STACK_SIZE << ")" << kendl;
     } else {
-        kio::bsp_kout << "[ERROR] Failed to find BSP init stack VM interval" << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to find BSP init stack VM interval" << kendl;
         pak.stack_bottom = 0;
     }
     
-    kio::bsp_kout << "[INFO] Kernel loaded successfully, " 
-                  << pak.VM_entry_count << " segments" << kio::kendl;
+    bsp_kout<< "[INFO] Kernel loaded successfully, " 
+                  << pak.VM_entry_count << " segments" << kendl;
     
     return 0;
 }

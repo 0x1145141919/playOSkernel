@@ -186,12 +186,7 @@ void atomic_write16_rdbk(volatile void *addr, uint16_t val);
 void atomic_write32_rdbk(volatile void *addr, uint32_t val);
 void atomic_write64_rdbk(volatile void *addr, uint64_t val);
 uint64_t align_down(uint64_t value, uint64_t alignment);
-uint64_t rdmsr(uint32_t offset);
-void wrmsr(uint32_t offset,uint64_t value);
-uint64_t rdtsc();
-uint64_t read_gs_u64(size_t index);
-void gs_u64_write(uint32_t index, uint64_t value);
-uint32_t fast_get_processor_id();
+
 uint64_t format_num_to_buffer(char* out, uint64_t raw, num_format_t format, numer_system_select radix);
 #ifdef USER_MODE
 // 将内存描述符表从文本格式转换为gBaseMemMgr.Init函数所需的格式

@@ -1,5 +1,5 @@
-#include "../init/include/initEntryPointDefinitions.h"
-#include "../init/include/kernel_mmu.h"
+#include "abi/boot.h"
+#include "../init/include/load_kernel.h"
 #include "../init/include/pages_alloc.h"
 #include "../init/include/util/textConsole.h"
 #include "../init/include/util/kout.h"
@@ -8,8 +8,7 @@
 #include "../init/include/init_linker_symbols.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "core_hardwares/primitive_gop.h"
-#include "init_to_kernel_info.h"
-extern  int kernel_load(load_kernel_info_pack&pak);
+#include "abi/boot.h"
 extern init_to_kernel_info* build_init_to_kernel_info(
     kernel_mmu* kmmu,
     BootInfoHeader* header,
@@ -26,7 +25,7 @@ extern "C" void init(BootInfoHeader* header)
 {
     GlobalStatus = kernel_state::EARLY_BOOT;
     // 5. 初始化 kout 输出系统 (自动注册 UART 后端)
-    kio::bsp_kout.Init();
+    bsp_kout.Init();
     // 1. 初始化堆分配器
     heap.first_linekd_heap_Init();
     pass_through_device_info* pass_through_devices = header->pass_through_devices;
@@ -53,24 +52,24 @@ extern "C" void init(BootInfoHeader* header)
         .is_masked=0,
         .write = &init_textconsole::PutString
     };
-    kio::bsp_kout.register_backend(screen_backend);
+    //bsp_kout.register_backend(screen_backend);
     
     // 6. 测试输出
-    kio::bsp_kout << "[INIT] System initialization started" << kio::kendl;
+    bsp_kout<< "[INIT] System initialization started" << kendl;
     int result= basic_allocator::Init(header->memory_map_ptr, header->memory_map_entry_count);
     if(result!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] basic_allocator::Init failed with error code: " << result << kio::kendl;
+        bsp_kout<< "[ERROR] basic_allocator::Init failed with error code: " << result << kendl;
         asm volatile("hlt");
     }
     uint64_t init_image_size=(uint64_t)&__init_heap_end-(uint64_t)&__init_text_start;
     result=basic_allocator::pages_set(mem_interval{(uint64_t)&__init_text_start,align_up(init_image_size,4096)},PHY_MEM_TYPE::OS_KERNEL_DATA);
     if(result!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] basic_allocator::pages_set failed for init image, error code: " << result << kio::kendl;
+        bsp_kout<< "[ERROR] basic_allocator::pages_set failed for init image, error code: " << result << kendl;
         asm volatile("hlt");
     }
     result=basic_allocator::pages_set(mem_interval{(uint64_t)header,header->total_pages_count*4096},PHY_MEM_TYPE::OS_KERNEL_DATA);
     if(result!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] basic_allocator::pages_set failed for boot info header, error code: " << result << kio::kendl;
+        bsp_kout<< "[ERROR] basic_allocator::pages_set failed for boot info header, error code: " << result << kendl;
         asm volatile("hlt");
     }
     uint64_t file_count=header->loaded_file_count;
@@ -80,15 +79,15 @@ extern "C" void init(BootInfoHeader* header)
         if(file_entry[i].file_type==LOADED_FILE_ENTRY_TYPE_ELF_REAL_LOAD)continue;
         result=basic_allocator::pages_set(mem_interval{(uint64_t)file_entry[i].raw_data,align_up(file_entry[i].file_size,4096)},PHY_MEM_TYPE::OS_KERNEL_DATA);
         if(result!=OS_SUCCESS){
-            kio::bsp_kout << "[ERROR] basic_allocator::pages_set failed for loaded file: " << file_entry[i].file_name;
-            kio::bsp_kout << ", error code: " << result << kio::kendl;
+            bsp_kout<< "[ERROR] basic_allocator::pages_set failed for loaded file: " << file_entry[i].file_name;
+            bsp_kout<< ", error code: " << result << kendl;
             asm volatile("hlt");
         }
     }
     kernel_mmu*kmmu=new kernel_mmu(arch_enums::x86_64_PGLV4);
     int low_identity_maps = setup_low_identity_maps(kmmu, header);
     if(low_identity_maps!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] Identity mapping failed during initialization" << kio::kendl;
+        bsp_kout<< "[ERROR] Identity mapping failed during initialization" << kendl;
         asm volatile("hlt");
     }
     loaded_file_entry* kernel_entry=nullptr;
@@ -102,11 +101,11 @@ extern "C" void init(BootInfoHeader* header)
         }
     }
     if(kernel_entry==nullptr){
-        kio::bsp_kout<<"kernel entry not found"<<kio::kendl;
+        bsp_kout<<"kernel entry not found"<<kendl;
         asm volatile("hlt");
     }
     if(symbols_entry==nullptr){
-        kio::bsp_kout<<"symbols entry not found"<<kio::kendl;
+        bsp_kout<<"symbols entry not found"<<kendl;
         asm volatile("hlt");
     }
     load_kernel_info_pack pak={
@@ -118,22 +117,22 @@ extern "C" void init(BootInfoHeader* header)
     basic_allocator::print_now_segs();
     result=kernel_load(pak);
     if(result!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] kernel_load failed with error code: " << result << kio::kendl;
+        bsp_kout<< "[ERROR] kernel_load failed with error code: " << result << kendl;
         asm volatile("hlt");
     }
     result = map_symbols_file(kmmu, pak, symbols_entry);
     if(result!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] Failed to map symbols file, error code: " << result << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to map symbols file, error code: " << result << kendl;
         asm volatile("hlt");
     }
     result = map_gop_buffer(kmmu, pak, header);
     if(result!=OS_SUCCESS){
-        kio::bsp_kout << "[ERROR] Failed to setup GOP buffer mapping, error code: " << result << kio::kendl;
+        bsp_kout<< "[ERROR] Failed to setup GOP buffer mapping, error code: " << result << kendl;
         asm volatile("hlt");
     }
     init_to_kernel_info*info = build_init_to_kernel_info(kmmu, header, symbols_entry, pak);
     if(pak.stack_bottom==0||pak.entry_vaddr==0){
-        kio::bsp_kout<<"kernel entry or stack bottom is zero"<<kio::kendl;
+        bsp_kout<<"kernel entry or stack bottom is zero"<<kendl;
         asm volatile("hlt");
     }
     shift_kernel(info,pak.stack_bottom,pak.entry_vaddr);

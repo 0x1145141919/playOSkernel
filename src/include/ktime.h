@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include <efilib.h>
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 typedef  uint64_t miusecond_time_stamp_t;
 struct hardware_time_base_token{
     miusecond_time_stamp_t hpet_base;

@@ -28,6 +28,16 @@ void spinlock_cpp_t::unlock()
     __atomic_clear(&status, __ATOMIC_RELEASE);
 }
 
+spinlock_guard::spinlock_guard(spinlock_cpp_t& lock)
+    : lock_ref(lock)
+{
+    lock_ref.lock();
+}
+
+spinlock_guard::~spinlock_guard()
+{
+    lock_ref.unlock();
+}
 
 bool trylock_cpp_t::try_lock()
  {
@@ -87,4 +97,26 @@ void spinrwlock_cpp_t::write_lock() {
 // 写解锁实现
 void spinrwlock_cpp_t::write_unlock() {
     writelock.unlock();   // 直接释放写锁
+}
+
+spinrwlock_read_guard::spinrwlock_read_guard(spinrwlock_cpp_t& lock)
+    : lock_ref(lock)
+{
+    lock_ref.read_lock();
+}
+
+spinrwlock_read_guard::~spinrwlock_read_guard()
+{
+    lock_ref.read_unlock();
+}
+
+spinrwlock_write_guard::spinrwlock_write_guard(spinrwlock_cpp_t& lock)
+    : lock_ref(lock)
+{
+    lock_ref.write_lock();
+}
+
+spinrwlock_write_guard::~spinrwlock_write_guard()
+{
+    lock_ref.write_unlock();
 }

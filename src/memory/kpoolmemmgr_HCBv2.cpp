@@ -1,14 +1,16 @@
 #include "memory/kpoolmemmgr.h"
 #include "memory/phygpsmemmgr.h"
+#include "memory/FreePagesAllocator.h"
 #include "memory/AddresSpace.h"
 #include "linker_symbols.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "util/OS_utils.h"
 #include "panic.h"
 #ifdef USER_MODE
 #include "stdlib.h"
 #include "kpoolmemmgr.h"
 #endif  
+#include <limits.h>
 #ifdef USER_MODE
     constexpr uint64_t FIRST_STATIC_HEAP_SIZE=1ULL<<24;
     
@@ -17,14 +19,40 @@
         bitmap_controller.Init();
     }
 #endif
- kpoolmemmgr_t::HCB_v2::HCB_v2()
+kpoolmemmgr_t::HCB_v2::HCB_v2()
 {
-    
+    statistics = {};
 }
 kpoolmemmgr_t::HCB_v2::HCB_v2(uint32_t size, vaddr_t vbase)
 {
     this->total_size_in_bytes=size;
     this->vbase=vbase;
+    ksetmem_8(&statistics,0,sizeof(HCB_statistics_t));
+}
+
+namespace {
+static inline uint32_t size_bucket_index(uint32_t size)
+{
+    if (size == 0) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < kpoolmemmgr_t::HCB_v2::SIZE_BUCKET_COUNT - 1; ++i) {
+        uint32_t upper = 1u << (5 + i);
+        if (size < upper) {
+            return i;
+        }
+    }
+    return kpoolmemmgr_t::HCB_v2::SIZE_BUCKET_COUNT - 1;
+}
+
+static inline void update_peak_used_bytes(
+    kpoolmemmgr_t::HCB_v2::HCB_statistics_t& statistics,
+    uint64_t used_bytes)
+{
+    if (used_bytes > statistics.peak_used_bytes_count) {
+        statistics.peak_used_bytes_count = static_cast<uint32_t>(used_bytes);
+    }
+}
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::param_checkment(uint64_t bit_idx, uint64_t bit_count)
 {
@@ -42,6 +70,11 @@ int kpoolmemmgr_t::HCB_v2::HCB_bitmap::Init(loaded_VM_interval *first_static_hea
     bitmap_used_bit=0;
     bitmap_size_in_64bit_units=first_static_heap_bitmap->size/sizeof(uint64_t);
     byte_bitmap_base=(uint8_t*)bitmap;
+    scan_cache.hint_u64_idx = invalid_cache;
+    scan_cache.last_success_idx = invalid_cache;
+    scan_cache.largest_free_hint_len = 0;
+    scan_cache.largest_free_hint_base = invalid_cache;
+    statistics = {};
     return OS_SUCCESS;
 }
 KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::default_kurd()
@@ -80,27 +113,35 @@ KURD_t kpoolmemmgr_t::HCB_v2::HCB_bitmap::second_stage_Init(uint32_t entries_cou
     KURD_t kurd;
 #ifdef KERNEL_MODE
     this->bitmap=(uint64_t*)__wrapped_pgs_valloc(
-     &kurd,align_up(bitmap_size_in_64bit_units,512)/512,KERNEL,12
+     &kurd,align_up(bitmap_size_in_64bit_units,512)/512,page_state_t::kernel_pinned,12
     );
 #endif
 #ifdef USER_MODE
     this->bitmap=(uint64_t*)malloc((bitmap_size_in_64bit_units*8));
 #endif
     if(this->bitmap==nullptr||kurd.result!=result_code::SUCCESS)return kurd;
-
+    ksetmem_8(bitmap,0,bitmap_size_in_64bit_units*8);
     byte_bitmap_base=(uint8_t*)this->bitmap;
+    scan_cache.hint_u64_idx = invalid_cache;
+    scan_cache.last_success_idx = invalid_cache;
+    scan_cache.largest_free_hint_len = 0;
+    scan_cache.largest_free_hint_base = invalid_cache;
+    statistics = {};
     return success;
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap::HCB_bitmap()
 {
+    scan_cache.hint_u64_idx = invalid_cache;
+    scan_cache.last_success_idx = invalid_cache;
+    scan_cache.largest_free_hint_len = 0;
+    scan_cache.largest_free_hint_base = invalid_cache;
+    statistics = {};
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
 {
     byte_bitmap_base=nullptr;
-    #ifdef KERNEL_MODE
-   phyaddr_t bitmap_phyaddr;
-    KURD_t status=KspaceMapMgr::v_to_phyaddrtraslation((vaddr_t)this->bitmap,bitmap_phyaddr);
-    status=KspaceMapMgr::pgs_remapped_free((vaddr_t)this->bitmap);
+    #ifdef KERNEL_MODE 
+    KURD_t status=__wrapped_pgs_vfree(bitmap,align_up(bitmap_size_in_64bit_units,512)/512);
     panic_info_inshort inshort={
         .is_bug=true,
         .is_policy=false,
@@ -108,27 +149,509 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap()
         .is_mem_corruption=false,
         .is_escalated=false,  
     };
+
     if(status.result!=result_code::SUCCESS){
         Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap cancel memmap failed",nullptr,&inshort,status);
     }
-    status=phymemspace_mgr::pages_recycle(bitmap_phyaddr,bitmap_size_in_64bit_units*8/4096);
-    if(status.result!=result_code::SUCCESS){
-        Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::HCB_bitmap::~HCB_bitmap recycle phy pages failed",nullptr,&inshort,status);
-    }
+
     #endif
     #ifdef USER_MODE
     std::free(this->bitmap);
-#endif
+    #endif
     this->bitmap=nullptr;
 }
 kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
- kpoolmemmgr_t::HCB_v2::HCB_bitmap::
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::continual_avaliable_bits_search(uint64_t bit_count, uint64_t &result_base_idx)
+{
+    statistics.call_bits_scan_count++;
+    uint64_t steps = 0;
+    if (bit_count == 0) {
+        return SUCCESS;
+    }
+    const uint64_t total_bits = bitmap_size_in_64bit_units << 6;
+    const uint64_t needed_u64s = (bit_count + 63) >> 6;
+
+    auto is_bits_free = [&](uint64_t start_bit) -> bool {
+        if (start_bit > total_bits || start_bit + bit_count > total_bits) {
+            return false;
+        }
+        for (uint64_t i = 0; i < bit_count; ++i) {
+            if (bit_get(start_bit + i)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (scan_cache.largest_free_hint_len >= needed_u64s &&
+        scan_cache.largest_free_hint_base != invalid_cache) {
+        uint64_t base_bit = scan_cache.largest_free_hint_base << 6;
+        if (is_bits_free(base_bit)) {
+            result_base_idx = base_bit;
+            scan_cache.last_success_idx = scan_cache.largest_free_hint_base;
+            uint64_t next = scan_cache.largest_free_hint_base + needed_u64s;
+            scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.bits_scan_largest_free_hint_hit_count++;
+            statistics.bits_scan_all_steps_accum += steps;
+            if (steps > statistics.bits_scan_max_steps_in_a_term) {
+                statistics.bits_scan_max_steps_in_a_term = steps;
+            }
+            return SUCCESS;
+        } else {
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.bits_scan_largest_free_hint_miss_count++;
+        }
+    }
+
+    uint64_t start_bit = 0;
+    if (scan_cache.hint_u64_idx != invalid_cache &&
+        scan_cache.hint_u64_idx < bitmap_size_in_64bit_units) {
+        start_bit = scan_cache.hint_u64_idx << 6;
+    } else {
+        scan_cache.hint_u64_idx = invalid_cache;
+    }
+
+    auto scan_range = [&](uint64_t range_start, uint64_t range_end) -> HCB_bitmap_error_code_t {
+        if (range_start >= range_end) {
+            return AVALIBLE_MEMSEG_SEARCH_FAIL;
+        }
+        uint64_t seg_base_bit_idx = range_start;
+        bool seg_value = bit_get(range_start);
+        uint64_t seg_length = 1;
+        steps++;
+
+        for (uint64_t current_bit_idx = range_start + 1; current_bit_idx < range_end; ++current_bit_idx) {
+            steps++;
+            if ((current_bit_idx & 0x3F) == 0) {
+                uint64_t* to_scan_u64 = reinterpret_cast<uint64_t*>(
+                    byte_bitmap_base + (current_bit_idx >> 3));
+                if (seg_value) {
+                    if (*to_scan_u64 == U64_FULL_UNIT) {
+                        seg_length += 64;
+                        steps += 63;
+                        current_bit_idx += 63;
+                        continue;
+                    }
+                } else {
+                    if (*to_scan_u64 == 0x00) {
+                        seg_length += 64;
+                        steps += 63;
+                        if (seg_length >= bit_count) {
+                            result_base_idx = seg_base_bit_idx;
+                            scan_cache.last_success_idx = seg_base_bit_idx >> 6;
+                            uint64_t next = scan_cache.last_success_idx + needed_u64s;
+                            scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+                            scan_cache.largest_free_hint_len = 0;
+                            scan_cache.largest_free_hint_base = invalid_cache;
+                            statistics.bits_scan_all_steps_accum += steps;
+                            if (steps > statistics.bits_scan_max_steps_in_a_term) {
+                                statistics.bits_scan_max_steps_in_a_term = steps;
+                            }
+                            return SUCCESS;
+                        }
+                        current_bit_idx += 63;
+                        continue;
+                    }
+                }
+            }
+
+            bool new_bit_value = bit_get(current_bit_idx);
+            if (seg_value == new_bit_value) {
+                seg_length++;
+                if (!seg_value && seg_length >= bit_count) {
+                    result_base_idx = seg_base_bit_idx;
+                    scan_cache.last_success_idx = seg_base_bit_idx >> 6;
+                    uint64_t next = scan_cache.last_success_idx + needed_u64s;
+                    scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+                    scan_cache.largest_free_hint_len = 0;
+                    scan_cache.largest_free_hint_base = invalid_cache;
+                    statistics.bits_scan_all_steps_accum += steps;
+                    if (steps > statistics.bits_scan_max_steps_in_a_term) {
+                        statistics.bits_scan_max_steps_in_a_term = steps;
+                    }
+                    return SUCCESS;
+                }
+            } else {
+                if (!seg_value) {
+                    uint64_t seg_u64_len = seg_length >> 6;
+                    if (seg_u64_len > scan_cache.largest_free_hint_len) {
+                        scan_cache.largest_free_hint_len = seg_u64_len;
+                        scan_cache.largest_free_hint_base = seg_base_bit_idx >> 6;
+                    }
+                }
+                seg_base_bit_idx = current_bit_idx;
+                seg_value = new_bit_value;
+                seg_length = 1;
+            }
+        }
+
+        if (!seg_value) {
+            if (seg_length >= bit_count) {
+                result_base_idx = seg_base_bit_idx;
+                scan_cache.last_success_idx = seg_base_bit_idx >> 6;
+                uint64_t next = scan_cache.last_success_idx + needed_u64s;
+                scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+                scan_cache.largest_free_hint_len = 0;
+                scan_cache.largest_free_hint_base = invalid_cache;
+                statistics.bits_scan_all_steps_accum += steps;
+                if (steps > statistics.bits_scan_max_steps_in_a_term) {
+                    statistics.bits_scan_max_steps_in_a_term = steps;
+                }
+                return SUCCESS;
+            }
+            uint64_t seg_u64_len = seg_length >> 6;
+            if (seg_u64_len > scan_cache.largest_free_hint_len) {
+                scan_cache.largest_free_hint_len = seg_u64_len;
+                scan_cache.largest_free_hint_base = seg_base_bit_idx >> 6;
+            }
+        }
+        return AVALIBLE_MEMSEG_SEARCH_FAIL;
+    };
+
+    HCB_bitmap_error_code_t rc = scan_range(start_bit, total_bits);
+    if (rc == SUCCESS) {
+        return rc;
+    }
+    if (start_bit != 0) {
+        rc = scan_range(0, start_bit);
+        if (rc == SUCCESS) {
+            return rc;
+        }
+    }
+
+    if (scan_cache.largest_free_hint_len == 0) {
+        scan_cache.largest_free_hint_base = invalid_cache;
+    }
+    scan_cache.hint_u64_idx = invalid_cache;
+    statistics.bits_scan_all_steps_accum += steps;
+    if (steps > statistics.bits_scan_max_steps_in_a_term) {
+        statistics.bits_scan_max_steps_in_a_term = steps;
+    }
+    return AVALIBLE_MEMSEG_SEARCH_FAIL;
+}
+
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::continual_avaliable_bytes_search(uint64_t byte_count, uint64_t &result_base_idx)
+{
+    statistics.call_bytes_scan_count++;
+    uint64_t steps = 0;
+    if (byte_count == 0) {
+        return SUCCESS;
+    }
+    const uint64_t total_bytes = bitmap_size_in_64bit_units * 8;
+    const uint64_t needed_u64s = (byte_count + 7) >> 3;
+
+    auto is_bytes_free = [&](uint64_t start_byte) -> bool {
+        if (start_byte > total_bytes || start_byte + byte_count > total_bytes) {
+            return false;
+        }
+        for (uint64_t i = 0; i < byte_count; ++i) {
+            if (byte_bitmap_base[start_byte + i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (scan_cache.largest_free_hint_len >= needed_u64s &&
+        scan_cache.largest_free_hint_base != invalid_cache) {
+        uint64_t base_byte = scan_cache.largest_free_hint_base << 3;
+        if (is_bytes_free(base_byte)) {
+            result_base_idx = base_byte;
+            scan_cache.last_success_idx = scan_cache.largest_free_hint_base;
+            uint64_t next = scan_cache.largest_free_hint_base + needed_u64s;
+            scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.bytes_scan_largest_free_hint_hit_count++;
+            statistics.bytes_scan_all_steps_accum += steps;
+            if (steps > statistics.bytes_scan_max_steps_in_a_term) {
+                statistics.bytes_scan_max_steps_in_a_term = steps;
+            }
+            return SUCCESS;
+        } else {
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.bytes_scan_largest_free_hint_miss_count++;
+        }
+    }
+
+    uint64_t start_byte = 0;
+    if (scan_cache.hint_u64_idx != invalid_cache &&
+        scan_cache.hint_u64_idx < bitmap_size_in_64bit_units) {
+        start_byte = scan_cache.hint_u64_idx << 3;
+    } else {
+        scan_cache.hint_u64_idx = invalid_cache;
+    }
+
+    auto scan_range = [&](uint64_t range_start, uint64_t range_end) -> HCB_bitmap_error_code_t {
+        if (range_start >= range_end) {
+            return AVALIBLE_MEMSEG_SEARCH_FAIL;
+        }
+        uint64_t seg_base_byte_idx = range_start;
+        bool seg_value = !!byte_bitmap_base[range_start];
+        uint64_t seg_length = 1;
+        steps++;
+
+        for (uint64_t current_byte_idx = range_start + 1; current_byte_idx < range_end; ++current_byte_idx) {
+            steps++;
+            if ((current_byte_idx & 0x7) == 0) {
+                uint64_t* to_scan_u64 = reinterpret_cast<uint64_t*>(
+                    byte_bitmap_base + current_byte_idx);
+                if (seg_value) {
+                    if (*to_scan_u64 == U64_FULL_UNIT) {
+                        seg_length += 8;
+                        steps += 7;
+                        current_byte_idx += 7;
+                        continue;
+                    }
+                } else {
+                    if (*to_scan_u64 == 0x00ULL) {
+                        seg_length += 8;
+                        steps += 7;
+                        if (seg_length >= byte_count) {
+                            result_base_idx = seg_base_byte_idx;
+                            scan_cache.last_success_idx = seg_base_byte_idx >> 3;
+                            uint64_t next = scan_cache.last_success_idx + needed_u64s;
+                            scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+                            scan_cache.largest_free_hint_len = 0;
+                            scan_cache.largest_free_hint_base = invalid_cache;
+                            statistics.bytes_scan_all_steps_accum += steps;
+                            if (steps > statistics.bytes_scan_max_steps_in_a_term) {
+                                statistics.bytes_scan_max_steps_in_a_term = steps;
+                            }
+                            return SUCCESS;
+                        }
+                        current_byte_idx += 7;
+                        continue;
+                    }
+                }
+            }
+
+            bool new_value = !!byte_bitmap_base[current_byte_idx];
+            if (seg_value == new_value) {
+                seg_length++;
+                if (!seg_value && seg_length >= byte_count) {
+                    result_base_idx = seg_base_byte_idx;
+                    scan_cache.last_success_idx = seg_base_byte_idx >> 3;
+                    uint64_t next = scan_cache.last_success_idx + needed_u64s;
+                    scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+                    scan_cache.largest_free_hint_len = 0;
+                    scan_cache.largest_free_hint_base = invalid_cache;
+                    statistics.bytes_scan_all_steps_accum += steps;
+                    if (steps > statistics.bytes_scan_max_steps_in_a_term) {
+                        statistics.bytes_scan_max_steps_in_a_term = steps;
+                    }
+                    return SUCCESS;
+                }
+            } else {
+                if (!seg_value) {
+                    uint64_t seg_u64_len = seg_length >> 3;
+                    if (seg_u64_len > scan_cache.largest_free_hint_len) {
+                        scan_cache.largest_free_hint_len = seg_u64_len;
+                        scan_cache.largest_free_hint_base = seg_base_byte_idx >> 3;
+                    }
+                }
+                seg_base_byte_idx = current_byte_idx;
+                seg_value = new_value;
+                seg_length = 1;
+            }
+        }
+
+        if (!seg_value) {
+            if (seg_length >= byte_count) {
+                result_base_idx = seg_base_byte_idx;
+                scan_cache.last_success_idx = seg_base_byte_idx >> 3;
+                uint64_t next = scan_cache.last_success_idx + needed_u64s;
+                scan_cache.hint_u64_idx = next < bitmap_size_in_64bit_units ? next : invalid_cache;
+                scan_cache.largest_free_hint_len = 0;
+                scan_cache.largest_free_hint_base = invalid_cache;
+                statistics.bytes_scan_all_steps_accum += steps;
+                if (steps > statistics.bytes_scan_max_steps_in_a_term) {
+                    statistics.bytes_scan_max_steps_in_a_term = steps;
+                }
+                return SUCCESS;
+            }
+            uint64_t seg_u64_len = seg_length >> 3;
+            if (seg_u64_len > scan_cache.largest_free_hint_len) {
+                scan_cache.largest_free_hint_len = seg_u64_len;
+                scan_cache.largest_free_hint_base = seg_base_byte_idx >> 3;
+            }
+        }
+        return AVALIBLE_MEMSEG_SEARCH_FAIL;
+    };
+
+    HCB_bitmap_error_code_t rc = scan_range(start_byte, total_bytes);
+    if (rc == SUCCESS) {
+        return rc;
+    }
+    if (start_byte != 0) {
+        rc = scan_range(0, start_byte);
+        if (rc == SUCCESS) {
+            return rc;
+        }
+    }
+
+    if (scan_cache.largest_free_hint_len == 0) {
+        scan_cache.largest_free_hint_base = invalid_cache;
+    }
+    scan_cache.hint_u64_idx = invalid_cache;
+    statistics.bytes_scan_all_steps_accum += steps;
+    if (steps > statistics.bytes_scan_max_steps_in_a_term) {
+        statistics.bytes_scan_max_steps_in_a_term = steps;
+    }
+    return AVALIBLE_MEMSEG_SEARCH_FAIL;
+}
+
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::continual_avaliable_u64s_search(uint64_t u64_count, uint64_t &result_base_idx)
+{
+    statistics.call_u64s_scan_count++;
+    uint64_t steps = 0;
+    if (u64_count == 0) {
+        return SUCCESS;
+    }
+    const uint64_t total_u64s = bitmap_size_in_64bit_units;
+
+    auto is_u64s_free = [&](uint64_t start_u64) -> bool {
+        if (start_u64 > total_u64s || start_u64 + u64_count > total_u64s) {
+            return false;
+        }
+        for (uint64_t i = 0; i < u64_count; ++i) {
+            if (bitmap[start_u64 + i] != 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (scan_cache.largest_free_hint_len >= u64_count &&
+        scan_cache.largest_free_hint_base != invalid_cache) {
+        uint64_t base = scan_cache.largest_free_hint_base;
+        if (is_u64s_free(base)) {
+            result_base_idx = base;
+            scan_cache.last_success_idx = base;
+            uint64_t next = base + u64_count;
+            scan_cache.hint_u64_idx = next < total_u64s ? next : invalid_cache;
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.u64s_scan_largest_free_hint_hit_count++;
+            statistics.u64s_scan_all_steps_accum += steps;
+            if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+                statistics.u64s_scan_max_steps_in_a_term = steps;
+            }
+            return SUCCESS;
+        } else {
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.u64s_scan_largest_free_hint_miss_count++;
+        }
+    }
+
+    uint64_t start_u64 = 0;
+    if (scan_cache.hint_u64_idx != invalid_cache &&
+        scan_cache.hint_u64_idx < total_u64s) {
+        start_u64 = scan_cache.hint_u64_idx;
+    } else {
+        scan_cache.hint_u64_idx = invalid_cache;
+    }
+
+    auto scan_range = [&](uint64_t range_start, uint64_t range_end) -> HCB_bitmap_error_code_t {
+        if (range_start >= range_end) {
+            return AVALIBLE_MEMSEG_SEARCH_FAIL;
+        }
+        uint64_t seg_base_u64_idx = range_start;
+        bool seg_value = !!bitmap[range_start];
+        uint64_t seg_length = 1;
+        steps++;
+
+        for (uint64_t current_u64_idx = range_start + 1; current_u64_idx < range_end; ++current_u64_idx) {
+            steps++;
+            bool new_value = !!bitmap[current_u64_idx];
+            if (seg_value == new_value) {
+                seg_length++;
+                if (!seg_value && seg_length >= u64_count) {
+                    result_base_idx = seg_base_u64_idx;
+                    scan_cache.last_success_idx = seg_base_u64_idx;
+                    uint64_t next = seg_base_u64_idx + u64_count;
+                    scan_cache.hint_u64_idx = next < total_u64s ? next : invalid_cache;
+                    scan_cache.largest_free_hint_len = 0;
+                    scan_cache.largest_free_hint_base = invalid_cache;
+                    statistics.u64s_scan_all_steps_accum += steps;
+                    if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+                        statistics.u64s_scan_max_steps_in_a_term = steps;
+                    }
+                    return SUCCESS;
+                }
+            } else {
+                if (!seg_value) {
+                    if (seg_length > scan_cache.largest_free_hint_len) {
+                        scan_cache.largest_free_hint_len = seg_length;
+                        scan_cache.largest_free_hint_base = seg_base_u64_idx;
+                    }
+                }
+                seg_base_u64_idx = current_u64_idx;
+                seg_value = new_value;
+                seg_length = 1;
+            }
+        }
+
+        if (!seg_value) {
+            if (seg_length >= u64_count) {
+                result_base_idx = seg_base_u64_idx;
+                scan_cache.last_success_idx = seg_base_u64_idx;
+                uint64_t next = seg_base_u64_idx + u64_count;
+                scan_cache.hint_u64_idx = next < total_u64s ? next : invalid_cache;
+                scan_cache.largest_free_hint_len = 0;
+                scan_cache.largest_free_hint_base = invalid_cache;
+                statistics.u64s_scan_all_steps_accum += steps;
+                if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+                    statistics.u64s_scan_max_steps_in_a_term = steps;
+                }
+                return SUCCESS;
+            }
+            if (seg_length > scan_cache.largest_free_hint_len) {
+                scan_cache.largest_free_hint_len = seg_length;
+                scan_cache.largest_free_hint_base = seg_base_u64_idx;
+            }
+        }
+        return AVALIBLE_MEMSEG_SEARCH_FAIL;
+    };
+
+    HCB_bitmap_error_code_t rc = scan_range(start_u64, total_u64s);
+    if (rc == SUCCESS) {
+        return rc;
+    }
+    if (start_u64 != 0) {
+        rc = scan_range(0, start_u64);
+        if (rc == SUCCESS) {
+            return rc;
+        }
+    }
+
+    if (scan_cache.largest_free_hint_len == 0) {
+        scan_cache.largest_free_hint_base = invalid_cache;
+    }
+    scan_cache.hint_u64_idx = invalid_cache;
+    statistics.u64s_scan_all_steps_accum += steps;
+    if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+        statistics.u64s_scan_max_steps_in_a_term = steps;
+    }
+    return AVALIBLE_MEMSEG_SEARCH_FAIL;
+}
+kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
+kpoolmemmgr_t::HCB_v2::HCB_bitmap::
 continual_avaliable_u64s_search_higher_alignment(
     uint64_t u64idx_align_log2,
     uint64_t u64_count,
     uint64_t &result_base_idx
 )
 {
+    statistics.call_u64s_scan_higher_alignment_count++;
+    uint64_t steps = 0;
     if (u64_count == 0)
         return SUCCESS;
 
@@ -142,48 +665,140 @@ continual_avaliable_u64s_search_higher_alignment(
         return (idx + align - 1) & ~(align - 1);
     };
 
-    uint64_t seg_base_u64_idx = 0;
-    bool seg_value = !!bitmap[0];
-    uint64_t seg_length = 1;
-
-    while (seg_base_u64_idx + seg_length < total_u64s) {
-        uint64_t cur_idx = seg_base_u64_idx + seg_length;
-        bool new_value = !!bitmap[cur_idx];
-
-        if (new_value == seg_value) {
-            seg_length++;
-        } else {
-            // 完整 free 段处理
-            if (!seg_value) {
-                uint64_t seg_end = seg_base_u64_idx + seg_length;
-                uint64_t aligned_base = align_u64_idx(seg_base_u64_idx);
-
-                if (aligned_base >= seg_base_u64_idx &&
-                    aligned_base + u64_count <= seg_end) {
-                    result_base_idx = aligned_base;
-                    return SUCCESS;
-                }
+    auto is_u64s_free = [&](uint64_t start_u64) -> bool {
+        if (start_u64 > total_u64s || start_u64 + u64_count > total_u64s) {
+            return false;
+        }
+        for (uint64_t i = 0; i < u64_count; ++i) {
+            if (bitmap[start_u64 + i] != 0) {
+                return false;
             }
-
-            // 切换段
-            seg_base_u64_idx = cur_idx;
-            seg_value = new_value;
-            seg_length = 1;
         }
-    }
+        return true;
+    };
 
-    // 最后一个段
-    if (!seg_value) {
-        uint64_t seg_end = seg_base_u64_idx + seg_length;
-        uint64_t aligned_base = align_u64_idx(seg_base_u64_idx);
-
-        if (aligned_base >= seg_base_u64_idx &&
-            aligned_base + u64_count <= seg_end) {
+    if (scan_cache.largest_free_hint_len >= u64_count &&
+        scan_cache.largest_free_hint_base != invalid_cache) {
+        uint64_t seg_base = scan_cache.largest_free_hint_base;
+        uint64_t seg_end = seg_base + scan_cache.largest_free_hint_len;
+        uint64_t aligned_base = align_u64_idx(seg_base);
+        if (aligned_base >= seg_base &&
+            aligned_base + u64_count <= seg_end &&
+            is_u64s_free(aligned_base)) {
             result_base_idx = aligned_base;
+            scan_cache.last_success_idx = aligned_base;
+            uint64_t next = aligned_base + u64_count;
+            scan_cache.hint_u64_idx = next < total_u64s ? next : invalid_cache;
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.u64s_scan_largest_free_hint_hit_count++;
+            statistics.u64s_scan_all_steps_accum += steps;
+            if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+                statistics.u64s_scan_max_steps_in_a_term = steps;
+            }
             return SUCCESS;
+        } else {
+            scan_cache.largest_free_hint_len = 0;
+            scan_cache.largest_free_hint_base = invalid_cache;
+            statistics.u64s_scan_largest_free_hint_miss_count++;
         }
     }
 
+    uint64_t start_u64 = 0;
+    if (scan_cache.hint_u64_idx != invalid_cache &&
+        scan_cache.hint_u64_idx < total_u64s) {
+        start_u64 = scan_cache.hint_u64_idx;
+    } else {
+        scan_cache.hint_u64_idx = invalid_cache;
+    }
+
+    auto scan_range = [&](uint64_t range_start, uint64_t range_end) -> HCB_bitmap_error_code_t {
+        if (range_start >= range_end) {
+            return AVALIBLE_MEMSEG_SEARCH_FAIL;
+        }
+        uint64_t seg_base_u64_idx = range_start;
+        bool seg_value = !!bitmap[range_start];
+        uint64_t seg_length = 1;
+        steps++;
+
+        for (uint64_t cur_idx = range_start + 1; cur_idx < range_end; ++cur_idx) {
+            steps++;
+            bool new_value = !!bitmap[cur_idx];
+            if (new_value == seg_value) {
+                seg_length++;
+            } else {
+                if (!seg_value) {
+                    uint64_t seg_end = seg_base_u64_idx + seg_length;
+                    uint64_t aligned_base = align_u64_idx(seg_base_u64_idx);
+                    if (aligned_base >= seg_base_u64_idx &&
+                        aligned_base + u64_count <= seg_end) {
+                        result_base_idx = aligned_base;
+                        scan_cache.last_success_idx = aligned_base;
+                        uint64_t next = aligned_base + u64_count;
+                        scan_cache.hint_u64_idx = next < total_u64s ? next : invalid_cache;
+                        scan_cache.largest_free_hint_len = 0;
+                        scan_cache.largest_free_hint_base = invalid_cache;
+                        statistics.u64s_scan_all_steps_accum += steps;
+                        if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+                            statistics.u64s_scan_max_steps_in_a_term = steps;
+                        }
+                        return SUCCESS;
+                    }
+                    if (seg_length > scan_cache.largest_free_hint_len) {
+                        scan_cache.largest_free_hint_len = seg_length;
+                        scan_cache.largest_free_hint_base = seg_base_u64_idx;
+                    }
+                }
+                seg_base_u64_idx = cur_idx;
+                seg_value = new_value;
+                seg_length = 1;
+            }
+        }
+
+        if (!seg_value) {
+            uint64_t seg_end = seg_base_u64_idx + seg_length;
+            uint64_t aligned_base = align_u64_idx(seg_base_u64_idx);
+            if (aligned_base >= seg_base_u64_idx &&
+                aligned_base + u64_count <= seg_end) {
+                result_base_idx = aligned_base;
+                scan_cache.last_success_idx = aligned_base;
+                uint64_t next = aligned_base + u64_count;
+                scan_cache.hint_u64_idx = next < total_u64s ? next : invalid_cache;
+                scan_cache.largest_free_hint_len = 0;
+                scan_cache.largest_free_hint_base = invalid_cache;
+                statistics.u64s_scan_all_steps_accum += steps;
+                if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+                    statistics.u64s_scan_max_steps_in_a_term = steps;
+                }
+                return SUCCESS;
+            }
+            if (seg_length > scan_cache.largest_free_hint_len) {
+                scan_cache.largest_free_hint_len = seg_length;
+                scan_cache.largest_free_hint_base = seg_base_u64_idx;
+            }
+        }
+        return AVALIBLE_MEMSEG_SEARCH_FAIL;
+    };
+
+    HCB_bitmap_error_code_t rc = scan_range(start_u64, total_u64s);
+    if (rc == SUCCESS) {
+        return rc;
+    }
+    if (start_u64 != 0) {
+        rc = scan_range(0, start_u64);
+        if (rc == SUCCESS) {
+            return rc;
+        }
+    }
+
+    if (scan_cache.largest_free_hint_len == 0) {
+        scan_cache.largest_free_hint_base = invalid_cache;
+    }
+    scan_cache.hint_u64_idx = invalid_cache;
+    statistics.u64s_scan_all_steps_accum += steps;
+    if (steps > statistics.u64s_scan_max_steps_in_a_term) {
+        statistics.u64s_scan_max_steps_in_a_term = steps;
+    }
     return AVALIBLE_MEMSEG_SEARCH_FAIL;
 }
 
@@ -262,9 +877,10 @@ kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t&err)
 }
 
 kpoolmemmgr_t::HCB_v2::HCB_bitmap_error_code_t
- kpoolmemmgr_t::HCB_v2::HCB_bitmap::bit_seg_set(uint64_t bit_idx, uint64_t bit_count, bool value)
+ kpoolmemmgr_t::HCB_v2::HCB_bitmap::bits_seg_set(uint64_t bit_idx, uint64_t bit_count, bool value)
 {
     if (bit_count == 0) return SUCCESS;
+    statistics.call_bits_seg_set_count++;
 
     HCB_bitmap_error_code_t status=param_checkment(bit_idx,bit_count);
     if(status!=SUCCESS){
@@ -326,22 +942,21 @@ KURD_t kpoolmemmgr_t::HCB_v2::second_stage_Init()
         fail.module_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::INIT_RESULTS::FAIL_RESONS::REASON_CODE_first_linekd_heap_NOT_ALLOWED;
         return fail;
     }
-    
+    buddy_alloc_params param=BUDDY_ALLOC_DEFAULT_FLAG;
+    param.align_log2=21;
     KURD_t contain;
-    this->phybase=__wrapped_pgs_alloc(&contain,total_size_in_bytes/0x1000,KERNEL,21);
+    
+    Alloc_result res=FreePagesAllocator::alloc(total_size_in_bytes,param,page_state_t::kernel_pinned);
+    this->phybase=res.base;
     if(!success_all_kurd(contain))return contain;
     #ifdef KERNEL_MODE
-    VM_DESC desc={
-        .start=vbase,
-        .end=vbase+total_size_in_bytes,
-        .map_type=VM_DESC::MAP_PHYSICAL,
-        .phys_start=phybase,
-        .access=KspaceMapMgr::PG_RW,
-        .committed_full=true,
-        .is_vaddr_alloced=true,
-        .is_out_bound_protective=false,
+    vm_interval interval={
+        .vbase=vbase,
+        .pbase=phybase,
+        .size=total_size_in_bytes,
+        .access=KspacePageTable::PG_RW,
     };
-    contain=KspaceMapMgr::enable_VMentry(desc);
+    contain=KspacePageTable::enable_VMentry(interval);
     if(!success_all_kurd(contain))return contain;
     #endif
     
@@ -361,21 +976,17 @@ kpoolmemmgr_t::HCB_v2::~HCB_v2()
     bitmap_controller.~HCB_bitmap();
     KURD_t status=KURD_t();
     #ifdef KERNEL_MODE
-    VM_DESC desc={
-        .start=vbase,
-        .end=vbase+total_size_in_bytes,
-        .map_type=VM_DESC::MAP_PHYSICAL,
-        .phys_start=phybase,
-        .access=KspaceMapMgr::PG_RW,
-        .committed_full=true,
-        .is_vaddr_alloced=true,
-        .is_out_bound_protective=false,
+    vm_interval interval={
+        .vbase=vbase,
+        .pbase=phybase,
+        .size=total_size_in_bytes,
+        .access=KspacePageTable::PG_RW,
     };
-    status=KspaceMapMgr::disable_VMentry(desc);
+    status=KspacePageTable::disable_VMentry(interval);
     if(!success_all_kurd(status))goto free_wrong;
-    status=__wrapped_pgs_free(
+    status=FreePagesAllocator::free(
         phybase,
-        total_size_in_bytes/0x1000
+        total_size_in_bytes
     );
     if(!success_all_kurd(status))goto free_wrong;
     #endif
@@ -394,7 +1005,7 @@ free_wrong:
     if(status.result!=result_code::SUCCESS){
         Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::~HCB_v2 cancel memmap failed",nullptr,&inshort,status);
     }
-    status=phymemspace_mgr::pages_recycle(phybase,total_size_in_bytes/4096);
+    status=FreePagesAllocator::free(phybase,total_size_in_bytes);
     if(status.result!=result_code::SUCCESS){
         Panic::panic(default_panic_behaviors_flags,"kpoolmemmgr_t::HCB_v2::~HCB_v2 recycle phy pages failed",nullptr,&inshort,status);
     }
@@ -480,17 +1091,23 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     // -----------------------------
     // 基本参数与边界检查
     // -----------------------------
+    auto record_alloc_fail = [&]() {
+        statistics.alloc_fail_count++;
+    };
     if (flags.align_log2 >=32)
         {
+            record_alloc_fail();
             fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_TOO_HIGH_ALIGN_DEMAND;
             return fail;
         }
     if (size == 0)
         {
+            record_alloc_fail();
             fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SIZE_DEMAND_IS_ZERO;
             return fail;
         }
     if(size>=1ULL<<16){
+        record_alloc_fail();
         fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SIZE_DEMAND_TOO_LARGE;
         return fail;
     }
@@ -530,6 +1147,19 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     // -----------------------------
     int status = OS_SUCCESS;
     uintptr_t base_addr = (uintptr_t)(flags.vaddraquire ? vbase : phybase);
+    auto update_cache_on_hint_hit = [&](uint64_t base_u64_idx, uint64_t need_u64s) {
+        auto& cache = bitmap_controller.scan_cache;
+        if (cache.largest_free_hint_len >= need_u64s &&
+            cache.largest_free_hint_base == base_u64_idx) {
+            cache.last_success_idx = base_u64_idx;
+            uint64_t next = base_u64_idx + need_u64s;
+            cache.hint_u64_idx = next < bitmap_controller.bitmap_size_in_64bit_units
+                ? next
+                : bitmap_controller.invalid_cache;
+            cache.largest_free_hint_len = 0;
+            cache.largest_free_hint_base = bitmap_controller.invalid_cache;
+        }
+    };
 
     switch (final_alignment_aquire)
     {
@@ -541,13 +1171,17 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
             {
+                record_alloc_fail();
                 fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
                 return fail;
             }
-        bitmap_controller.bit_seg_set(base_bit_idx, serial_bits_count,true);
+        update_cache_on_hint_hit(base_bit_idx >> 6, (serial_bits_count + 63) >> 6);
+        bitmap_controller.bits_seg_set(base_bit_idx, serial_bits_count,true);
         bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit+=serial_bits_count;
         uintptr_t offset = bytes_per_bit * (base_bit_idx + 1);
+        uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+        update_peak_used_bytes(statistics, used_bytes);
         bitmap_controller.used_bit_count_lock.unlock();
         addr = (void *)(base_addr + offset);
         break;
@@ -560,16 +1194,20 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
             {
+                record_alloc_fail();
                 fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
                 return fail;
             }
+        update_cache_on_hint_hit(base_byte_idx >> 3, (serial_bytes_count + 7) >> 3);
 
         bitmap_controller.bit_set(7 + (base_byte_idx << 3) , true);
         bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit++;
         uint32_t total_bitcount = (size + SMALL_UNIT_BYTES - 1) >> 4;
-        bitmap_controller.bit_seg_set((base_byte_idx+1)*8, total_bitcount,true);
+        bitmap_controller.bits_seg_set((base_byte_idx+1)*8, total_bitcount,true);
         bitmap_controller.bitmap_used_bit+=total_bitcount;
+        uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+        update_peak_used_bytes(statistics, used_bytes);
         bitmap_controller.used_bit_count_lock.unlock();
         uintptr_t offset = bytes_per_bit * ((base_byte_idx + 1) << 3);
         addr = (void *)(base_addr + offset);
@@ -583,16 +1221,20 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
         bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
             {
+                record_alloc_fail();
                 fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
                 return fail;
             }
+        update_cache_on_hint_hit(base_u64_idx, serial_u64_count);
 
         bitmap_controller.bit_set( 63 + (base_u64_idx << 6), true);
         bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit++;
         uint32_t total_bitcount = (size + SMALL_UNIT_BYTES - 1) >> 4;
-        bitmap_controller.bit_seg_set((base_u64_idx+1)*64, total_bitcount,true);
+        bitmap_controller.bits_seg_set((base_u64_idx+1)*64, total_bitcount,true);
         bitmap_controller.bitmap_used_bit += total_bitcount;
+        uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+        update_peak_used_bytes(statistics, used_bytes);
         bitmap_controller.used_bit_count_lock.unlock();
         uintptr_t offset = bytes_per_bit * ((base_u64_idx + 1) << 6);
         addr = (void *)(base_addr + offset);
@@ -602,6 +1244,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     {
     if (final_alignment_aquire <= 10)
         {
+            record_alloc_fail();
             fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FATAL_REASONS::REASON_CODE_ALIGN_DEMAND_INVALID;
             return fatal;
         }
@@ -637,9 +1280,11 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
 
     if (status != OS_SUCCESS)
         {
+                record_alloc_fail();
                 fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
                 return fail;
             }
+    update_cache_on_hint_hit(base_u64_idx, payload_u64_count);
 
     // ------------------------------------
     // 计算真正的对齐起点
@@ -661,13 +1306,15 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     const uint32_t total_bitcount =
         (size + SMALL_UNIT_BYTES - 1) >> 4;
 
-    bitmap_controller.bit_seg_set(
+    bitmap_controller.bits_seg_set(
         real_base_bit,
         total_bitcount,
         true
     );
 
     bitmap_controller.bitmap_used_bit += total_bitcount;
+    uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+    update_peak_used_bytes(statistics, used_bytes);
     bitmap_controller.used_bit_count_lock.unlock();
 
     // ------------------------------------
@@ -688,6 +1335,8 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_alloc(
     meta->magic = MAGIC_ALLOCATED;
     meta->data_size = size;
     meta->alloc_flags= flags;
+    statistics.alloc_count++;
+    statistics.alloc[size_bucket_index(size)]++;
     return success;
 }
 
@@ -737,6 +1386,8 @@ KURD_t kpoolmemmgr_t::HCB_v2::free(void *ptr)
         fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FATAL_REASONS::REASON_CODE_METADATA_DESTROYED;
         return fatal;
     }
+    statistics.free_count++;
+    statistics.free[size_bucket_index(meta->data_size)]++;
     uint32_t total_bits_count=(meta->data_size+15)/16;
     uint32_t base_bit_idx=in_heap_offset/16;
     bitmap_controller.bitmap_rwlock.write_lock();
@@ -746,7 +1397,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::free(void *ptr)
     bitmap_controller.bitmap_used_bit--;
     bitmap_controller.bitmap_used_bit-=total_bits_count;
     bitmap_controller.used_bit_count_lock.unlock();
-    bitmap_controller.bit_seg_set(
+    bitmap_controller.bits_seg_set(
         base_bit_idx,
         total_bits_count,
         false
@@ -765,7 +1416,11 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
     success.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC;
     fail.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC;
     fatal.event_code=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC;
+    auto record_realloc_fail = [&]() {
+        statistics.realloc_fail_count++;
+    };
     if(uint64_t(ptr)&15||!is_addr_belong_to_this_hcb(ptr)){
+        record_realloc_fail();
         fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
         return fail;   
     }  //本堆的内存至少16字节对齐
@@ -785,6 +1440,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
         if((uint64_t)ptr<phybase+sizeof(data_meta)||
     phybase+total_size_in_bytes<=(uint64_t)ptr
     ){
+        record_realloc_fail();
         fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
         return fail;   
     } 
@@ -792,6 +1448,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
     }else{
         if((uint64_t)ptr<vbase+sizeof(data_meta)||
     vbase+total_size_in_bytes<=(uint64_t)ptr){
+        record_realloc_fail();
         fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FAIL_RESONS::REASON_CODE_BAD_ADDR;
         return fail;   
     } 
@@ -801,6 +1458,7 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
     uint16_t old_size=meta->data_size;
     if(meta->magic != MAGIC_ALLOCATED)
     {
+        record_realloc_fail();
         fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::FREE_RESULTS::FATAL_REASONS::REASON_CODE_METADATA_DESTROYED;
         return fatal;
     }uint32_t old_bits_count=(meta->data_size+15)/16;
@@ -811,15 +1469,18 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
     if(new_bits_count<=old_bits_count)
     {
         meta->data_size=new_size;
-        bitmap_controller.bit_seg_set(
+        bitmap_controller.bits_seg_set(
             base_bit_idx+new_bits_count,
             old_bits_count-new_bits_count,
             false
         );
         bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit-=(old_bits_count-new_bits_count);
+        uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+        update_peak_used_bytes(statistics, used_bytes);
         bitmap_controller.used_bit_count_lock.unlock();
 
+        statistics.realloc_count++;
         return success;
     }else{
         HCB_bitmap_error_code_t err;
@@ -831,14 +1492,17 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
         if(err!=SUCCESS)try_append=false;
         if(try_append)
         {
-             bitmap_controller.bit_seg_set(
+             bitmap_controller.bits_seg_set(
                 base_bit_idx+old_bits_count,
                 new_bits_count-old_bits_count,
                 true
             );
             bitmap_controller.used_bit_count_lock.lock();
             bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
+            uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+            update_peak_used_bytes(statistics, used_bytes);
             bitmap_controller.used_bit_count_lock.unlock();
+            statistics.realloc_count++;
             return success;
         }else{
             void*new_ptr;
@@ -851,9 +1515,13 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
                 ptr=new_ptr;
                 bitmap_controller.used_bit_count_lock.lock();
                 bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
+                uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+                update_peak_used_bytes(statistics, used_bytes);
                 bitmap_controller.used_bit_count_lock.unlock();
+                statistics.realloc_count++;
                 return success;
             }else{
+                record_realloc_fail();
                 return status;
             }
         }
@@ -869,12 +1537,17 @@ KURD_t kpoolmemmgr_t::HCB_v2::in_heap_realloc(
                 ptr=new_ptr;
                 bitmap_controller.used_bit_count_lock.lock();
                 bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
+                uint64_t used_bytes = bitmap_controller.bitmap_used_bit * bytes_per_bit;
+                update_peak_used_bytes(statistics, used_bytes);
                 bitmap_controller.used_bit_count_lock.unlock();
+                statistics.realloc_count++;
                 return success;
             }else{
+                record_realloc_fail();
                 return status;
             }
     }fatal.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::INHEAP_REALLOC_RESULTS::FATAL_REASONS::REASON_CODE_UNREACHABLE_CODE;
+    record_realloc_fail();
     return fatal;
 }
 

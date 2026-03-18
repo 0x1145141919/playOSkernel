@@ -1,21 +1,21 @@
 #include "core_hardwares/PortDriver.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "core_hardwares/primitive_gop.h"
 #include "kcirclebufflogMgr.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "core_hardwares/HPET.h"
 #include "Interrupt_system/loacl_processor.h"
 #include "core_hardwares/lapic.h"
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "memory/kpoolmemmgr.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/FreePagesAllocator.h"
 #include "memory/init_memory_info.h"
-#include "util/cpuid_intel.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 #include "memory/AddresSpace.h"
 #include "util/OS_utils.h"
-#include "msr_offsets_definitions.h"
-#include "time.h"
+#include "abi/arch/x86-64/msr_offsets_definitions.h"
+#include "ktime.h"
 #include "util/kout.h"
 #include "util/textConsole.h"
 #include "firmware/UefiRunTimeServices.h"
@@ -51,8 +51,8 @@ EFI_TIME global_time;
 uint32_t efi_map_ver;
 void ipi_test(){
     uint32_t self_processor_id=fast_get_processor_id();
-    kio::bsp_kout<<"processor id "<< self_processor_id<<kio::kendl;
-    //asm volatile("hlt");
+    bsp_kout<<"processor id "<< self_processor_id<<kendl;
+    asm volatile("hlt");
 }
 extern "C" void ap_norm_start( ){
 
@@ -73,7 +73,7 @@ phymem_segment *phymem_segments;
 uint64_t phymem_segments_count; 
 extern "C" void kernel_start(init_to_kernel_info* transfer) 
 {   
-    GlobalKernelStatus=kernel_state::ENTER;
+    GlobalKernelStatus=kernel_state::EARLY_BOOT;
     int  Status=0;
     KURD_t bsp_init_kurd=KURD_t();
     pass_through_device_info*tfg=nullptr;
@@ -102,10 +102,6 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
             logbuffer = &transfer->loaded_VM_intervals[i];
             break;
         
-        case VM_ID_FIRST_BCB_BITMAP:
-            first_BCB_bitmap = &transfer->loaded_VM_intervals[i];
-            break;
-        
         case VM_ID_KSYMBOLS:
             ksymbols = &transfer->loaded_VM_intervals[i];
             break;
@@ -130,19 +126,20 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
     ktime::hardware_time::try_tsc();
     ksymmanager::Init(ksymbols,transfer->ksymbols_file_size);  
     kpoolmemmgr_t::Init(first_heap,first_heap_bitmap);  
-    global_gST=transfer->gST_ptr;
+    global_gST=(EFI_SYSTEM_TABLE*)transfer->gST_ptr;
     DmesgRingBuffer::Init(logbuffer);
     Vec2i font_vec={.x=16, .y=32};
     bsp_init_kurd=textconsole_GoP::Init(&ter16x32_data[0][0][0],font_vec,0x00ffffffff,0);
+    textconsole_GoP::Clear();
     serial_init_stage1();
-    kio::bsp_kout.Init();
-    kio::bsp_kout.shift_dec();
+    bsp_kout.Init();
+    bsp_kout.shift_dec();
     if (Status!=OS_SUCCESS)
     {
-        kio::bsp_kout<<"InitialKernelShellControler Failed\n";
+        bsp_kout<<"InitialKernelShellControler Failed\n";
         return ;
     }
-    kio::bsp_kout<<"Kernel Shell Initialed Success\n";
+    bsp_kout<<"Kernel Shell Initialed Success\n";
     VM_intervals=new loaded_VM_interval[transfer->loaded_VM_interval_count];
     ksystemramcpy(transfer->loaded_VM_intervals,VM_intervals,transfer->loaded_VM_interval_count*sizeof(loaded_VM_interval));
     phymem_segments=new phymem_segment[transfer->phymem_segment_count];
@@ -152,31 +149,29 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
     GlobalKernelStatus=kernel_state::PANIC_WILL_ANALYZE;
     Panic::will_check();
     if(transfer->kmmu_root_table>=0x100000000){
-        kio::bsp_kout<<"Kernel Mmu Root Table is not in low memory"<<kio::kendl;
+        bsp_kout<<"Kernel Mmu Root Table is not in low memory"<<kendl;
         asm volatile("hlt");
     }
     assigned_cr3=transfer->kmmu_root_table;
     asm volatile("sfence");
     bsp_init_kurd=phymemspace_mgr::Init(transfer);
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"phymemspace_mgr Init Failed"<<kio::kendl;
+        bsp_kout<<"phymemspace_mgr Init Failed"<<kendl;
         asm volatile("hlt");
     }
-    bsp_init_kurd=FreePagesAllocator::Init(first_BCB_bitmap);//传入一个loaded_VM_entry
+    bsp_init_kurd=FreePagesAllocator::Init();//传入一个loaded_VM_entry
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"FreePagesAllocator Init Failed"<<kio::kendl;
+        bsp_kout<<"FreePagesAllocator Init Failed"<<kendl;
         asm volatile("hlt");
     }
-    bsp_init_kurd=KspaceMapMgr::Init(kspaceUPpdpt);
+    bsp_init_kurd=KspacePageTable::Init(kspaceUPpdpt);
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"KspaceMapMgr Init Failed"<<kio::kendl;
+        bsp_kout<<"KspaceMapMgr Init Failed"<<kendl;
         asm volatile("hlt");
     }
     gKernelSpace=new AddressSpace();
     bsp_init_kurd=gKernelSpace->second_stage_init();//传入trasfer,特殊重载，要接手相关内存
-    bsp_init_kurd=[&](init_to_kernel_info*transfer)->KURD_t{
-        loaded_VM_interval*loaded_VM_interval_base=transfer->loaded_VM_intervals;
-        phymem_segment*phymem_segment_base=transfer->memory_map;
+    bsp_init_kurd=[&]()->KURD_t{
         KURD_t kurd=KURD_t();
         pgaccess WB_ACCESS={
                 .is_kernel=1,
@@ -213,17 +208,17 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
             .is_out_bound_protective=0,
             .SEG_SIZE_ONLY_UES_IN_BASIC_SEG=0xffffffffffffffff
         };
-        for(uint64_t i=0;i<transfer->phymem_segment_count;i++){
-            identity_map_template.start=phymem_segment_base[i].size;
-            identity_map_template.phys_start=phymem_segment_base[i].start;
-            identity_map_template.end=phymem_segment_base[i].size+phymem_segment_base[i].start;
-            if(phymem_segment_base[i].type==PHY_MEM_TYPE::EFI_MEMORY_MAPPED_IO||
-            phymem_segment_base[i].type==PHY_MEM_TYPE::EFI_ACPI_MEMORY_NVS||
-            phymem_segment_base[i].type==PHY_MEM_TYPE::EFI_RESERVED_MEMORY_TYPE){
+        for(uint64_t i=0;i<phymem_segments_count;i++){
+            identity_map_template.start=phymem_segments[i].start;
+            identity_map_template.phys_start=phymem_segments[i].start;
+            identity_map_template.end=phymem_segments[i].size+phymem_segments[i].start;
+            if(phymem_segments[i].type==PHY_MEM_TYPE::EFI_MEMORY_MAPPED_IO||
+            phymem_segments[i].type==PHY_MEM_TYPE::EFI_ACPI_MEMORY_NVS||
+            phymem_segments[i].type==PHY_MEM_TYPE::EFI_RESERVED_MEMORY_TYPE){
                 identity_map_template.access=UC_ACCESS;
             }else{
                 identity_map_template.access=WB_ACCESS;
-                if(phymem_segment_base[i].type==PHY_MEM_TYPE::EFI_RUNTIME_SERVICES_CODE){
+                if(phymem_segments[i].type==PHY_MEM_TYPE::EFI_RUNTIME_SERVICES_CODE){
                     identity_map_template.access=WB_RX_ACCESS;
                 }
             }
@@ -231,15 +226,30 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
             
             if(error_kurd(kurd))return kurd;
         }
+        for(uint64_t i=0;i<VM_intervals_count;i++){
+            if(VM_intervals[i].VM_interval_specifyid<VM_ID_architecture_agnostic_base){
+                if(VM_intervals[i].vbase<0xffff800000000000){
+                    identity_map_template.start=VM_intervals[i].vbase;
+            identity_map_template.phys_start=VM_intervals[i].pbase;
+            identity_map_template.end=VM_intervals[i].vbase+align_up(VM_intervals[i].size,4096);
+            identity_map_template.access=VM_intervals[i].access;
+            kurd=gKernelSpace->enable_VM_desc(identity_map_template);
+            if(error_kurd(kurd))return kurd;
+                }
+            }
+        }
         return kurd;
-    }(transfer);
-    Status=EFI_RT_SVS::Init(transfer->gST_ptr);
+    }();
+    if(error_kurd(bsp_init_kurd)){
+        bsp_kout<<"identity map fail"<<kendl;
+        asm volatile("hlt");
+    }
+    Status=EFI_RT_SVS::Init((EFI_SYSTEM_TABLE*)transfer->gST_ptr);
     gAcpiVaddrSapceMgr.Init(global_gST);
     gKernelSpace->unsafe_load_pml4_to_cr3(KERNEL_SPACE_PCID);
     GlobalKernelStatus=kernel_state::MM_READY;
-    phymemspace_mgr::subtb_alloc_shift_pages_way(); 
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"textconsole_GoP Init Failed"<<kio::kendl;
+        bsp_kout<<"textconsole_GoP Init Failed"<<kendl;
         asm volatile("hlt");
     }
     readonly_timer=new HPET_driver_only_read_time_stamp(
@@ -249,26 +259,25 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
     x86_smp_processors_container::regist_core(0);
     bsp_init_kurd=readonly_timer->second_stage_init();
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"HPET Init Failed"<<kio::kendl;
+        bsp_kout<<"HPET Init Failed"<<kendl;
         asm volatile("hlt");
     }
     ktime::hardware_time::inform_initialized_hpet();
     ktime::hardware_time::processor_regist();
     
-    kio::bsp_kout<<kio::now<<"HPET Initialized Success"<<kio::kendl;
-    kio::bsp_kout<<kio::now<<"BSP online"<<kio::kendl;
+    bsp_kout<<now<<"HPET Initialized Success"<<kendl;
+    bsp_kout<<now<<"BSP online"<<kendl;
     gAnalyzer=new APIC_table_analyzer((MADT_Table*)gAcpiVaddrSapceMgr.get_acpi_table("APIC"));
     FreePagesAllocator::second_stage(FreePagesAllocator::BEST_FIT);
     bsp_init_kurd=kpoolmemmgr_t::multi_heap_enable();
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kio::kendl;
+        bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kendl;
     }
-    
     ktime::time_interrupt_generator::bsp_init();
     all_scheduler_ptr=new per_processor_scheduler*[gAnalyzer->processor_x64_list->size()];
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
-        kio::bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kio::kendl;
+        bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kendl;
     }    
     asm volatile("sti");   
     //中断接管工作

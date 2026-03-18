@@ -1,5 +1,5 @@
 #include "firmware/ACPI_APIC.h"
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "firmware/gSTResloveAPIs.h"
 APIC_table_analyzer*gAnalyzer;
 //根据传入的MADT表以状态机的思想遍历填充那五个双向链表

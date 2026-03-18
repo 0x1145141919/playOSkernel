@@ -338,7 +338,7 @@ void setup_memory_layout()
     mem_interval cross_seg = {0x100000, 0x200000};
     int result = basic_allocator::pages_set(cross_seg, OS_KERNEL_DATA);
     if (result == -2) {
-        kio::bsp_kout << "Error: Region spans multiple segments" << kio::kendl;
+        bsp_kout<< "Error: Region spans multiple segments" << kendl;
     }
 }
 ```
@@ -472,8 +472,8 @@ void init_memory_management(BootInfoHeader* header)
     }
     
     // 5. 输出分配结果
-    kio::bsp_kout << "Kernel Stack: 0x" << kernel_stack << kio::kendl;
-    kio::bsp_kout << "Kernel Data: 0x" << kernel_data << kio::kendl;
+    bsp_kout<< "Kernel Stack: 0x" << kernel_stack << kendl;
+    bsp_kout<< "Kernel Data: 0x" << kernel_data << kendl;
 }
 ```
 

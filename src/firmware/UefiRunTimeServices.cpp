@@ -1,9 +1,10 @@
 #include "firmware/UefiRunTimeServices.h"
 #include "util/OS_utils.h"
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "memory/AddresSpace.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "memory/init_memory_info.h"
+#include "abi/boot.h"
 
 EFI_SYSTEM_TABLE*global_gST;
 EFI_SYSTEM_TABLE* EFI_RT_SVS::gST;
@@ -23,25 +24,6 @@ int EFI_RT_SVS::Init(EFI_SYSTEM_TABLE *sti)
    uint64_t filter_maxcount = phymem_segments_count;
     loaded_VM_interval*entries_fileter= new loaded_VM_interval[filter_maxcount];
    uint16_t gST_locate_index=0;
-    for (uint64_t i = 0,i1=0; i < filter_maxcount; i++)
-    {
-       if (phymem_segments[i].type==EFI_RUNTIME_SERVICES_CODE||
-       phymem_segments[i].type==EFI_RUNTIME_SERVICES_DATA||
-       phymem_segments[i].type==EFI_ACPI_RECLAIM_MEMORY)
-        {
-            KURD_t kurd=KURD_t();
-           vaddr_t vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd,phymem_segments[i].start,phymem_segments[i].size,KspaceMapMgr::PG_RWX,0);
-           if(!vbase)return kurd_get_raw(kurd);
-           entries_fileter[i1].pbase=phymem_segments[i].start;
-           entries_fileter[i1].size=phymem_segments[i].size;            
-           entries_fileter[i1].vbase=(vaddr_t)vbase;
-           if(phymem_segments[i].start<=(phyaddr_t)sti&&(phyaddr_t)sti<(phymem_segments[i].size+phymem_segments[i].start))
-            {
-               gST_locate_index=i1;
-            }
-            i1++;
-        }
-    }
     reset_system = (EFI_RESET_SYSTEM)gST->RuntimeServices->ResetSystem;
     get_time = (EFI_GET_TIME)gST->RuntimeServices->GetTime;
     set_time = (EFI_SET_TIME)gST->RuntimeServices->SetTime;

@@ -1,5 +1,5 @@
 #pragma once
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "util/OS_utils.h"
 namespace kio
 {
@@ -116,6 +116,7 @@ class kout
     kout& operator<<(uint8_t num);
     kout& operator<<(int8_t num);
     kout& operator<<(radix_shift_t radix);
+    kout& operator<<(numer_system_select radix);
     uint64_t register_backend(kout_backend backend);//返回~0表示分配失败
     bool unregister_backend(uint64_t index);
     bool mask_backend(uint64_t index);
@@ -126,8 +127,10 @@ class kout
     void Init();
     ~kout(){};
 };
-extern kout bsp_kout;
-extern endl kendl;
-extern now_time now;
+
+
 void defalut_KURD_module_interpator(KURD_t kurd);
 }
+extern kio::endl kendl;
+extern kio::now_time now;
+extern kio::kout bsp_kout;

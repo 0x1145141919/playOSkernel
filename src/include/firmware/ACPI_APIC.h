@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "gSTResloveAPIs.h"
 #include "util/Ktemplats.h"
 namespace ACPI_MADT {

@@ -1,13 +1,14 @@
 #include "core_hardwares/lapic.h"
 #include "util/OS_utils.h"
-#include "util/cpuid_intel.h"
-#include "msr_offsets_definitions.h"
+#include "util/arch/x86-64/cpuid_intel.h"
+#include "abi/arch/x86-64/msr_offsets_definitions.h"
+#include "abi/arch/x86-64/GS_Slots_index_definitions.h"
 #include "Interrupt_system/Interrupt.h"
 #include "firmware/gSTResloveAPIs.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/AddresSpace.h"
 #include "util/kout.h"
-#include "time.h"
+#include "ktime.h"
 void x2apic::x2apic_driver::raw_config_timer(timer_lvt_entry entry)
 {
     wrmsr(msr::apic::IA32_X2APIC_LVT_TIMER,entry.raw);

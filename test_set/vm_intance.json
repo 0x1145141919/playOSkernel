@@ -1,0 +1,30 @@
+{
+    "phymem":[
+        {"start": "0x0", "size": 655360, "type": "freeSystemRam"},
+        {"start": "0xA0000", "size": 393216, "type": "OS_MEMSEG_HOLE"},
+        {"start": "0x100000", "size": 7340032, "type": "freeSystemRam"},
+        {"start": "0x800000", "size": 32768, "type": "EFI_ACPI_MEMORY_NVS"},
+        {"start": "0x808000", "size": 12288, "type": "freeSystemRam"},
+        {"start": "0x80B000", "size": 4096, "type": "EFI_ACPI_MEMORY_NVS"},
+        {"start": "0x80C000", "size": 32768, "type": "freeSystemRam"},
+        {"start": "0x814000", "size": 966656, "type": "EFI_ACPI_MEMORY_NVS"},
+        {"start": "0x900000", "size": 2128531456, "type": "freeSystemRam"},
+        {"start": "0x7F6ED000", "size": 1048576, "type": "EFI_RUNTIME_SERVICES_DATA"},
+        {"start": "0x7F7ED000", "size": 1048576, "type": "EFI_RUNTIME_SERVICES_CODE"},
+        {"start": "0x7F8ED000", "size": 524288, "type": "EFI_RESERVED_MEMORY_TYPE"},
+        {"start": "0x7F96D000", "size": 73728, "type": "EFI_ACPI_RECLAIM_MEMORY"},
+        {"start": "0x7F97F000", "size": 524288, "type": "EFI_ACPI_MEMORY_NVS"},
+        {"start": "0x7F9FF000", "size": 4403200, "type": "freeSystemRam"},
+        {"start": "0x7FE32000", "size": 16384, "type": "EFI_RESERVED_MEMORY_TYPE"},
+        {"start": "0x7FE36000", "size": 8192, "type": "EFI_ACPI_MEMORY_NVS"},
+        {"start": "0x7FE38000", "size": 606208, "type": "freeSystemRam"},
+        {"start": "0x7FECC000", "size": 540672, "type": "EFI_RUNTIME_SERVICES_DATA"},
+        {"start": "0x7FF50000", "size": 720896, "type": "EFI_ACPI_MEMORY_NVS"},
+        {"start": "0x80000000", "size": 1610612736, "type": "OS_MEMSEG_HOLE"},
+        {"start": "0xE0000000", "size": 268435456, "type": "EFI_RESERVED_MEMORY_TYPE"},
+        {"start": "0xF0000000", "size": 251641856, "type": "OS_MEMSEG_HOLE"},
+        {"start": "0xFEFFC000", "size": 16384, "type": "EFI_RESERVED_MEMORY_TYPE"},
+        {"start": "0xFF000000", "size": 16777216, "type": "OS_MEMSEG_HOLE"},
+        {"start": "0x100000000", "size": 6442450944, "type": "freeSystemRam"}
+    ]
+}

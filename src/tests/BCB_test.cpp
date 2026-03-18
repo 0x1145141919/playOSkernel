@@ -88,9 +88,9 @@ static int exit_with_cleanup(int code)
 
 int main()
 {
-    kio::bsp_kout.Init();  
-    kio::bsp_kout.shift_dec();
-    kio::bsp_kout << "=== Starting FreePagesAllocator BCB Test ===" << kio::kendl;
+    bsp_kout.Init();  
+    bsp_kout.shift_dec();
+    bsp_kout<< "=== Starting FreePagesAllocator BCB Test ===" << kendl;
      
     // 创建第一个BCB实例，用于管理从0x100000000开始的20阶内存区域（约1GB）
     FreePagesAllocator::first_BCB = new FreePagesAllocator::BuddyControlBlock(
@@ -98,16 +98,16 @@ int main()
     );
 
     // 验证BCB基本属性
-    kio::bsp_kout << "Testing basic info..." << kio::kendl;
-    kio::bsp_kout << "Max support order: " << (uint32_t)FreePagesAllocator::first_BCB->get_max_order() << kio::kendl;
+    bsp_kout<< "Testing basic info..." << kendl;
+    bsp_kout<< "Max support order: " << (uint32_t)FreePagesAllocator::first_BCB->get_max_order() << kendl;
     
     // 初始化第二阶段
-    kio::bsp_kout << "Initializing second stage..." << kio::kendl;
+    bsp_kout<< "Initializing second stage..." << kendl;
     KURD_t init_result = FreePagesAllocator::first_BCB->second_stage_init();
     if (init_result.result == result_code::SUCCESS) {
-        kio::bsp_kout << "Second stage initialization successful!" << kio::kendl;
+        bsp_kout<< "Second stage initialization successful!" << kendl;
     } else {
-        kio::bsp_kout << "Second stage initialization failed!" << kio::kendl;
+        bsp_kout<< "Second stage initialization failed!" << kendl;
         return exit_with_cleanup(-1);
     }
 
@@ -121,7 +121,7 @@ int main()
     std::lognormal_distribution<double> size_dist(log(1<<14), 1.0); 
 
     const int num_allocations = 10000; // 分配100000次
-    kio::bsp_kout << "Generating " << num_allocations << " random allocations..." << kio::kendl;
+    bsp_kout<< "Generating " << num_allocations << " random allocations..." << kendl;
 
     // 创建文件A用于保存测试集（二进制结构体数组）
 #ifdef BEHAVIOR_SAVE
@@ -132,7 +132,7 @@ int main()
         map_file_rw(test_set_path, test_set_bytes, test_set_fd)
     );
     if (test_set_map == MAP_FAILED) {
-        kio::bsp_kout << "Failed to mmap " << test_set_path << " for writing!" << kio::kendl;
+        bsp_kout<< "Failed to mmap " << test_set_path << " for writing!" << kendl;
         return exit_with_cleanup(-1);
     }
     std::memset(test_set_map, 0, test_set_bytes);
@@ -157,9 +157,9 @@ int main()
     msync(test_set_map, test_set_bytes, MS_SYNC);
     munmap(test_set_map, test_set_bytes);
     close(test_set_fd);
-    kio::bsp_kout << "Test set saved to " << test_set_path << kio::kendl;
+    bsp_kout<< "Test set saved to " << test_set_path << kendl;
 #else
-    kio::bsp_kout << "BEHAVIOR_SAVE not enabled: skip test set file output" << kio::kendl;
+    bsp_kout<< "BEHAVIOR_SAVE not enabled: skip test set file output" << kendl;
 #endif
 
     // 创建文件B用于记录操作日志（二进制结构体数组）
@@ -172,18 +172,18 @@ int main()
         map_file_rw(op_log_path, op_log_bytes, op_log_fd)
     );
     if (op_log_map == MAP_FAILED) {
-        kio::bsp_kout << "Failed to mmap " << op_log_path << " for writing!" << kio::kendl;
+        bsp_kout<< "Failed to mmap " << op_log_path << " for writing!" << kendl;
         return exit_with_cleanup(-1);
     }
     std::memset(op_log_map, 0, op_log_bytes);
     size_t op_log_count = 0;
 #else
-    kio::bsp_kout << "BEHAVIOR_SAVE not enabled: skip operation log file output" << kio::kendl;
+    bsp_kout<< "BEHAVIOR_SAVE not enabled: skip operation log file output" << kendl;
 #endif
 
     // 创建状态机进行100万次分配和释放操作
     std::uniform_int_distribution<int> index_dist(0, num_allocations - 1);
-    kio::bsp_kout << "Starting state machine with 1,000,000 allocation/deallocation cycles..." << kio::kendl;
+    bsp_kout<< "Starting state machine with 1,000,000 allocation/deallocation cycles..." << kendl;
     uint64_t old_stamp=rdtsc();
     int exit_code = 0;
     
@@ -216,8 +216,8 @@ int main()
             } else if (is_no_available_buddy_fail(alloc_result)) {
                 // 正常的内存不足情况，跳过
             } else {
-                kio::bsp_kout << "Allocation failed at cycle " << cycle 
-                             << ", size=" << seg.size << kio::kendl;
+                bsp_kout<< "Allocation failed at cycle " << cycle 
+                             << ", size=" << seg.size << kendl;
                 exit_code = 2;
                 break;
             }
@@ -237,8 +237,8 @@ int main()
             if (free_result.result == result_code::SUCCESS) {
                 seg.start_addr = 1; // 重置为无效地址
             } else {
-                kio::bsp_kout << "Deallocation failed at cycle " << cycle 
-                             << ", addr=0x" << seg.start_addr << kio::kendl;
+                bsp_kout<< "Deallocation failed at cycle " << cycle 
+                             << ", addr=0x" << seg.start_addr << kendl;
                 exit_code = 3;
                 break;
             }
@@ -246,11 +246,11 @@ int main()
         
         // 每隔100000次输出一次进度和时间
         if ((cycle + 1) % 100000 == 0) {
-            kio::bsp_kout << "Completed " << (cycle + 1) << " cycles" << kio::kendl;
+            bsp_kout<< "Completed " << (cycle + 1) << " cycles" << kendl;
             uint64_t now_tsc=rdtsc();
-            kio::bsp_kout << "Elapsed time: " << (now_tsc-old_stamp)/100000 << " tsc" << kio::kendl;
+            bsp_kout<< "Elapsed time: " << (now_tsc-old_stamp)/100000 << " tsc" << kendl;
             old_stamp=now_tsc;
-            kio::bsp_kout << "Timestamp: " <<kio::now<< kio::kendl;
+            bsp_kout<< "Timestamp: " <<now<< kendl;
         }
     }
     
@@ -263,15 +263,15 @@ int main()
     munmap(op_log_map, op_log_bytes);
     ftruncate(op_log_fd, static_cast<off_t>(used_log_bytes));
     close(op_log_fd);
-    kio::bsp_kout << "Operation log saved to " << op_log_path << kio::kendl;
+    bsp_kout<< "Operation log saved to " << op_log_path << kendl;
 #endif
     
     FreePagesAllocator::first_BCB->print_basic_info();
     KURD_t flush=FreePagesAllocator::first_BCB->free_pages_flush();
     if(!success_all_kurd(flush)){
-        kio::bsp_kout << "violation detect" << kio::kendl;
+        bsp_kout<< "violation detect" << kendl;
         FreePagesAllocator::first_BCB->print_basic_info();
     }
-    kio::bsp_kout << "=== Random Allocation/Deallocation Test Completed ===" << kio::kendl;
+    bsp_kout<< "=== Random Allocation/Deallocation Test Completed ===" << kendl;
     return exit_with_cleanup(exit_code);
 }

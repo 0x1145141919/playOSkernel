@@ -1,7 +1,8 @@
 #include "memory/AddresSpace.h"
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "memory/phygpsmemmgr.h"
 #include "memory/kpoolmemmgr.h"
+#include "memory/FreePagesAllocator.h"
 #include "memory/phyaddr_accessor.h"    
 #include "linker_symbols.h"
 #include "util/OS_utils.h"
@@ -157,10 +158,9 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
             return subtb_phybase;
         }else{
             phyaddr_t entry_to_alloc_phybase=0;
-            entry_to_alloc_phybase = __wrapped_pgs_alloc(
-                &pages_alloc_event_kurd,1,KERNEL,12
-            );
-            if(!entry_to_alloc_phybase) return 0;
+            Alloc_result res= FreePagesAllocator::alloc(_4KB_SIZE,BUDDY_ALLOC_DEFAULT_FLAG,page_state_t::kernel_pinned);
+            entry_to_alloc_phybase=res.base;
+            if(!entry_to_alloc_phybase||error_kurd(res.result)) return 0;
             
             // 初始化新分配的页表内存为0
             for(uint16_t i=0; i<512; i++) {
@@ -185,7 +185,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
         
         
         if(count==0||count>512){
-            kio::bsp_kout<<"AddressSpace::enable_VM_desc::_4lv_pte_4KB_entries_set:cross page directory boundary not allowed"<<kio::kendl;
+            bsp_kout<<"AddressSpace::enable_VM_desc::_4lv_pte_4KB_entries_set:invalid count"<<kendl;
             return ILLEAGLE_PAGES_COUNT;
         }
         if(phybase%_4KB_SIZE||vaddr_base%_4KB_SIZE){
@@ -196,7 +196,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
         uint16_t pde_index=(vaddr_base>>21)&((1<<9)-1);
         uint16_t pte_index=(vaddr_base>>12)&((1<<9)-1);
         if(pte_index+count>512){
-            kio::bsp_kout<<"AddressSpace::enable_VM_desc::_4lv_pte_4KB_entries_set:cross page directory boundary not allowed"<<kio::kendl;
+            bsp_kout<<"AddressSpace::enable_VM_desc::_4lv_pte_4KB_entries_set:cross page directory boundary not allowed"<<kendl;
             return PAGES_COUNT_AND_BASE_OUT_OF_RANGE;
         }//这里权限问题待解决
         
@@ -285,7 +285,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
     ](phyaddr_t phybase, vaddr_t vaddr_base, uint16_t count) -> uint16_t {
         
         if (count == 0 || count > 512) {
-            kio::bsp_kout << "AddressSpace::enable_VM_desc::_4lv_pde_2MB_entries_set:cross page directory boundary not allowed" << kio::kendl;
+            bsp_kout<< "AddressSpace::enable_VM_desc::_4lv_pde_2MB_entries_set:cross invalid count" << kendl;
             return ILLEAGLE_PAGES_COUNT;
         }
         constexpr uint32_t _2MB_SIZE = 0x200000;
@@ -298,6 +298,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
         uint16_t pde_index   = (vaddr_base >> 21) & 0x1FF;
 
         if (pde_index + count > 512) {
+            bsp_kout<< "AddressSpace::enable_VM_desc::_4lv_pde_2MB_entries_set:cross page directory boundary not allowed" << kendl;
             return PAGES_COUNT_AND_BASE_OUT_OF_RANGE;
         }
 
@@ -366,7 +367,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
         TRY_TO_GET_SUB_ENTRY_FOT_BIG_ATOM_PAGE_ENTRY,desc_access,atompages_cache_table_idx, get_sub_tb,pml4tb_phyaddr_base](
         phyaddr_t phybase, vaddr_t vaddr_base, uint64_t count) -> uint16_t {
         if (count == 0 || count > 512) {
-            kio::bsp_kout << "AddressSpace::enable_VM_desc::_4lv_pdpte_1GB_entries_set:cross page directory boundary not allowed" << kio::kendl;
+            bsp_kout<< "AddressSpace::enable_VM_desc::_4lv_pdpte_1GB_entries_set:invalid pages count" << kendl;
             return ILLEAGLE_PAGES_COUNT;
         }
         constexpr uint64_t _1GB_SIZE = 0x40000000ULL;
@@ -378,6 +379,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
         uint16_t pdpte_index = (vaddr_base >> 30) & 0x1FF;
 
         if (pdpte_index + count > 512) {
+            bsp_kout<< "AddressSpace::enable_VM_desc::_4lv_pdpte_1GB_entries_set:cross page directory boundary not allowed" << kendl;
             return PAGES_COUNT_AND_BASE_OUT_OF_RANGE;
         }
 
@@ -428,101 +430,73 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
     if(pglv_4_or_5==PAGE_TBALE_LV::LV_4)
     {
         lock.write_lock();
-        switch (package.congruence_level) {
-        case congruence_level_1gb: {
-            for(int i=0;i<5;i++) {
-                auto &entry = package.entryies[i];
-                if(entry.num_of_pages==0) continue;
-                uint64_t psize = entry.page_size_in_byte;
-                if(psize==0) goto page_size_invalid;
-                if((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0){
-                    fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
-                    goto bad_vmentry_unlock;
-                }
-                switch(entry.page_size_in_byte){
-                case _1GB_SIZE: {
-                    uint64_t count_to_assign_left = entry.num_of_pages;
-                    uint16_t pdpte_idx = (entry.vbase / _1GB_SIZE) & 0x1FF;
-                    uint64_t processed_pages = 0;
-                    auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
-                    while(count_to_assign_left > 0){
-                        uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pdpte_idx));
-                        phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
-                        vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
-                        contain = _4lv_pdpte_1GB_entries_set(this_phybase, this_vbase, this_count);
-                        if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
-                        if(contain!=0)goto sub_step_invalid;
-                        count_to_assign_left -= this_count;
-                        processed_pages += this_count;
-                        pdpte_idx = 0;
-                    }
-                    break;
-                }
-                case _2MB_SIZE:
-                    contain=_4lv_pde_2MB_entries_set(entry.phybase,entry.vbase,static_cast<uint16_t>(entry.num_of_pages));
-                    if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
-                    if(contain!=0)goto sub_step_invalid;
-                    break;
-                case _4KB_SIZE:
-                    contain=_4lv_pte_4KB_entries_set(entry.phybase,entry.vbase,static_cast<uint16_t>(entry.num_of_pages));
-                    if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
-                    if(contain!=0)goto sub_step_invalid;
-                    break;
-                default:
-                    goto page_size_invalid;
-                }
+        for(int i=0;i<5;i++) {
+            auto &entry = package.entryies[i];
+            if(entry.num_of_pages==0) continue;
+            uint64_t psize = entry.page_size_in_byte;
+            if(psize==0) goto page_size_invalid;
+            if((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0){
+                fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
+                goto bad_vmentry_unlock;
             }
-            break;
-        }
-        case congruence_level_2mb: {
-            for(int i=0;i<5;i++) {
-                auto &entry = package.entryies[i];
-                if(entry.num_of_pages==0) continue;
-                uint64_t psize = entry.page_size_in_byte;
-                if(psize==0) goto page_size_invalid;
-                if((entry.vbase % psize) != 0 || (entry.phybase % psize) != 0){
-                    fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FAIL_REASONS::REASON_CODE_BAD_VMENTRY;
-                    goto bad_vmentry_unlock;
-                }
-                switch(entry.page_size_in_byte){
-                case _2MB_SIZE:
-                    for(uint64_t j=0;j<entry.num_of_pages;j++){
-                        contain=_4lv_pde_2MB_entries_set(
-                            entry.phybase + j*_2MB_SIZE,
-                            entry.vbase + j*_2MB_SIZE,
-                            1);
-                        if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
-                        if(contain!=0)goto sub_step_invalid;
-                    }
-                    break;
-                case _4KB_SIZE:
-                    contain=_4lv_pte_4KB_entries_set(entry.phybase,entry.vbase,static_cast<uint16_t>(entry.num_of_pages));
+            switch(entry.page_size_in_byte){
+            case _1GB_SIZE: {
+                uint64_t count_to_assign_left = entry.num_of_pages;
+                uint16_t pdpte_idx = (entry.vbase / _1GB_SIZE) & 0x1FF;
+                uint64_t processed_pages = 0;
+                auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
+                while(count_to_assign_left > 0){
+                    uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pdpte_idx));
+                    phyaddr_t this_phybase = entry.phybase + processed_pages * _1GB_SIZE;
+                    vaddr_t this_vbase = entry.vbase + processed_pages * _1GB_SIZE;
+                    contain = _4lv_pdpte_1GB_entries_set(this_phybase, this_vbase, this_count);
                     if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
                     if(contain!=0)goto sub_step_invalid;
-                    break;
-                default:
-                    goto page_size_invalid;
+                    count_to_assign_left -= this_count;
+                    processed_pages += this_count;
+                    pdpte_idx = 0;
                 }
+                break;
             }
-            break;
-        }
-        case congruence_level_4kb: {
-            for(int i=0;i<5;i++) {
-                auto &entry = package.entryies[i];
-                if(entry.page_size_in_byte!=_4KB_SIZE) continue;
-                for(uint64_t j=0;j<entry.num_of_pages;j++){
-                    contain=_4lv_pte_4KB_entries_set(
-                        entry.phybase + j*_4KB_SIZE,
-                        entry.vbase + j*_4KB_SIZE,
-                        1);
+            case _2MB_SIZE: {
+                uint64_t count_to_assign_left = entry.num_of_pages;
+                uint16_t pde_idx = (entry.vbase / _2MB_SIZE) & 0x1FF;
+                uint64_t processed_pages = 0;
+                auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
+                while(count_to_assign_left > 0){
+                    uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pde_idx));
+                    phyaddr_t this_phybase = entry.phybase + processed_pages * _2MB_SIZE;
+                    vaddr_t this_vbase = entry.vbase + processed_pages * _2MB_SIZE;
+                    contain = _4lv_pde_2MB_entries_set(this_phybase, this_vbase, this_count);
                     if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
                     if(contain!=0)goto sub_step_invalid;
+                    count_to_assign_left -= this_count;
+                    processed_pages += this_count;
+                    pde_idx = 0;
                 }
+                break;
             }
-            break;
-        }
-        default:
-            goto page_size_invalid;
+            case _4KB_SIZE: {
+                uint64_t count_to_assign_left = entry.num_of_pages;
+                uint16_t pte_idx = (entry.vbase / _4KB_SIZE) & 0x1FF;
+                uint64_t processed_pages = 0;
+                auto min = [](uint64_t a, uint64_t b)->uint64_t { return a < b ? a : b; };
+                while(count_to_assign_left > 0){
+                    uint16_t this_count = static_cast<uint16_t>(min(count_to_assign_left, 512 - pte_idx));
+                    phyaddr_t this_phybase = entry.phybase + processed_pages * _4KB_SIZE;
+                    vaddr_t this_vbase = entry.vbase + processed_pages * _4KB_SIZE;
+                    contain = _4lv_pte_4KB_entries_set(this_phybase, this_vbase, this_count);
+                    if(contain==OS_OUT_OF_MEMORY)goto pages_runout_chech;
+                    if(contain!=0)goto sub_step_invalid;
+                    count_to_assign_left -= this_count;
+                    processed_pages += this_count;
+                    pte_idx = 0;
+                }
+                break;
+            }
+            default:
+                goto page_size_invalid;
+            }
         }
         occupyied_size+=(desc.end-desc.start);
         goto success;
@@ -580,8 +554,6 @@ KURD_t AddressSpace::disable_VM_desc(VM_DESC desc)
     uint64_t currunt_roottb_phyaddr=0;
     asm volatile("mov %%cr3, %0" : "=r"(currunt_roottb_phyaddr));
     bool will_invalidate_soon=align_down(currunt_roottb_phyaddr, _4KB_SIZE)==this->pml4_phybase;
-    pgaccess desc_access = desc.access;
-    cache_table_idx_struct_t atompages_cache_table_idx = cache_strategy_to_idx(desc_access.cache_strategy);
     phyaddr_t pml4tb_phyaddr_base=pml4_phybase;
     struct pages_clear_result_bitmap{
         uint64_t success:1;
@@ -603,7 +575,7 @@ KURD_t AddressSpace::disable_VM_desc(VM_DESC desc)
     phyaddr_t phybase, vaddr_t vaddr_base, uint16_t count) -> pages_clear_error_status
     {
     if (count == 0 || count > 512) {
-        kio::bsp_kout<<"OS_PGTB_FREE_VALIDATION_FAIL"<<kio::kendl;
+        bsp_kout<<"OS_PGTB_FREE_VALIDATION_FAIL"<<kendl;
         return COUNT_OUT_OF_RANGE;
     }
     if (phybase % _4KB_SIZE ||vaddr_base % _4KB_SIZE) return ADDRESS_NOT_ALIGNED;
@@ -660,7 +632,7 @@ KURD_t AddressSpace::disable_VM_desc(VM_DESC desc)
     }
     if(all_clear)
      {
-        phymemspace_mgr::pages_recycle(pte_base,1);
+        FreePagesAllocator::free(pte_base,1<<12);
         PhyAddrAccessor::writeu64(pde_base+pde_index*sizeof(PageTableEntryUnion),0);
         
         // Check if the entire PD is now empty and can be recycled
@@ -674,7 +646,7 @@ KURD_t AddressSpace::disable_VM_desc(VM_DESC desc)
         
         if (pd_all_clear) {
             // Recycle the entire PD page
-            phymemspace_mgr::pages_recycle(pde_base, 1);
+            FreePagesAllocator::free(pde_base, 1<<12);
             PhyAddrAccessor::writeu64(pdpt_base + pdpte_index * sizeof(PageTableEntryUnion), 0);
             
             // Check if the entire PDPT is now empty and can be recycled
@@ -688,7 +660,7 @@ KURD_t AddressSpace::disable_VM_desc(VM_DESC desc)
             
             if (pdpt_all_clear) {
                 // Recycle the entire PDPT page
-                phymemspace_mgr::pages_recycle(pdpt_base, 1);
+                FreePagesAllocator::free(pdpt_base, 1<<12);
                 // 使用pml4tb_phyaddr_base和PhyAddrAccessor修改PML4项
                 PhyAddrAccessor::writeu64(pml4tb_phyaddr_base + pml4_index * sizeof(PageTableEntryUnion), 0);
             }
@@ -705,7 +677,7 @@ auto _4lv_pde_2MB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
     phyaddr_t phybase, vaddr_t vaddr_base, uint16_t count) -> pages_clear_error_status
 {
     if (count == 0 || count > 512) {
-        kio::bsp_kout<<"AddressSpace::disable_VM_desc: out of range"<<kio::kendl;
+        bsp_kout<<"AddressSpace::disable_VM_desc: out of range"<<kendl;
         return COUNT_OUT_OF_RANGE;
     }
     constexpr uint32_t _2MB_SIZE = 0x200000;
@@ -770,7 +742,7 @@ auto _4lv_pde_2MB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
     if (!pde_all_empty) return SUCCESS;
 
     // 释放 PDE 表
-    phymemspace_mgr::pages_recycle(pde_base, 1);
+    FreePagesAllocator::free(pde_base, 1<<12);
     PhyAddrAccessor::writeu64(pdpt_base + pdpte_index * sizeof(PageTableEntryUnion), 0);
 
     // 检查 PDPT 是否全空
@@ -784,7 +756,7 @@ auto _4lv_pde_2MB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
     if (!pdpt_all_empty) return SUCCESS;
 
     // 释放 PDPT
-    phymemspace_mgr::pages_recycle(pdpt_base, 1);
+    FreePagesAllocator::free(pdpt_base, 1<<12);
     // 使用pml4tb_phyaddr_base和PhyAddrAccessor修改PML4项
     PhyAddrAccessor::writeu64(pml4tb_phyaddr_base + pml4_index * sizeof(PageTableEntryUnion), 0);
     return SUCCESS;
@@ -796,7 +768,7 @@ auto _4lv_pde_2MB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
 auto _4lv_pdpte_1GB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
     phyaddr_t phybase, vaddr_t vaddr_base, uint64_t count) -> pages_clear_error_status {
     if (count == 0 || count > 512) {
-        kio::bsp_kout<<"AddressSpace::disable_VM_desc::_4lv_pdpte_1GB_entries_clear: invalid count"<<kio::kendl;
+        bsp_kout<<"AddressSpace::disable_VM_desc::_4lv_pdpte_1GB_entries_clear: invalid count"<<kendl;
         return COUNT_OUT_OF_RANGE;
     }
     constexpr uint64_t _1GB_SIZE = 0x40000000ULL;
@@ -845,7 +817,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
     if (!pdpt_all_empty) return SUCCESS;
 
     // 释放 PDPT
-    phymemspace_mgr::pages_recycle(pdpt_base, 1);
+    FreePagesAllocator::free(pdpt_base, 1<<12);
     // 使用pml4tb_phyaddr_base和PhyAddrAccessor修改PML4项
     PhyAddrAccessor::writeu64(pml4tb_phyaddr_base + pml4_index * sizeof(PageTableEntryUnion), 0);
 
@@ -1069,6 +1041,12 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr,KURD_t& kurd)
 /**
  * 不对pcid内容进行校验直接位运算
  */
+int VM_desc_cmp(const VM_DESC &a, const VM_DESC &b)
+{
+    if((a.start==b.start)&&(a.end==b.end))return 0;
+    if(a.start>=b.end)return 1;
+    if(a.end<=b.start)return -1;
+}
 void AddressSpace::unsafe_load_pml4_to_cr3(uint16_t pcid)
 {
     uint64_t cr3_value=pml4_phybase|pcid;
@@ -1077,9 +1055,9 @@ void AddressSpace::unsafe_load_pml4_to_cr3(uint16_t pcid)
 
 AddressSpace::~AddressSpace()
 {
-    KURD_t status=phymemspace_mgr::pages_recycle(pml4_phybase,1);
+    KURD_t status=FreePagesAllocator::free(pml4_phybase,1<<12);
     if(status.result!=result_code::SUCCESS){
-        kio::bsp_kout<<"phymemspace_mgr::pages_recycle failed in result:"<<status<<kio::kendl;
+        bsp_kout<<"phymemspace_mgr::pages_recycle failed in result:"<<status<<kendl;
     }
 }
 
@@ -1089,16 +1067,17 @@ KURD_t AddressSpace::second_stage_init()
     flags.force_first_linekd_heap=true;
     flags.align_log2=12;
     KURD_t contain=KURD_t();
-    pml4_phybase=__wrapped_pgs_alloc(&contain,1,KERNEL,12);
-    if(pml4_phybase==0)return contain;
+    Alloc_result res=FreePagesAllocator::alloc(_4KB_SIZE,BUDDY_ALLOC_DEFAULT_FLAG,page_state_t::kernel_pinned);
+    pml4_phybase=res.base;
+    if(pml4_phybase==0||error_kurd(res.result))return contain;
     for(uint16_t i=0;i<256;i++){
         PhyAddrAccessor::writeu64(
             pml4_phybase+i*sizeof(PageTableEntryUnion),
             0
         );
     }
-    phyaddr_t kspacUPpdpt_phybase=KspaceMapMgr::kspace_uppdpt_phyaddr;
-    PageTableEntryUnion Up_pml4e_template=KspaceMapMgr::high_half_template;
+    phyaddr_t kspacUPpdpt_phybase=KspacePageTable::kspace_uppdpt_phyaddr;
+    PageTableEntryUnion Up_pml4e_template=KspacePageTable::high_half_template;
     for(uint16_t i=0;i<256;i++)
     {
         uint64_t raw=Up_pml4e_template.raw;

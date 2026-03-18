@@ -1,9 +1,9 @@
 #include "Interrupt_system/loacl_processor.h"
 #include "util/kout.h"
-#include "util/cpuid_intel.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 void illeagale_interrupt_post(uint16_t vector)
 {
-    kio::bsp_kout<<kio::now<<"[x64_local_processor]illegal interrupt on vector"<<vector<<"and apicid:"<<query_x2apicid()<<kio::kendl;
+    bsp_kout<<now<<"[x64_local_processor]illegal interrupt on vector"<<vector<<"and apicid:"<<query_x2apicid()<<kendl;
 }
 template<uint8_t Vec>
 __attribute__((interrupt))

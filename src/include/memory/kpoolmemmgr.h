@@ -2,8 +2,7 @@
 #include "stdint.h"
 #include "util/bitmap.h"
 #include "memmodule_err_definitions.h"
-#include "GS_Slots_index_definitions.h"
-#include "init_to_kernel_info.h"
+#include "abi/boot.h"
 #include <util/lock.h>
 typedef uint64_t size_t;
 typedef uint64_t phyaddr_t;
@@ -16,22 +15,7 @@ enum data_type_t:uint8_t
     DT_STRUCT = 2,
     DT_CLASS = 3,
 };
-struct alloc_flags_t{
-    bool is_longtime;
-    bool is_crucial_variable;
-    bool vaddraquire;
-    bool force_first_linekd_heap;
-    bool is_when_realloc_force_new_addr;//在realloc中强制重新分配内存，非realloc接口忽视此位但是会忠实记录进入metadata,realloc中此位不设置会优先原地调整，原地调整解决则不会修改源地址和元数据flags
-    uint8_t align_log2;
-};
-constexpr alloc_flags_t default_flags={
-    .is_longtime=false,
-    .is_crucial_variable=false,
-    .vaddraquire=true,
-    .force_first_linekd_heap=false,
-    .is_when_realloc_force_new_addr=false,
-    .align_log2=4
-};
+
 namespace MEMMODULE_LOCAIONS
 {
     constexpr uint8_t LOCATION_CODE_KPOOLMEMMGR=4;//[4~7]是kpoolmemmgr的子模块
@@ -135,6 +119,19 @@ private:
 public:
     class HCB_v2//堆控制块，必须是连续物理地址空间的连续内存
     {
+        public:
+        static constexpr int SIZE_BUCKET_COUNT = 10;
+        struct HCB_statistics_t
+        {//原始大小落入(1<<(4+SIZE_BUCKET_COUNT))<=size<(1<<(5+SIZE_BUCKET_COUNT))的落入对应的桶
+        uint64_t alloc_count;
+        uint64_t free_count;
+        uint64_t alloc_fail_count;
+        uint64_t realloc_count;
+        uint64_t realloc_fail_count;
+        uint32_t peak_used_bytes_count;
+        uint64_t alloc[SIZE_BUCKET_COUNT];//alloc接口接收的size各桶的出现次数
+        uint64_t free[SIZE_BUCKET_COUNT];//free接口接收的size各桶的出现次数
+        };
         private:
             // 活跃分配魔数（推荐）
         static constexpr uint64_t MAGIC_ALLOCATED    = 0xDEADBEEFCAFEBABEull;
@@ -150,6 +147,8 @@ public:
             TOO_BIG_MEM_DEMAND=3,
         };
         
+        
+        HCB_statistics_t statistics;
         class HCB_bitmap:public bitmap_t
         { 
             HCB_bitmap_error_code_t param_checkment(uint64_t bit_idx,uint64_t bit_count);
@@ -158,15 +157,48 @@ public:
             KURD_t default_fail();
             KURD_t default_fatal();
             public:
+            static constexpr uint64_t invalid_cache=~0ull;
+            struct scan_cache_t
+            {
+            uint64_t hint_u64_idx;        // 下一次扫描起点
+            uint64_t last_success_idx;    // 最近成功分配位置(u64引索)
+            uint64_t largest_free_hint_len; // 若扫描到空洞但是由于大小不够放弃，单位是u64
+            uint64_t largest_free_hint_base;   // 若扫描到空洞但是由于大小不够放弃的话就尝试更新这两个字段
+            };//无效就要标记相应条目无效
+            scan_cache_t scan_cache;
+            struct hcbbitmap_statistics
+            {
+            uint64_t call_bits_scan_count;
+            uint64_t bits_scan_largest_free_hint_hit_count;
+            uint64_t bits_scan_largest_free_hint_miss_count;
+            uint64_t bits_scan_all_steps_accum;
+            uint64_t bits_scan_max_steps_in_a_term;
+            uint64_t call_bytes_scan_count;
+            uint64_t bytes_scan_largest_free_hint_hit_count;
+            uint64_t bytes_scan_largest_free_hint_miss_count;
+            uint64_t bytes_scan_all_steps_accum;
+            uint64_t bytes_scan_max_steps_in_a_term;
+            uint64_t call_u64s_scan_count;
+            uint64_t u64s_scan_largest_free_hint_hit_count;
+            uint64_t u64s_scan_largest_free_hint_miss_count;
+            uint64_t u64s_scan_all_steps_accum;
+            uint64_t u64s_scan_max_steps_in_a_term;
+            uint64_t call_u64s_scan_higher_alignment_count;
+            uint64_t call_bits_seg_set_count;
+            };
+            hcbbitmap_statistics statistics;
             int Init(loaded_VM_interval*first_static_heap_bitmap);//只有第一个堆的初始化会调用此函数，所以不用KURD
             KURD_t second_stage_Init(
                 uint32_t entries_count
             );
             HCB_bitmap();
             ~HCB_bitmap();
+            HCB_bitmap_error_code_t continual_avaliable_bits_search(uint64_t bit_count,uint64_t&result_base_idx);
+            HCB_bitmap_error_code_t continual_avaliable_bytes_search(uint64_t byte_count,uint64_t&result_base_idx);
+            HCB_bitmap_error_code_t continual_avaliable_u64s_search(uint64_t u64_count,uint64_t&result_base_idx);
             HCB_bitmap_error_code_t continual_avaliable_u64s_search_higher_alignment(uint64_t u64idx_align_log2,uint64_t u64_count,uint64_t&result_base_idx);
             bool target_bit_seg_is_avaliable(uint64_t bit_idx,uint64_t bit_count,HCB_bitmap_error_code_t&err);//考虑用uint64_t来优化扫描，扫描的时候要加锁
-            HCB_bitmap_error_code_t bit_seg_set(uint64_t bit_idx,uint64_t bit_count,bool value);//优化的set函数，中间会解析，然后调用对应的bits_set，bytes_set，u64s_set，并且会参数检查，加锁
+            HCB_bitmap_error_code_t bits_seg_set(uint64_t bit_idx,uint64_t bit_count,bool value);//优化的set函数，中间会解析，然后调用对应的bits_set，bytes_set，u64s_set，并且会参数检查，加锁
             friend class HCB_v2;
         };
         HCB_bitmap bitmap_controller;

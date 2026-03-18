@@ -19,7 +19,7 @@
 ## 后端架构
 
 ```
-kio::bsp_kout
+bsp_kout
 ├── Backend 0: UART_COM1 (0x3F8)
 │   ├── write(): 直接写串口
 │   └── num(): 数字转字符串后输出
@@ -52,10 +52,10 @@ void init_logging()
     );
     
     // 3. 初始化 kout (自动注册 UART 后端)
-    kio::bsp_kout.Init();
+    bsp_kout.Init();
     
     // 4. 开始输出
-    kio::bsp_kout << "=== Init Logging Started ===" << kio::kendl;
+    bsp_kout<< "=== Init Logging Started ===" << kendl;
 }
 ```
 
@@ -65,42 +65,42 @@ void init_logging()
 #include "util/kout.h"
 
 // 输出字符串
-kio::bsp_kout << "Hello, World!" << kio::kendl;
+bsp_kout<< "Hello, World!" << kendl;
 
 // 输出数字 (默认十进制)
-kio::bsp_kout << "Count: " << 42 << kio::kendl;
+bsp_kout<< "Count: " << 42 << kendl;
 
 // 输出十六进制
-kio::bsp_kout << "Address: 0x" 
-              << kio::HEX_shift << 0x12345678 
-              << kio::DEC_shift << kio::kendl;
+bsp_kout<< "Address: 0x" 
+              << HEX << 0x12345678 
+              << DEC << kendl;
 
 // 输出指针
 void* ptr = (void*)0xFFFF8000;
-kio::bsp_kout << "Pointer: " << ptr << kio::kendl;
+bsp_kout<< "Pointer: " << ptr << kendl;
 
 // 输出 KURD_t 错误码
 KURD_t status = some_function();
-kio::bsp_kout << "Status: " << status << kio::kendl;
+bsp_kout<< "Status: " << status << kendl;
 ```
 
 ### 3. 进制切换
 
 ```cpp
 // 切换到二进制
-kio::bsp_kout << kio::BIN_shift << 0b10101010 << kio::kendl;
+bsp_kout<< kio::BIN_shift << 0b10101010 << kendl;
 
 // 切换到十进制
-kio::bsp_kout << kio::DEC_shift << 123456 << kio::kendl;
+bsp_kout<< DEC << 123456 << kendl;
 
 // 切换到十六进制
-kio::bsp_kout << kio::HEX_shift << 0xDEADBEEF << kio::kendl;
+bsp_kout<< HEX << 0xDEADBEEF << kendl;
 
 // 链式调用
-kio::bsp_kout << "BIN: " << kio::BIN_shift << 255 
-              << ", DEC: " << kio::DEC_shift << 255
-              << ", HEX: " << kio::HEX_shift << 255 
-              << kio::kendl;
+bsp_kout<< "BIN: " << kio::BIN_shift << 255 
+              << ", DEC: " << DEC << 255
+              << ", HEX: " << HEX << 255 
+              << kendl;
 ```
 
 ### 4. 格式化数字
@@ -116,14 +116,14 @@ int32_t s32_val = -99999;
 uint64_t u64_val = 0x123456789ABCDEF0;
 int64_t s64_val = -123456789012345;
 
-kio::bsp_kout << "u8: " << u8_val << kio::kendl;
-kio::bsp_kout << "s8: " << s8_val << kio::kendl;
-kio::bsp_kout << "u16: " << u16_val << kio::kendl;
-kio::bsp_kout << "s16: " << s16_val << kio::kendl;
-kio::bsp_kout << "u32: " << u32_val << kio::kendl;
-kio::bsp_kout << "s32: " << s32_val << kio::kendl;
-kio::bsp_kout << "u64: " << u64_val << kio::kendl;
-kio::bsp_kout << "s64: " << s64_val << kio::kendl;
+bsp_kout<< "u8: " << u8_val << kendl;
+bsp_kout<< "s8: " << s8_val << kendl;
+bsp_kout<< "u16: " << u16_val << kendl;
+bsp_kout<< "s16: " << s16_val << kendl;
+bsp_kout<< "u32: " << u32_val << kendl;
+bsp_kout<< "s32: " << s32_val << kendl;
+bsp_kout<< "u64: " << u64_val << kendl;
+bsp_kout<< "s64: " << s64_val << kendl;
 ```
 
 ## API 参考
@@ -217,7 +217,7 @@ kio::kout_backend my_backend = {
     .num = &my_backend_num
 };
 
-uint64_t index = kio::bsp_kout.register_backend(my_backend);
+uint64_t index = bsp_kout.register_backend(my_backend);
 if (index == ~0ULL) {
     // 注册失败
 }
@@ -227,16 +227,16 @@ if (index == ~0ULL) {
 
 ```cpp
 // 禁用后端
-kio::bsp_kout.mask_backend(index);
+bsp_kout.mask_backend(index);
 
 // 启用后端
-kio::bsp_kout.mask_backend(index);  // toggle
+bsp_kout.mask_backend(index);  // toggle
 ```
 
 ### 删除后端
 
 ```cpp
-kio::bsp_kout.unregister_backend(index);
+bsp_kout.unregister_backend(index);
 ```
 
 ## 实现细节
@@ -297,26 +297,26 @@ static constexpr char hex_chars[16] = {
 void demo_init_logging()
 {
     // 初始化
-    kio::bsp_kout.Init();
+    bsp_kout.Init();
     
     // 欢迎信息
-    kio::bsp_kout << "=== System Initialization ===" << kio::kendl;
+    bsp_kout<< "=== System Initialization ===" << kendl;
     
     // 输出各种类型
-    kio::bsp_kout << "Integer: " << 42 << kio::kendl;
-    kio::bsp_kout << "Hex: 0x" << kio::HEX_shift << 0xDEADBEEF << kio::kendl;
-    kio::bsp_kout << "Ptr: " << (void*)0xFFFF8000 << kio::kendl;
+    bsp_kout<< "Integer: " << 42 << kendl;
+    bsp_kout<< "Hex: 0x" << HEX << 0xDEADBEEF << kendl;
+    bsp_kout<< "Ptr: " << (void*)0xFFFF8000 << kendl;
     
     // 输出错误码
     KURD_t status = some_init_function();
-    kio::bsp_kout << "Init Status: " << status << kio::kendl;
+    bsp_kout<< "Init Status: " << status << kendl;
     
     // 恢复十进制
-    kio::bsp_kout << kio::DEC_shift;
+    bsp_kout<< DEC;
     
     // 查看统计
-    auto stats = kio::bsp_kout.get_statistics();
-    kio::bsp_kout << "Total chars: " << stats.total_printed_chars << kio::kendl;
+    auto stats = bsp_kout.get_statistics();
+    bsp_kout<< "Total chars: " << stats.total_printed_chars << kendl;
 }
 ```
 
@@ -324,5 +324,5 @@ void demo_init_logging()
 
 - `textConsole.h` - 文本控制台后端 (可选)
 - `PortDriver.h` - UART 串口驱动
-- `os_error_definitions.h` - 错误码定义
+- `abi/os_error_definitions.h` - 错误码定义
 - `OS_utils.h` - 内存操作函数

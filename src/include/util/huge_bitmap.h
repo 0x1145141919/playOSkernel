@@ -8,9 +8,6 @@ class huge_bitmap:public bitmap_t
     using bitmap_t::bits_set;
     using bitmap_t::bytes_set;
     using bitmap_t::u64s_set;
-    using bitmap_t::continual_avaliable_bytes_search;
-    using bitmap_t::continual_avaliable_bits_search;
-    using bitmap_t::continual_avaliable_u64s_search;
     using bitmap_t::avaliable_bit_search;
     using bitmap_t::used_bit_count_add;
     using bitmap_t::used_bit_count_sub;

@@ -1,9 +1,10 @@
 #include "util/textConsole.h"
 #include "util/OS_utils.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/FreePagesAllocator.h"
 #include "16x32AsciiCharacterBitmapSet.h"
 #include "util/kout.h"
 #include "Scheduler/per_processor_scheduler.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 #include "panic.h"
 namespace {
 static void textconsole_backend_write(const char* buf, uint64_t len)
@@ -124,7 +125,7 @@ KURD_t textconsole_GoP::Init(
         .panic_write = &textconsole_backend_write,
         .early_write = &textconsole_backend_write,
     };
-    if (kio::bsp_kout.register_backend(backend) == ~0ULL) {
+    if (bsp_kout.register_backend(backend) == ~0ULL) {
         fail.reason = infrastructure_location_code::textconsole_GoP_events::init_results::fail_reasons::backend_register_fail;
         return fail;
     }
@@ -210,7 +211,7 @@ KURD_t textconsole_GoP::enable_font_render()
     const uint64_t page_count = alloc_bytes / 0x1000;
 
     KURD_t kurd = empty_kurd;
-    void* new_glyph_cache = __wrapped_pgs_valloc(&kurd, page_count, KERNEL, 12);
+    void* new_glyph_cache = __wrapped_pgs_valloc(&kurd, page_count, page_state_t::kernel_pinned, 12);
     if (new_glyph_cache == nullptr || error_kurd(kurd)) {
         fail.reason = infrastructure_location_code::textconsole_GoP_events::init_results::fail_reasons::glyph_cache_alloc_fail;
         return error_kurd(kurd) ? kurd : fail;
@@ -314,9 +315,8 @@ void textconsole_GoP::PutChar(char ch)
                 GfxPrim::Blit(pos, &template_character);
             } else {
                 // 直接位图渲染模式：逐 bit调用 PutPixel
-                uint16_t idx = glyph_index[uch];
                 const uint32_t bytes_per_row = 2;
-                const uint8_t* char_bitmap = font_bitmap + idx * view.cell.y * bytes_per_row;
+                const uint8_t* char_bitmap = font_bitmap + uch * view.cell.y * bytes_per_row;
                 
                 Vec2i base_pos = {
                     view.pos.x + cursor.m * view.cell.x,

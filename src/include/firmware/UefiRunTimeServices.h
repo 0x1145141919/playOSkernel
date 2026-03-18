@@ -1,5 +1,5 @@
 #include <efi.h>
-#include <init_to_kernel_info.h>
+#include <abi/boot.h>
 class EFI_RT_SVS
 {   
     static EFI_SYSTEM_TABLE *gST;

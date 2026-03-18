@@ -1,0 +1,25 @@
+{
+    "phymem": [
+        {"start": "0x0", "size": "0x9F000", "type": "ConventionalMemory"},
+        {"start": "0x9F000", "size": "0x1000", "type": "Reserved"},
+        {"start": "0xA0000", "size": "0x60000", "type": "Reserved"},
+        {"start": "0x100000", "size": "0x63E9B000", "type": "ConventionalMemory"},
+        {"start": "0x63F9B000", "size": "0x900000", "type": "Reserved"},
+        {"start": "0x6489B000", "size": "0x1E24000", "type": "ConventionalMemory"},
+        {"start": "0x666BF000", "size": "0x3D0000", "type": "RuntimeServicesCode"},
+        {"start": "0x66A8F000", "size": "0xC30000", "type": "RuntimeServicesData"},
+        {"start": "0x676BF000", "size": "0x1000000", "type": "Reserved"},
+        {"start": "0x686BF000", "size": "0x5800000", "type": "ACPIMemoryNVS"},
+        {"start": "0x6DEBF000", "size": "0x140000", "type": "ACPIReclaimMemory"},
+        {"start": "0x6DFFF000", "size": "0x1000", "type": "BootServicesData"},
+        {"start": "0x6E000000", "size": "0x8000000", "type": "Reserved"},
+        {"start": "0x76000000", "size": "0x2000000", "type": "Reserved"},
+        {"start": "0x78000000", "size": "0x2000000", "type": "Reserved"},
+        {"start": "0x7A000000", "size": "0x4800000", "type": "Reserved"},
+        {"start": "0xC0000000", "size": "0x10000000", "type": "MemoryMappedIO"},
+        {"start": "0xFE010000", "size": "0x1000", "type": "MemoryMappedIO"},
+        {"start": "0xFED20000", "size": "0x60000", "type": "Reserved"},
+        {"start": "0xFF000000", "size": "0x1000000", "type": "MemoryMappedIO"},
+        {"start": "0x100000000", "size": "0x781800000", "type": "ConventionalMemory"}
+    ]
+}

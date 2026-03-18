@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include "fixed_interrupt_vectors.h"
-#include "pt_regs.h"
+#include "abi/arch/x86-64/pt_regs.h"
 extern void (*global_ipi_handler)();
 /**
  * 中断管理器，管理着每个cpu的中断描述符表和本地apic

@@ -57,6 +57,7 @@ set(SRC_COMMON
     src/utils/kout.cpp
     src/utils/intel_cpuid.cpp
     src/panic.cpp
+    src/utils/kptrace.cpp
 )
 
 # 添加gnu-efi作为外部项目
@@ -76,13 +77,19 @@ add_custom_target(ksymbols
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "运行自定义目标"
 )
-add_dependencies(ksymbols symbols_dumper)
+add_dependencies(ksymbols symbols_dumper init.elf kernel.elf)
 
 add_dependencies(kernel_resources 
-    kernel.elf 
-    init.elf
     ksymbols
 ) 
+add_library(json_praser 
+    user_utils/json_configs_prase.cpp
+)
+target_include_directories(json_praser PRIVATE
+     "/usr/include"
+     "${CMAKE_SOURCE_DIR}/src/include"
+)
+
 # 获取gnu-efi构建目录路径
 ExternalProject_Get_Property(gnu-efi SOURCE_DIR)
 set(GNU_EFI_SOURCE_DIR ${SOURCE_DIR})
@@ -112,7 +119,6 @@ add_executable(kernel.elf
     src/Interrupts/Sysdef_exception_entries.asm
     src/core_hardwares/HPET.cpp
     src/time.cpp
-    src/utils/kptrace.cpp
     src/utils/textConsole.cpp
     src/core_hardwares/primitive_gop.cpp
     src/firmware/acpimgr.cpp
@@ -148,6 +154,7 @@ add_executable(init.elf
     src/os_error_definitions.cpp
     src/init/info_fill.cpp
     src/init/mem_loads.cpp
+    src/utils/intel_cpuid.cpp
 )
 add_executable(BCB_test
     src/tests/BCB_test.cpp
@@ -195,12 +202,6 @@ target_compile_options(
 add_executable(test_mem
     src/tests/test_memmodule.cpp
     src/memory/phygpsmemmgr.cpp
-    src/memory/phygpsmemmgr_pgcount_modify.cpp
-    src/memory/phygpsmemmgr_pgs_set.cpp
-    src/memory/phygpsmemmgr_seg_managment.cpp
-    src/memory/phygpsmemmgr_availabe_search.cpp
-    src/memory/phypgsmemmgr_alloc.cpp
-    src/memory/phygpsmemmgr_buddy_about.cpp
     src/memory/mixed_bitmap.cpp
     src/memory/FreePagesAllocator_BCB.cpp
     src/memory/FreePagesAllocator.cpp
@@ -215,8 +216,17 @@ target_include_directories(
 target_compile_options(
     test_mem PRIVATE
     -DUSER_MODE
-
+    -fno-omit-frame-pointer
+    -rdynamic
+    -no-pie
 )
+target_link_libraries(
+    test_mem PRIVATE
+    json_praser
+    -rdynamic
+    -no-pie
+)
+
 add_executable(multhread
     src/tests/multithread_test.cpp
     src/utils/lock.cpp

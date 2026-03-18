@@ -1,6 +1,6 @@
 #include "init_fs.h"
 #include "memory/kpoolmemmgr.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "util/OS_utils.h"
 #ifdef USER_MODE
 #include <cstdio>

@@ -1,4 +1,4 @@
-#include </usr/include/time.h>
+#include <ktime.h>
 #include <pthread.h>
 #include <algorithm>
 #include <random>

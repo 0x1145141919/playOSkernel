@@ -1,5 +1,5 @@
 #include "kintrin.h"
-
+#ifdef KERNEL_MODE
  int  __builtin_ctzll(long long unsigned x)
 {
     uint64_t result;
@@ -10,3 +10,4 @@
     );
     return result;
 }
+#endif

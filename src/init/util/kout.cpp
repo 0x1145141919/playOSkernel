@@ -13,8 +13,7 @@ static constexpr char hex_chars_table[16] = {
 
 namespace kio {
 
-kout bsp_kout;
-endl kendl;
+
 
 
 
@@ -256,17 +255,6 @@ kout& kout::operator<<(int8_t num)
     return *this;
 }
 
-kout& kout::operator<<(radix_shift_t radix)
-{
-    switch (radix) {
-        case BIN_shift: shift_bin(); break;
-        case DEC_shift: shift_dec(); break;
-        case HEX_shift: shift_hex(); break;
-        default: shift_dec(); break;
-    }
-    return *this;
-}
-
 void kout::shift_bin()
 {
     curr_numer_system = BIN;
@@ -328,5 +316,16 @@ bool kout::mask_backend(uint64_t index)
     }
     return false;
 }
-
+kout &kout::operator<<(numer_system_select radix)
+{   
+     switch (radix) {
+        case BIN: shift_bin(); break;
+        case DEC: shift_dec(); break;
+        case HEX: shift_hex(); break;
+        default: shift_dec(); break;
+    }
+    return *this;
+}
 } // namespace kio
+kio::kout bsp_kout;
+kio::endl kendl;

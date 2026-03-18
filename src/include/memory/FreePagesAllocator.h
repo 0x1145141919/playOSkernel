@@ -1,12 +1,12 @@
 #pragma once
 #include "stdint.h"
 #include "memmodule_err_definitions.h"
-#include "Memory.h"
+#include "memory/memory_base.h"
 #include "util/lock.h"
 #include "util/Ktemplats.h"
 #include "util/bitmap.h"
 #include "memory/phygpsmemmgr.h"
-class KspaceMapMgr;
+class KspacePageTable;
 struct fpa_stats {
     uint64_t alloc_main_hit;
     uint64_t alloc_vice_hit;
@@ -28,7 +28,6 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t EVENT_CODE_INIT_SECOND_STAGE = 1;
         constexpr uint8_t EVENT_CODE_ALLOC = 2;
         namespace INIT_SECOND_STAGE_RESULTS_CODE{
-            //todo kurd语义设计以及错误码
             namespace FATAL_REASONS_CODE{
                 constexpr uint16_t FAIL_NO_AVALIABLE_MEM= 1;
                 constexpr uint16_t FAIL_THREAD_COUNT_ZERO= 2;
@@ -48,6 +47,12 @@ namespace MEMMODULE_LOCAIONS{
             }
             namespace RETRY_REASONS_CODE{
                 constexpr uint16_t RETRY_REASON_CODE_TARGET_BUSY = 1;
+            }
+        }
+        constexpr uint8_t EVENT_CODE_FREE = 3;
+        namespace FREE_RESULTS_CODE{
+            namespace FAIL_REASONS_CODE{
+                constexpr  uint16_t FAIL_REASON_CODE_BASE_NOT_BELONG=1;
             }
         }
     }
@@ -119,7 +124,7 @@ namespace MEMMODULE_LOCAIONS{
         constexpr uint8_t EVENT_CODE_INIT=0;
     }
 };
-struct alloc_params;
+struct buddy_alloc_params;
 struct Alloc_result{
     uint64_t base;
     KURD_t result;
@@ -141,10 +146,10 @@ public:
     class BuddyControlBlock {
     private:
         static constexpr uint64_t INVALID_INBCB_INDEX = ~0;
-        static constexpr uint8_t DESINGED_MAX_SUPPORT_ORDER = 64;
+        static constexpr uint8_t DESINGED_MAX_SUPPORT_ORDER = 24;
         static constexpr uint8_t PER_ORDER_CACHE_SUGGEST_COUNT = 8;
         using cache_order_suggest_t = uint64_t[PER_ORDER_CACHE_SUGGEST_COUNT];
-        spinlock_cpp_t lock;
+        
         bool is_splited_bitmap_valid;
         uint8_t max_supprt_order;
         phyaddr_t base; // base 至少是 4KB 对齐的，可以不是 1<<(MAX_SUPPORT_ORDER+12) 对齐的，只会影响外部获得的地址
@@ -179,7 +184,7 @@ public:
             using bitmap_t::bit_get;
             mixed_bitmap_t(uint64_t entry_count);
             KURD_t second_stage_init();
-            void first_bcb_specified_init(loaded_VM_interval* first_BCB_bitmap);
+            void first_bcb_specified_init();
             uint64_t find_free_in_interval(
                 uint64_t start_idx,
                 uint64_t interval_length
@@ -234,6 +239,7 @@ public:
         friend phymemspace_mgr;
         void print_basic_info();
         void print_bitmap_info();
+        void print_all_statistics();  // 新增：打印全部统计信息
         void print_bitmap_order_info_compress(uint8_t order);
         void print_bitmap_order_interval_compress(uint8_t order, uint64_t base, uint64_t length);
         KURD_t free_pages_flush(); // 强制扫描位图校准 free_count[DESINGED_MAX_SUPPORT_ORDER] 数据结构
@@ -241,7 +247,8 @@ public:
             phyaddr_t base,
             uint8_t max_support_order
         );
-        void first_bcb_specified_init(loaded_VM_interval* first_BCB_bitmap);
+        BuddyControlBlock();
+        void first_bcb_specified_init();
         KURD_t second_stage_init();
         phyaddr_t allocate_buddy_way(
             uint64_t size,
@@ -259,13 +266,13 @@ public:
 #endif
         bool is_addr_belong_to_this_BCB(phyaddr_t addr);
         bool can_alloc(uint8_t order);
+        spinlock_cpp_t lock;
         ~BuddyControlBlock() = default;
     };
-    friend phymemspace_mgr;
-    friend KspaceMapMgr;
+    friend KspacePageTable;
     static BuddyControlBlock* first_BCB; // 通过 pages_alloc 在 align_log2=30 时分配一个 1GB 页，哪个页用来初始化这个
     static uint64_t main_BCB_count;
-    static BuddyControlBlock* main_BCBS;
+    static BuddyControlBlock*mainBCBS;
     static uint64_t vice_BCB_count;
     static BuddyControlBlock* vice_BCBS;
     
@@ -281,34 +288,20 @@ public:
         .strategy = INIT_STRATEGY_BEST_ALIGN_FIT,
         .thread_coefficient = 1
     };
+    static constexpr strategy_t DEFAULT_THREAD = {
+        .strategy = INIT_STRATEGY_MATCH_THREAD,
+        .thread_coefficient = 1
+    };
+    
     static KURD_t second_stage(strategy_t strategy);
-    static KURD_t Init(loaded_VM_interval* first_BCB_bitmap);
-    static Alloc_result alloc(uint64_t size, alloc_params params);//params只有在
+    static KURD_t Init();
+    static Alloc_result alloc(uint64_t size, buddy_alloc_params params,page_state_t interval_type);//params只有在
     static KURD_t free(phyaddr_t base, uint64_t size);
-    static fpa_stats get_fpa_stats();//当前本地CPU的统计数据，必须在second_stage初始化完成后才可以调用，否则行为未定义
-    static fpa_stats get_fpa_stats(uint64_t pid);//pid为处理器id，必须在second_stage初始化完成后才可以调用，否则行为未定义,不提供锁保护
-    static fpa_stats get_fpa_stats_all();//所有统计信息的总计，除bcb_scan_max是取最大，其他字段是求和，不在锁保护下
+    static fpa_stats get_fpa_stats();//当前本地 CPU 的统计数据，必须在 second_stage 初始化完成后才可以调用，否则行为未定义
+    static fpa_stats get_fpa_stats(uint64_t pid);//pid 为处理器 id，必须在 second_stage 初始化完成后才可以调用，否则行为未定义，不提供锁保护
+    static fpa_stats get_fpa_stats_all();//所有统计信息的总计，除 bcb_scan_max 是取最大，其他字段是求和，不在锁保护下
+    
+    // 打印所有 BCB 的完整统计信息
+    static void print_all_bcb_statistics();
 };
-
-/**
- * @brief 
- * 对于分配参数的设计优先看位域控制，遵循以下的依赖
- * 1.force_first_bcb为1时强制只使用first_BCB，其它参数统统无效
- * 2.当force_first_bcb为0时，no_up_limit_bit，try_lock_always_try，no_addr_constrain_bit
- * 这三个位是三个独立的位
- * 2.1try_lock_always_try:为1只有确定所有所有BCB都不满足分配条件时才失败，在到达这个之前无限重试,为0时重试次数有上限
- * 2.2no_up_limit_bit:为0时等价于[0,up_phyaddr_limit)的地址限制
- * 2.3no_addr_constrain_bit:为0时等价于[constrain_base,constrain_base+constrain_interval_size)的地址限制]
- * 2.2和2.3若同时为0则区间取交集
- */
-struct alloc_params{
-    uint64_t numa;//不支持，暂时
-    uint64_t constrain_base;
-    uint64_t constrain_interval_size;
-    uint64_t up_phyaddr_limit;
-    uint64_t no_addr_constrain_bit:1;
-    uint64_t try_lock_always_try:1;//多BCB的架构下，会尝试多次获取锁，失败次数过高会失败返回繁忙重试，这个标志位为1则永远尝试直到成功获取锁
-    uint64_t no_up_limit_bit:1;
-    uint64_t force_first_bcb:1;//强制只使用first_BCB,优先级最高的位
-    uint8_t align_log2;
-};
+extern spinlock_cpp_t FPA_modify;

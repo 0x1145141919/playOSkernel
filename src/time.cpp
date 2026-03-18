@@ -1,9 +1,10 @@
-#include "time.h"
+#include "ktime.h"
 #include "util/OS_utils.h"
-#include "util/cpuid_intel.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 #include "core_hardwares/HPET.h"
-#include "GS_Slots_index_definitions.h"
+#include "abi/arch/x86-64/GS_Slots_index_definitions.h"
 #include "core_hardwares/lapic.h"
+#include "util/kout.h"
 bool ktime::hardware_time::is_tsc_reliable = false;
 uint32_t ktime::hardware_time::bsp_tsc_fs_per_cycle = 0;
 bool ktime::hardware_time::is_hpet_initialized = false;
@@ -73,7 +74,6 @@ miusecond_time_stamp_t ktime::hardware_time::get_stamp( )
             uint64_t delta_cycles=current_tsc-complex->private_token.tsc_base;
             uint64_t tsc_fs_per_cycle=(is_bsp_registed?complex->private_token.tsc_fs_per_cycle:bsp_tsc_fs_per_cycle);
             uint64_t delta_mius=((__uint128_t)delta_cycles*tsc_fs_per_cycle)/1000000000;
-            
             return complex->private_token.hpet_base+delta_mius;
         }else{
             return readonly_timer->get_time_stamp_in_mius();

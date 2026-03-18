@@ -1,5 +1,6 @@
 #include "util/huge_bitmap.h"
 #include "util/OS_utils.h"
+#include "memory/FreePagesAllocator.h"
 #ifdef USER_MODE
 #include <cstdint>
 #include <cstring>
@@ -113,174 +114,6 @@ void bitmap_t::u64s_set(uint64_t start_u64_idx, uint64_t u64_count, bool value)
  * 扫描的时候可以通过uit64_t U64_FULL_UNIT跳过64个字节
  * 
  */
-int bitmap_t::continual_avaliable_bits_search(uint64_t bit_count, uint64_t &result_base_idx)
-{
-    uint64_t bit_scanner_end = bitmap_size_in_64bit_units << 6;
-    uint64_t seg_base_bit_idx = 0;
-    bool seg_value = bit_get(0);
-    uint64_t seg_length = 1; // 初始化长度为1，因为已经包含了seg_base_bit_idx
-
-    while (seg_base_bit_idx + seg_length < bit_scanner_end) {
-        uint64_t current_bit_idx = seg_base_bit_idx + seg_length;
-        
-        // 64位对齐优化检查
-        if ((current_bit_idx & 0x3F) == 0) { // 检查是否是64位对齐
-            uint64_t* to_scan_u64 = reinterpret_cast<uint64_t*>(
-                byte_bitmap_base + (current_bit_idx >> 3));
-            
-            if (seg_value) {
-                // 当前是占用段，检查是否可以跳过整个64位占用
-                if (*to_scan_u64 == U64_FULL_UNIT) {
-                    seg_length += 64;
-                    continue; // 继续跳过占用段
-                }
-            } else {
-                // 当前是空闲段，检查是否可以跳过整个64位空闲
-                if (*to_scan_u64 == 0x00) {
-                    seg_length += 64;
-                    // 检查是否已经找到足够的连续空闲位
-                    if (seg_length >= bit_count) {
-                        result_base_idx = seg_base_bit_idx;
-                        return OS_SUCCESS;
-                    }
-                    continue; // 继续尝试跳过更多空闲段
-                }
-            }
-        }
-        
-        // 逐位扫描
-        bool new_bit_value = bit_get(current_bit_idx);
-        
-        if (seg_value == new_bit_value) {
-            // 位值相同，扩展当前段
-            seg_length++;
-            
-            if (!seg_value && seg_length >= bit_count) {
-                // 找到足够的连续空闲位
-                result_base_idx = seg_base_bit_idx;
-                return OS_SUCCESS;
-            }
-        } else {
-            // 位值变化，切换到新段
-            if (!seg_value && seg_length >= bit_count) {
-                // 当前空闲段已经满足要求
-                result_base_idx = seg_base_bit_idx;
-                return OS_SUCCESS;
-            }
-            
-            // 开始新段
-            seg_base_bit_idx = current_bit_idx;
-            seg_value = new_bit_value;
-            seg_length = 1;
-        }
-    }
-    
-    // 检查最后一个段是否满足条件
-    if (!seg_value && seg_length >= bit_count) {
-        result_base_idx = seg_base_bit_idx;
-        return OS_SUCCESS;
-    }
-    
-    return OS_NOT_EXIST;
-}
-
-int bitmap_t::continual_avaliable_bytes_search(uint64_t byte_count, uint64_t &result_base_idx)
-{
-    const uint64_t total_bytes = bitmap_size_in_64bit_units * 8; // 每个u64含8字节
-    uint64_t seg_base_byte_idx = 0;
-    bool seg_value = !!byte_bitmap_base[0]; // true=占用，false=空闲
-    uint64_t seg_length = 1; // 当前段长度(单位:字节)
-
-    while (seg_base_byte_idx + seg_length < total_bytes) {
-        uint64_t current_byte_idx = seg_base_byte_idx + seg_length;
-
-        // ===== 64bit对齐优化（跳过8字节） =====
-        if ((current_byte_idx & 0x7) == 0) { // 字节对齐到8
-            uint64_t* to_scan_u64 = reinterpret_cast<uint64_t*>(
-                byte_bitmap_base + current_byte_idx);
-
-            if (seg_value) {
-                // 当前是占用段，检查是否可以跳过整块占用
-                if (*to_scan_u64 == U64_FULL_UNIT) {
-                    seg_length += 8;
-                    continue;
-                }
-            } else {
-                // 当前是空闲段
-                if (*to_scan_u64 == 0x00ULL) {
-                    seg_length += 8;
-                    if (seg_length >= byte_count) {
-                        result_base_idx = seg_base_byte_idx;
-                        return OS_SUCCESS;
-                    }
-                    continue;
-                }
-            }
-        }
-
-        // ===== 单字节扫描 =====
-        bool new_value = !!byte_bitmap_base[current_byte_idx] ;
-
-        if (seg_value == new_value) {
-            seg_length++;
-            if (!seg_value && seg_length >= byte_count) {
-                result_base_idx = seg_base_byte_idx;
-                return OS_SUCCESS;
-            }
-        } else {
-            if (!seg_value && seg_length >= byte_count) {
-                result_base_idx = seg_base_byte_idx;
-                return OS_SUCCESS;
-            }
-            seg_base_byte_idx = current_byte_idx;
-            seg_value = new_value;
-            seg_length = 1;
-        }
-    }
-
-    if (!seg_value && seg_length >= byte_count) {
-        result_base_idx = seg_base_byte_idx;
-        return OS_SUCCESS;
-    }
-
-    return OS_NOT_EXIST;
-}
-
-int bitmap_t::continual_avaliable_u64s_search(uint64_t u64_count, uint64_t &result_base_idx)
-{
-    const uint64_t total_u64s = bitmap_size_in_64bit_units;
-    uint64_t seg_base_u64_idx = 0;
-    bool seg_value = !!bitmap[0];
-    uint64_t seg_length = 1;
-
-    while (seg_base_u64_idx + seg_length < total_u64s) {
-        uint64_t current_u64_idx = seg_base_u64_idx + seg_length;
-        bool new_value = !!bitmap[current_u64_idx];
-
-        if (seg_value == new_value) {
-            seg_length++;
-            if (!seg_value && seg_length >= u64_count) {
-                result_base_idx = seg_base_u64_idx;
-                return OS_SUCCESS;
-            }
-        } else {
-            if (!seg_value && seg_length >= u64_count) {
-                result_base_idx = seg_base_u64_idx;
-                return OS_SUCCESS;
-            }
-            seg_base_u64_idx = current_u64_idx;
-            seg_value = new_value;
-            seg_length = 1;
-        }
-    }
-
-    if (!seg_value && seg_length >= u64_count) {
-        result_base_idx = seg_base_u64_idx;
-        return OS_SUCCESS;
-    }
-
-    return OS_NOT_EXIST;
-}
 
 int bitmap_t::get_bitmap_used_bit()
 {
@@ -375,8 +208,8 @@ KURD_t huge_bitmap::second_stage_init()
     KURD_t ret=KURD_t();
     #ifdef KERNEL_MODE
     
-    uint64_t pgs4kbcount=(bitmap_size_in_64bit_units+511-1)/512;
-    bitmap=(uint64_t*)__wrapped_pgs_valloc(&ret,pgs4kbcount,KERNEL,12);
+    uint64_t pgs4kbcount=(bitmap_size_in_64bit_units+511)/512;
+    bitmap=(uint64_t*)__wrapped_pgs_valloc(&ret,pgs4kbcount,page_state_t::kernel_pinned,12);
     #endif
     #ifdef USER_MODE
     bitmap=(uint64_t*)malloc(bitmap_size_in_64bit_units*sizeof(uint64_t));
@@ -399,4 +232,26 @@ huge_bitmap::~huge_bitmap()
     #ifdef USER_MODE
     free(bitmap);
     #endif
+}
+
+bool bitmap_t::all_true()
+{
+    // 遍历所有完整的 64 位单元
+    for (uint64_t i = 0; i < bitmap_size_in_64bit_units; ++i) {
+        if (bitmap[i] != U64_FULL_UNIT) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool bitmap_t::all_false()
+{
+    // 遍历所有完整的 64 位单元
+    for (uint64_t i = 0; i < bitmap_size_in_64bit_units; ++i) {
+        if (bitmap[i] != 0x00) {
+            return false;
+        }
+    }
+    return true;
 }

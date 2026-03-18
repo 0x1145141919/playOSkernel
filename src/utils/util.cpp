@@ -1,8 +1,8 @@
 #include "util/OS_utils.h"
-#include "GS_Slots_index_definitions.h"
+#include "abi/arch/x86-64/GS_Slots_index_definitions.h"
 #include "stdint.h"
-#include "memory/Memory.h"
-#include "os_error_definitions.h"
+#include "memory/memory_base.h"
+#include "abi/os_error_definitions.h"
 #ifdef USER_MODE
 #include <x86intrin.h>
 #endif
@@ -191,7 +191,7 @@ extern "C" void __wrap___stack_chk_fail(void)
  * 
  * @param result 输出参数，存储拆分后的页面信息包
  * @param vmentry VM 描述符，包含虚拟地址和物理地址信息
- * @return int OS_SUCCESS 成功，其他错误码见 os_error_definitions.h
+ * @return int OS_SUCCESS 成功，其他错误码见 abi/os_error_definitions.h
  */
 int vm_interval_to_pages_info(seg_to_pages_info_pakage_t &result, VM_DESC vmentry)
 {
@@ -574,57 +574,3 @@ void atomic_write64_rdbk(volatile void *addr, uint64_t val)
     } while(read_val != val);  // 等待直到回读值与写入值一致
 }
 
-uint64_t rdmsr(uint32_t offset)
-{
-    uint32_t value_high, value_low; 
-    asm volatile("rdmsr"
-                 : "=a" (value_low),
-                   "=d" (value_high)
-                 : "c" (offset));
-    return ((uint64_t)value_high << 32) | value_low;
-}
-void wrmsr(uint32_t offset, uint64_t value)
-{
-    uint32_t value_high=(value>>32)&0xffffffff, value_low=value&0xffffffff; 
-    asm volatile("wrmsr"
-                 :
-                 : "c" (offset),
-                   "a" (value_low),
-                   "d" (value_high));
-}
-uint64_t rdtsc() {
-    unsigned int lo, hi;
-    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
-    return ((uint64_t)hi << 32) | lo;
-}
-uint64_t read_gs_u64(size_t index)
-{
-    uint64_t value = 0;
-    uint64_t offset = index * sizeof(uint64_t);
-    
-    asm volatile(
-        "movq %%gs:(%[offset]), %[value]"
-        : [value] "=r" (value)
-        : [offset] "r" (offset)
-        : "memory"
-    );
-    return value;
-}
-
-void gs_u64_write(uint32_t index, uint64_t value)
-{
-    uint64_t offset = index * sizeof(uint64_t);
-    
-    asm volatile(
-        "movq %[val], %%gs:(%[offset])"
-        :
-        : [offset] "r" (offset),
-          [val] "r" (value)
-        : "memory"
-    );
-}
-
-uint32_t fast_get_processor_id()
-{
-    return static_cast<uint32_t>(read_gs_u64(PROCESSOR_ID_GS_INDEX));
-}

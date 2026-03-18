@@ -216,5 +216,5 @@ void render_glyph(int m, int n, unsigned char ch)
 
 - `init_gop.h` - 底层图形输出
 - `16x32AsciiCharacterBitmapSet.h` - 字库数据
-- `os_error_definitions.h` - 错误码定义
+- `abi/os_error_definitions.h` - 错误码定义
 - `util/OS_utils.h` - 内存操作函数

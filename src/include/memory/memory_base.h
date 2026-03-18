@@ -1,8 +1,6 @@
 #pragma once
 #include  <stdint.h>
-#include  <efi.h>
-#include "pgtable45.h"
-#include "devices_typeids.h"
+#include <abi/os_error_definitions.h>
 typedef enum :uint32_t{
     EFI_RESERVED_MEMORY_TYPE,
     EFI_LOADER_CODE,
@@ -35,22 +33,9 @@ typedef enum :uint32_t{
   MEMORY_TYPE_OS_RESERVED_MIN  = 0x80000000,
   MEMORY_TYPE_OS_RESERVED_MAX  = 0xFFFFFFFF
 } PHY_MEM_TYPE;
+constexpr uint64_t MAX_PHYADDR_1GB_PGS_COUNT=1ull<<21;
 typedef uint64_t phyaddr_t;
 typedef uint64_t vaddr_t;
-#define IN
-#define OUT
-#pragma pack(push, 8)  // 强制8字节对齐（x64 ABI要求）
-
-typedef struct {
-    PHY_MEM_TYPE     Type;          // 4字节
-    uint32_t ReservedA;
-    
-    EFI_PHYSICAL_ADDRESS  PhysicalStart;  // 8字节
-    EFI_VIRTUAL_ADDRESS   VirtualStart;   // 8字节
-    UINT64                NumberOfPages;  // 8字节
-    UINT64                Attribute;      // 8字节
-    UINT64                ReservedB;      // 8字节
-} EFI_MEMORY_DESCRIPTORX64;
 enum cache_strategy_t:uint8_t
 {
     UC=0,
@@ -104,6 +89,9 @@ union ia32_pat_t
    uint64_t value;
    cache_strategy_t  mapped_entry[8];
 };
+constexpr ia32_pat_t DEFAULT_PAT_CONFIG={
+    .value=0x0407050600070106
+};
 struct pgaccess
 {
     uint8_t is_kernel:1;
@@ -147,54 +135,59 @@ struct VM_DESC
     uint8_t is_out_bound_protective:1; // 是否有越界保护区,只有is_vaddr_alloced为1的bit此位才有意义，
     uint64_t SEG_SIZE_ONLY_UES_IN_BASIC_SEG;
 };
-#pragma pack(pop)  // 恢复默认对齐
-typedef struct phy_memDescriptor{
-    PHY_MEM_TYPE                          Type;           // Field size is 32 bits followed by 32 bit pad
-    uint32_t remapped_count;
-    
-    EFI_PHYSICAL_ADDRESS            PhysicalStart;  // Field size is 64 bits
-    EFI_VIRTUAL_ADDRESS             VirtualStart;   // Field size is 64 bits
-    UINT64                          NumberOfPages;  // Field size is 64 bits
-    UINT64                          Attribute;      // Field size is 64 bits
-    /**
-     *  上面的attribute0位是否占用，1位是否读，2位是否写，3位是否可执行，
-     * 
-     * 上面的约定只在phy_memDesriptor *KspaceMapMgr::queryPhysicalMemoryUsage(phyaddr_t base, uint64_t len_in_bytes)
-     * 的返回结果中有效
-     */
-    phy_memDescriptor*submaptable;
-}  phy_memDescriptor; //PHY_MEMORY_DESCRIPTOR
-constexpr uint64_t MAX_PHYADDR_1GB_PGS_COUNT=4096;
-static_assert((MAX_PHYADDR_1GB_PGS_COUNT&(MAX_PHYADDR_1GB_PGS_COUNT-1))==0,"MAX_PHYADDR_1GB_PGS_COUNT must be power of 2");
-static_assert((MAX_PHYADDR_1GB_PGS_COUNT>512),"MAX_PHYADDR_1GB_PGS_COUNT must be greater than 512");
+struct alloc_flags_t{
+    bool is_longtime;
+    bool is_crucial_variable;
+    bool vaddraquire;
+    bool force_first_linekd_heap;
+    bool is_when_realloc_force_new_addr;//在realloc中强制重新分配内存，非realloc接口忽视此位但是会忠实记录进入metadata,realloc中此位不设置会优先原地调整，原地调整解决则不会修改源地址和元数据flags
+    uint8_t align_log2;
+};
+constexpr alloc_flags_t default_flags={
+    .is_longtime=false,
+    .is_crucial_variable=false,
+    .vaddraquire=true,
+    .force_first_linekd_heap=false,
+    .is_when_realloc_force_new_addr=false,
+    .align_log2=4
+};
 
 /**
- * @brief 通用函数：将虚拟 - 物理地址区间按照页面大小拆分为多个条目
- * 
- * 根据虚拟地址和物理地址的同余关系（congruence），智能地将区间拆分为 1GB/2MB/4KB 的页面组合。
- * 拆分策略优先使用大页面以减少 TLB 条目数，边界不对齐部分使用小页面填充。
- * 
- * @param result 输出参数，存储拆分后的页面信息包
- * @param vmentry VM 描述符，包含虚拟地址和物理地址信息
- * @return int OS_SUCCESS 成功，其他错误码见 os_error_definitions.h
- * 
- * @note 该函数不依赖任何类实例，可在任何上下文中调用
- * @note 要求 vmentry 的 start, end, phys_start 都必须 4KB 对齐
+ * @brief 
+ * 对于分配参数的设计优先看位域控制，遵循以下的依赖
+ * 1.force_first_bcb为1时强制只使用first_BCB，其它参数统统无效
+ * 2.当force_first_bcb为0时，no_up_limit_bit，try_lock_always_try，no_addr_constrain_bit
+ * 这三个位是三个独立的位
+ * 2.1try_lock_always_try:为1只有确定所有所有BCB都不满足分配条件时才失败，在到达这个之前无限重试,为0时重试次数有上限
+ * 2.2no_up_limit_bit:为0时等价于[0,up_phyaddr_limit)的地址限制
+ * 2.3no_addr_constrain_bit:为0时等价于[constrain_base,constrain_base+constrain_interval_size)的地址限制]
+ * 2.2和2.3若同时为0则区间取交集
  */
+struct buddy_alloc_params{
+    uint64_t numa;//不支持，暂时
+    uint64_t try_lock_always_try:1;//多BCB的架构下，会尝试多次获取锁，失败次数过高会失败返回繁忙重试，这个标志位为1则永远尝试直到成功获取锁
+    uint8_t align_log2;
+};
+constexpr buddy_alloc_params BUDDY_ALLOC_DEFAULT_FLAG{
+    .numa = 0,
+    .try_lock_always_try = 0,
+    .align_log2 = 12
+};
+struct phymem_segment {
+    phyaddr_t start;
+    uint64_t size;
+    PHY_MEM_TYPE type;
+};
+struct loaded_VM_interval {
+
+    phyaddr_t pbase;
+    vaddr_t vbase;
+    uint64_t size;
+    uint32_t VM_interval_specifyid;
+    pgaccess access;
+};
 int vm_interval_to_pages_info(seg_to_pages_info_pakage_t &result, VM_DESC vmentry);
-
-/**
- * @brief 通用函数：将虚拟 - 物理地址区间按照页面大小拆分为多个条目
- * 
- * 根据虚拟地址和物理地址的同余关系（congruence），智能地将区间拆分为 1GB/2MB/4KB 的页面组合。
- * 拆分策略优先使用大页面以减少 TLB 条目数，边界不对齐部分使用小页面填充。
- * 
- * @param result 输出参数，存储拆分后的页面信息包
- * @param vbase 虚拟地址起始（必须 4KB 对齐）
- * @param vend 虚拟地址结束（必须 4KB 对齐，开区间）
- * @param pbase 物理地址起始（必须 4KB 对齐）
- * @return int OS_SUCCESS 成功，其他错误码见 os_error_definitions.h
- * 
- * @note 该函数不依赖任何类实例，可在任何上下文中调用
- * @note 要求 vbase, vend, pbase 都必须 4KB 对齐
- */
+extern loaded_VM_interval* VM_intervals;
+extern uint64_t VM_intervals_count;
+extern phymem_segment *phymem_segments;
+extern uint64_t phymem_segments_count; 

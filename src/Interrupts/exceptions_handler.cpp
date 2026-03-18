@@ -3,7 +3,7 @@
 #include "util/kout.h"
 #include "util/OS_utils.h"
 #include "panic.h"
-#include "pt_regs.h"
+#include "abi/arch/x86-64/pt_regs.h"
 #include "util/kptrace.h"
 void (*global_ipi_handler)()=nullptr;
 void div_by_zero_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
@@ -97,7 +97,7 @@ void double_fault_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_mem_corruption=0,
             .is_escalated=0
         };
-    kio::bsp_kout<<"double_fault_cpp_enter"<<kio::kendl;
+    bsp_kout<<"double_fault_cpp_enter"<<kendl;
     panic_context::x64_context panic_context = Panic::convert_to_panic_context(frame, 8);
     Panic::panic(default_panic_behaviors_flags,"kernel_context cause #DF(Double Fault)", &panic_context,&inshort,KURD_t());
 }
@@ -139,6 +139,9 @@ void general_protection_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_mem_corruption=0,
             .is_escalated=0
         };
+        symbol_entry*lastest_rip =ksymmanager::get_entry_near_addr(frame->rip);
+        //bsp_kout<<"lastest_rip:"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kendl;
+        else_trace((void*)frame->rbp);
         panic_context::x64_context panic_context = Panic::convert_to_panic_context(frame, 0xD);
         Panic::panic(default_panic_behaviors_flags,"kernel_context cause #GP(General Protection)", &panic_context,&inshort,KURD_t());
     }
@@ -161,7 +164,8 @@ void page_fault_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_escalated=0
         };
         symbol_entry*lastest_rip =ksymmanager::get_entry_near_addr(frame->rip);
-        kio::bsp_kout<<"lastest_rip: 0x"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kio::kendl;
+        bsp_kout<<"kernel oops in page_fault_cpp_enter"<<kendl;
+        bsp_kout<<"lastest_rip:"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kendl;
         else_trace((void*)frame->rbp);
         panic_context::x64_context panic_context = Panic::convert_to_panic_context(frame, 0xE);
         Panic::panic(default_panic_behaviors_flags,"kernel_context cause #PF(Page Fault)", &panic_context,&inshort,KURD_t());

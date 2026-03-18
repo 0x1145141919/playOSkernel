@@ -1,12 +1,13 @@
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "util/OS_utils.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "util/kout.h"
 #include "panic.h"
 #include "memory/kpoolmemmgr.h"
 #include "memory/AddresSpace.h"
 #include "firmware/ACPI_APIC.h"
-#include "util/cpuid_intel.h"
+#include "util/arch/x86-64/cpuid_intel.h"
+#include "abi/arch/x86-64/GS_Slots_index_definitions.h"
 #include "util/kptrace.h"
 #include "util/OS_utils.h"
 #include "Interrupt_system/loacl_processor.h"
@@ -25,7 +26,7 @@ VM_DESC heap_area={.start=0,
     .end=0,
     .map_type=VM_DESC::MAP_NONE,
     .phys_start=0,
-    .access=KspaceMapMgr::PG_RW,
+    .access=KspacePageTable::PG_RW,
     .committed_full=0,
     .is_vaddr_alloced=0,
     .is_out_bound_protective=0
@@ -81,14 +82,14 @@ KURD_t kpoolmemmgr_t::multi_heap_enable()
     ksetmem_8(HCB_ARRAY, 0, hcb_count*sizeof(HCB_ARRAY[0]));
     HCB_ARRAY_lock.write_unlock();
     uint64_t heap_area_size=HCB_DEFAULT_SIZE*hcb_count;
-    heap_area.start=KspaceMapMgr::kspace_vm_table->alloc_available_space(heap_area_size,0);
+    heap_area.start=kspace_vm_table->alloc_available_space(heap_area_size,0);
     if(heap_area.start==0){
         fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_NO_VADDR_SPACE;
         return fail;
     }
     heap_area.end=heap_area.start+heap_area_size;
     heap_area.is_vaddr_alloced=1;
-    if(KspaceMapMgr::VM_add(heap_area)!=OS_SUCCESS){
+    if(kspace_vm_table->insert(heap_area)!=OS_SUCCESS){
         fail.reason=MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::PER_PROCESSOR_HEAP_INIT_RESULTS::FAIL_RESONS::REASON_CODE_VM_ADD_FAIL;
         return fail;
     }
@@ -183,8 +184,8 @@ kpoolmemmgr_t::HCB_v2 *kpoolmemmgr_t::find_hcb_by_address(void *ptr)
 
 // 辅助函数：处理堆对象被销毁的错误
 static void handle_heap_obj_destroyed(const char* operation, void* ptr) {
-    kio::bsp_kout << kio::now << "kpoolmemmgr_t::" << operation 
-                  << ": heap object destroyed at address 0x" << (void*)ptr << kio::kendl;
+    bsp_kout<< now << "kpoolmemmgr_t::" << operation 
+                  << ": heap object destroyed at address 0x" << (void*)ptr << kendl;
     self_trace();
     panic_info_inshort inshort={
         .is_bug=false,
@@ -246,8 +247,8 @@ void* kpoolmemmgr_t::kalloc(uint64_t size,KURD_t&no_succes_report,alloc_flags_t 
             }
         }
         // 所有每CPU堆都失败，回退到第一个链接堆
-        kio::bsp_kout << kio::now << "kpoolmemmgr_t::kalloc: fallback to first_linekd_heap on processor " 
-                      << query_x2apicid() << kio::kendl;
+        bsp_kout<< now << "kpoolmemmgr_t::kalloc: fallback to first_linekd_heap on processor " 
+                      << query_x2apicid() << kendl;
     }
     
     // 使用第一个链接堆分配

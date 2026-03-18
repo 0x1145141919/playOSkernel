@@ -3,7 +3,7 @@
  */
 #include "stdint.h"
 #include "util/lock.h"
-#include "init_to_kernel_info.h"
+#include "abi/boot.h"
  class DmesgRingBuffer
 {
 private:

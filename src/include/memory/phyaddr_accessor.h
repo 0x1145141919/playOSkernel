@@ -3,7 +3,7 @@
 #include "phygpsmemmgr.h"
 constexpr uint8_t CACHE_VMDESC_MAX=16;
 class PhyAddrAccessor { 
-    friend KspaceMapMgr;
+    friend KspacePageTable;
     friend phymemspace_mgr;
     static phyaddr_t init_pgtb_root;
     static VM_DESC BASIC_DESC;

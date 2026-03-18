@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "Interrupt_system/Interrupt.h"
 #include "util/lock.h"
 #include "Interrupt_errors.h"

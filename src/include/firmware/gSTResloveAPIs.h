@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <efi.h>
 #include <efilib.h>
-#include "memory/Memory.h"
-#include "init_to_kernel_info.h"
+#include "memory/memory_base.h"
+#include "abi/boot.h"
 //
 // ACPI 表签名常量定义（仅C++）
 //

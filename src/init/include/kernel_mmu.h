@@ -1,5 +1,5 @@
-#include "memory/pgtable45.h"
-#include "memory/Memory.h"
+#include "abi/arch/x86-64/pgtable45.h"
+#include "memory/memory_base.h"
 #pragma once
 struct vinterval{
     uint64_t phybase;

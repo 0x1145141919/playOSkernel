@@ -1,7 +1,7 @@
 #include "firmware/gSTResloveAPIs.h"
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
 #include "memory/AddresSpace.h"
-#include "os_error_definitions.h"
+#include "abi/os_error_definitions.h"
 #include "panic.h"
 #include "memory/init_memory_info.h"
 
@@ -35,36 +35,39 @@ int acpimgr_t::Init(EFI_SYSTEM_TABLE *st)
     }
     
     // 从全局 phymem_segments 中查找 XSDT 所在的内存段
-  phy_memDescriptor des_temp;
-  phy_memDescriptor *des = nullptr;
-  uint64_t xsdt_phy = rsdp_phy->XsdtAddress;
-    
+    uint64_t xsdt_phy = rsdp_phy->XsdtAddress;
+    phymem_segment *des = nullptr;
     // 遍历 phymem_segments 数组查找包含 XSDT 物理地址的段
     for(uint64_t i = 0; i < phymem_segments_count; i++) {
       phymem_segment& seg = phymem_segments[i];
         if(xsdt_phy >= seg.start && xsdt_phy < seg.start + seg.size) {
-            // 找到了包含 XSDT 的内存段
-            des_temp.PhysicalStart = seg.start;
-            des_temp.NumberOfPages = seg.size / 0x1000;  // 转换为页数
-            des_temp.Type = seg.type;
-            des = &des_temp;
+            des = &seg;
             break;
         }
     }
     
-    if (!des || des->Type != EFI_ACPI_RECLAIM_MEMORY)
+    if (!des || des->type != EFI_ACPI_RECLAIM_MEMORY)
     {
         return OS_INVALID_PARAMETER;
     }
     
     KURD_t kurd;
-    acpi_seg_vbase=(vaddr_t)KspaceMapMgr::pgs_remapp(kurd, des->PhysicalStart, des->NumberOfPages * 0x1000, KspaceMapMgr::PG_RW, 0);
-    acpi_seg_pbase = des->PhysicalStart;
-    acpi_seg_size = des->NumberOfPages * 0x1000;
-    if(acpi_seg_vbase == 0) return kurd_get_raw(kurd);
-    
+    acpi_seg_pbase = des->start;
+    acpi_seg_size = des->size;
+
+    acpi_seg_vbase=kspace_vm_table->alloc_available_space(des->size,des->start%0x40000000);
+    //if(acpi_seg_vbase == 0) return kurd_get_raw(kurd);
+    kurd=KspacePageTable::enable_VMentry(vm_interval{
+        .vbase=acpi_seg_vbase,
+        .pbase=acpi_seg_pbase,
+        .size=acpi_seg_size,
+        .access=KspacePageTable::PG_RW
+    });
+    if(error_kurd(kurd)){
+        return kurd_get_raw(kurd);
+    }
     XSDT_OFFSET = xsdt_phy - acpi_seg_pbase;
-    XSDT_Table *vXSDT = (XSDT_Table*)(XSDT_OFFSET + acpi_seg_pbase);
+    XSDT_Table *vXSDT = (XSDT_Table*)(xsdt_phy);
     xsdt_entry_count = (vXSDT->Header.Length - sizeof(ACPI_Table_Header)) / sizeof(uint64_t);
     for (int i = 0; i < xsdt_entry_count; i++)
     {

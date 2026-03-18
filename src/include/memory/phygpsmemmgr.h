@@ -1,527 +1,74 @@
 #pragma once
 #include "stdint.h"
-#include "memory/Memory.h"
+#include "memory/memory_base.h"
+#include "memory/page_struct.h"
 #include <util/lock.h>
 #include <util/Ktemplats.h>
 #include "memory/memmodule_err_definitions.h"
-#include "init_to_kernel_info.h"
+#include "abi/boot.h"
 typedef  uint64_t phyaddr_t;
 namespace MEMMODULE_LOCAIONS{
-        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR=8;//[8~15]是phymemspace_mgr的子模块
-        namespace PHYMEMSPACE_MGR_EVENTS_CODE{
-            constexpr uint8_t EVENT_CODE_INIT=0;
-            namespace INIT_RSEUL_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t USER_TEST_KERNEL_IMAGE_SET_FAIL=0x1;
-                    constexpr uint16_t USER_TEST_KERNEL_IMAGE_BAD_ELF_MAGIC=0x2;
-                }
+    constexpr uint8_t LOCATION_CODE_TRANSPARNENT_PAGE=0x3;
+    namespace TRANSPARNENT_PAGE_EVENTS{
+        constexpr uint8_t EVENT_CODE_SPILT=0x1;
+        constexpr uint8_t EVENT_CODE_MERGE=0x2;
+        constexpr uint8_t EVENT_CODE_MERGE_FREE=0x3;
+        namespace SPILT_RESULTS_CODE{
+            namespace FAIL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_CODE_INVALID_TARGET_ORDER=1;
+                constexpr uint16_t FAIL_REASON_CODE_TARGET_ORDER_NOT_SMALLER=2;
+                constexpr uint16_t FAIL_REASON_CODE_INDEX_ALIGN_TOO_SMALL=3;
+                constexpr uint16_t NOT_HEAD_PAGE=4;
+                constexpr uint16_t FAIL_REASON_CODE_OUT_OF_RANGE=5;
             }
-            constexpr uint8_t EVENT_CODE_PAGES_SET=1;
-            namespace PAGES_SET_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_PAGES_COUNT_ZERO=0x1;
-                    constexpr uint16_t REASON_CODE_FAIL_TO_SPLIT_SEG=0x2;
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t REASON_CODE_attempt_create_new_entry_not_blackhole=0x1;
-                    constexpr uint16_t REASON_CODE_TOP1GB_ENABLE_FAIL=0x2;
-                }
+            namespace FATAL_REASONS_CODE{
+                constexpr uint16_t CONSISTENCY_VIOLATION=1;
             }
-            constexpr uint8_t EVENT_CODE_PAGES_SET_DRAM=2;
-            namespace PAGES_SET_DRAM_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_PAGES_COUNT_ZERO=0x1;
-                    constexpr uint16_t REASON_CODE_FAIL_TO_SPLIT_SEG=0x2;
-                    constexpr uint16_t REASON_CODE_DRAMSEG_NOT_EXIST=0x3;
-                    constexpr uint16_t REASON_CODE_INVALID_STATE=0x4;
-                    constexpr uint16_t REASON_CODE_FREE_STATE_NOT_ALLOWED=0x5;
-                    constexpr uint16_t REASON_CODE_FREE_REFCNT_NOT_ONE=0x6;
-                    constexpr uint16_t REASON_CODE_FREE_MAPCOUNT_NOT_ZERO=0x7;
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t REASON_CODE_WHEN_BUDDY_UNREGIS_STATE_CONFILICT=0x1;
-                    constexpr uint16_t REASON_CODE_TOP1GB_ENABLE_FAIL=0x2;
-                    constexpr uint16_t REASON_CODE_WHEN_BUDDY_UNREGIS_SUBTB_NOT_EXSIT=0x3;
-                    constexpr uint16_t REASON_CODE_BAD_PAGE_SIZE=0x4;
-                    constexpr uint16_t REASON_CODE_WHEN_NORMAL_ATOM_EXPECTION_VIOLATION=0x5;
-                    constexpr uint16_t REASON_CODE_WHEN_NORMAL_FREE_EXPECTION_VIOLATION=0x6;
-                    constexpr uint16_t REASON_CODE_WHEN_NORMAL_BUDDY_EXPECTION_VIOLATION=0x7;
-                    constexpr uint16_t REASON_CODE_WHEN_BUDDY_REGIST_STATE_CONFILICT=0x8;
-                }
+        }
+        namespace MERGE_RESULTS_CODE{
+            namespace FAIL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_CODE_INVALID_TARGET_ORDER=1;
+                constexpr uint16_t FAIL_REASON_CODE_TARGET_ORDER_NOT_GREATER=2;
+                constexpr uint16_t FAIL_REASON_CODE_INDEX_ALIGN_TOO_SMALL=3;
+                constexpr uint16_t FAIL_REASON_CODE_OUT_OF_RANGE=4;
+                constexpr uint16_t FAIL_REASON_CODE_NOT_HEAD_PAGE=5;
+                constexpr uint16_t FAIL_REASON_CODE_ORDER_MISMATCH=6;
+                constexpr uint16_t FAIL_REASON_CODE_TYPE_MISMATCH=7;
+                constexpr uint16_t FAIL_REASON_CODE_TRANSPARENT_PAGE_INVALID=8;
+                constexpr uint16_t FAIL_REASON_CODE_HEAD_PTR_MISMATCH=9;
+                constexpr uint16_t FAIL_REASON_CODE_HUGE_ORDER_MISMATCH=10;
+                constexpr uint16_t NOT_HEAD_PAGE=11;
             }
-            constexpr uint8_t EVENT_CODE_PAGES_LINEAR_SCAN_AND_ALLOC=3;
-            namespace PAGES_LINEAR_SCAN_AND_ALLOC_RESULTS_CODE{ 
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_INVALID_STATE=0x1;
-                }
+        }
+        namespace MERGE_FREE_RESULTS_CODE{
+            namespace FAIL_REASONS_CODE{
+                constexpr uint16_t FAIL_REASON_CODE_INVALID_TARGET_ORDER=1;
+                constexpr uint16_t FAIL_REASON_CODE_TARGET_ORDER_NOT_GREATER=2;
+                constexpr uint16_t FAIL_REASON_CODE_INDEX_ALIGN_TOO_SMALL=3;
+                constexpr uint16_t FAIL_REASON_CODE_OUT_OF_RANGE=4;
+                constexpr uint16_t FAIL_REASON_CODE_NOT_HEAD_PAGE=5;
+                constexpr uint16_t FAIL_REASON_CODE_ORDER_MISMATCH=6;
+                constexpr uint16_t FAIL_REASON_CODE_NOT_FREE=7;
+                constexpr uint16_t FAIL_REASON_CODE_NOT_ALLOCATABLE=8;
+                constexpr uint16_t FAIL_REASON_CODE_REFCOUNT_NONZERO=9;
+                constexpr uint16_t FAIL_REASON_CODE_TRANSPARENT_PAGE_INVALID=10;
+                constexpr uint16_t FAIL_REASON_CODE_HEAD_PTR_MISMATCH=11;
+                constexpr uint16_t FAIL_REASON_CODE_HUGE_ORDER_MISMATCH=12;
+                constexpr uint16_t NOT_HEAD_PAGE=13;
             }
-            constexpr uint8_t EVENT_CODE_ALIGN_SEARCHES=4;
-            namespace ALIGN_SEARCHES_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_NO_ENOUGH_MEMORY=0x1;
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t REASON_CODE_TOP1GB_ENTRY_INVALID=0x1;
-                    constexpr uint16_t REASON_CODE_ILLAGLE_DRAM_PAGE_TYPE=0x2;
-                    constexpr uint16_t REASON_CODE_SUBTABLE_NULLPTR=0x3;
-                    constexpr uint16_t REASON_CODE_4KBPAGE_SUB_BIT_VALID=0x4;
-                }
-            } 
-            constexpr uint8_t EVENT_CODE_DEL_NO_ATOM_1GB_PG=5;
-            namespace DEL_NO_ATOM_1GB_PG_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t _1GB_PG_NOT_EXIST=0x1;
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t SUBTABLE_NOT_EXIST=0x1;
-                    constexpr uint16_t PAGES_ILLEAGLE_STATE=0x2;
+        }
+    };
 
-                }
-            } 
-            constexpr uint8_t EVENT_CODE_BLACK_HOLE_ACCLAIM=6;
-            namespace BLACK_HOLE_ACCLAIM_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t BASE_NOT_ALIGNED=0x1;
-                }
-            }  
-            constexpr uint8_t EVENT_CODE_BLACK_HOLE_DECCLAIM=7;
-            namespace BLACK_HOLE_DECCLAIM_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t BASE_NOT_ALIGNED=0x1;
-                    constexpr uint16_t REASON_CODE_NOT_FOUND=0x2;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_MMIO_REGIST=8;
-            namespace MMIO_REGIST_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_MMIOSEG_NOT_EXIST=0x1;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_MMIO_UNREGIST=9;
-            namespace MMIO_UNREGIST_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_MMIOSEG_NOT_EXIST=0x1;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_PAGES_RECYCLE=10;
-            namespace PAGES_RECYCLE_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_DRAMSEG_NOT_EXIST=0x1;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_PAGES_RECYCLE_VERIFY=11;
-            namespace PAGES_RECYCLE_VERIFY_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t BAD_PARAM=0x1;
-                    constexpr uint16_t REASON_CODE_UNRECYCABLE_PAGE_STATE=0x2;
-                    constexpr uint16_t REASON_CODE_PAGE_STATE_SHIFT=0x3;
-                    constexpr uint16_t REASON_CODE_REF_COUNT_NET_ALLOW_RECYCLE=0x4;
-                    constexpr uint16_t REASON_CODE_MAP_COUNT_NOT_CLEAR=0x5;
-                    constexpr uint16_t REASON_CODE_4KBPAGE_SUBTABLE_BIT_VALID=0x6;
-                    constexpr uint16_t REASON_CODE_BUDDY_PAGE_NOT_ALLOW_RECYCLE=0x7;
-
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t REASON_CODE_UNREACHABLE_CODE=0x1;
-                    constexpr uint16_t REASON_CODE_PAGE_FRAME_FAIL_GET=0x2;
-                }
-            } 
-        }
-        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR_LOW1MB_MGR=9;
-        namespace PHYMEMSPACE_MGR_LOW1MB_MGR_DOUBLE_LINK_LIST_EVENTS_CODE{
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_INIT=0;
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_ADD_SEG=1;
-            namespace MEMSEG_DOUBLE_LINK_LIST_ADD_SEG_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_ADD_SEG_FAIL=0x1;
-                    constexpr uint16_t REASON_CODE_SEG_OVERLAP=0x2;
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t REASON_CODE_UNREACHABLE_CODE=0x1;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_DEL_SEG=2;
-            namespace MEMSEG_DOUBLE_LINK_LIST_DEL_SEG_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_DLL_ALREADY_EMPTY=0x1;
-                    constexpr uint16_t REASON_CODE_SEG_NOT_FOUND=0x2;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_SEARCH=3;
-            namespace MEMSEG_DOUBLE_LINK_LIST_SEARCH_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_SEG_NOT_FOUND=0x1;
-                }
-            }
-        }
-        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR_ATOM_PAGES_COMPLEX_STRUCT=10;
-        constexpr uint8_t LOCATION_CODE_PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST=11;    
-        namespace PHYMEMSPACE_MGR_MEMSEG_DOUBLE_LINK_LIST_EVENTS_CODE{
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_INIT=0;
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_ADD_SEG=1;
-            namespace MEMSEG_DOUBLE_LINK_LIST_ADD_SEG_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_ADD_SEG_FAIL=0x1;
-                    constexpr uint16_t REASON_CODE_SEG_OVERLAP=0x2;
-                }
-                namespace FATAL_REASONS{
-                    constexpr uint16_t REASON_CODE_UNREACHABLE_CODE=0x1;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_DEL_SEG=2;
-            namespace MEMSEG_DOUBLE_LINK_LIST_DEL_SEG_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_DLL_ALREADY_EMPTY=0x1;
-                    constexpr uint16_t REASON_CODE_SEG_NOT_FOUND=0x2;
-                }
-            }
-            constexpr uint8_t EVENT_CODE_MEMSEG_DOUBLE_LINK_LIST_SEARCH=3;
-            namespace MEMSEG_DOUBLE_LINK_LIST_SEARCH_RESULTS_CODE{
-                namespace FAIL_REASONS{
-                    constexpr uint16_t REASON_CODE_SEG_NOT_FOUND=0x1;
-                }
-            }
-        }
 };
 /**
- * 要把这个类等价于一个原子页视图，各种大小对齐的原子页
- * 2mb中页,1gb大页在state为NOT_ATOM的时候为非原子页，且is_sub_valid必然为1
- * 必然存在下级页
- * 2mbNOT_ATOM中页在4kb子表有效且存在时全部非free/mmiofree时应标记为full，
- * 1gb大页在2mb中页原子页中全部非free且非原子页全部为full时则应该标记为full，
- * */
-/**
- * 由于有伙伴系统的引入，此模块存储着物理页框信息也要进行调整
- * 首先此模块维护了一个物理段链表，而伙伴系统的内存段必须是某个dram物理段的子集
- * 由是所有is_belonged_to_buddy的页必须在某个dram物理段内，
- * 由于是dram段所以不能复用
- * static int pages_state_set(phyaddr_t base,uint64_t num_of_4kbpgs,page_state_t state,pages_state_set_flags_t flags);//这个函数对大中页原子free表项的“染色”策略是染色成PARTIAL
- * 这个接口，必须另起炉灶
- * 显然，在本模块的三个基本扫描算反必须跳过这些is_belonged_to_buddy的页
+ * phymemspace_mgr权责约定：
+ * 向外暴露的数据结构中pages_array_2mb保证在初始化逻辑中后可以不越界的情况下自由读写不产生页错误
+ * 
  */
-/**
- *整个模块有两个核心数据结构：
-    static PHYSEG_LIST_ITEM*physeg_list;与
-    top_1gb_table稀疏数组
-    整个模块的所有内存操作必须落在physeg_list指定的一个PHYSEG内，而开始的状态是全部black_hole
-    由此提供blackhole_acclaim和blackhole_decclaim两个接口来声明某个内存段
-    而struct PHYSEG的type字段标记其类型有
-    enum seg_type_t:uint8_t{
-        DRAM_SEG,
-        FIRMWARE_RESERVED_SEG,
-        RESERVED_SEG,
-        MMIO_SEG
-    };
-    只有在DRAM_SEG类型，才会允许使用pages_alloc与pages_recycle分配回收内存
-    DRAM_SEG下的原子页视图中FREE算空闲，USER_FILE，USERuint8_t buddy_dram_seg:1;//仅在op为normal时有效，_ANONYMOUS，DMA，KERNEL，KERNEL_PERSIST算占用
-    MMIO_SEG下原子页视图中也有空闲占用两种状态，但是MMIO_FREE为空闲，MMIO为占用
-    MMIO_SEG段下提供mmio_regist注册/注销的接口，不允许重复注册，需要调用者自己保存注册了什么地址
-    一次mmio_regist的地址范围必须是某个MMIO_SEG的子集
-*/
-/**
- * 此函数全局单例掌握物理内存一手唯一信源，如果出现不一致等情况应该直接panic,并且还要尽可能打印尽可能多的表项信息
- */
-enum page_state_t:uint8_t {
-        RESERVED = 0, // 保留页,不能动,特意设计成这个数码来保证在clear之后默认就是如此
-        FREE,   // 空闲页 
-        NOT_ATOM,// 仅大页可用，代表子表是否存在state,refcount存在不完全相同
-        FULL,
-        MMIO_FREE,
-        KERNEL,        // 内核使用，内核堆之类的分配
-        KERNEL_PERSIST, //持久内核页，内核映像注册
-        UEFI_RUNTIME,   //只能Init中注册这种类型
-        ACPI_TABLES,    //只能Init中注册这种类型
-        ACPI_NVS,
-        USER_FILE,          // 用户进程
-        USER_ANONYMOUS,// 用户进程匿名页
-        DMA,           // DMA缓冲
-        MMIO,
-        LOW1MB
-    };
-    enum seg_type_t:uint8_t{
-        DRAM_SEG,
-        FIRMWARE_RESERVED_SEG,
-        RESERVED_SEG,
-        MMIO_SEG,
-        LOW1MB_SEG
-    };
 class phymemspace_mgr{
     public:
-    //主要是原子页迭代器太复杂，暂时全模块加锁，后续可能的话进行优化
-    //技术债
-    
-    struct blackhole_acclaim_flags_t{
-        uint64_t a;
-    };
-    /**
-     * 此结构体为物理段的统计信息结构体，所有类型物理段total_pages字段有有效，而且为seg_size/4096
-     * DRAM_SEG下free，kernel，kernel_persisit，user_file，user_anonymous，dma这几个字段是直接统计信息，used为前面几个统计出
-     * MMIO_SEG下free，used这两个字段有效，
-     * LOW1MB_SEG，RESERVED_SEG，FIRMWARE_RESERVED_SEG这三个只有total_pages字段有效，其它都应该为0
-     */
-    struct PHYSEG_statistics_t{//都是原子页视图的4kb页
-        uint64_t total_pages;
-        uint64_t mmio;
-        uint64_t kernel;
-        uint64_t kernel_persisit;
-        uint64_t user_file;
-        uint64_t user_anonymous;
-        uint64_t dma;
-    };
-    struct PHYSEG{
-        phyaddr_t base;
-        uint64_t seg_size;
-        uint64_t flags;
-        seg_type_t type;
-        PHYSEG_statistics_t statistics;
-    };
-    struct phymemmgr_statistics_t{
-        uint64_t total_allocatable;
-        uint64_t kernel;
-        uint64_t kernel_persisit;
-        uint64_t user_file;
-        uint64_t user_anonymous;
-        uint64_t dma;
-        uint64_t total_mmio;
-        uint64_t mmio_used;
-        uint64_t total_firmware;
-        uint64_t total_reserved;
-    };
-    static  const PHYSEG NULL_SEG;
-    private:
-    static KURD_t default_kurd();
-    static KURD_t default_success();
-    static KURD_t default_failure();
-    static KURD_t default_fatal();
-    static phymemmgr_statistics_t statisitcs;
-    static bool subtb_alloc_is_pool_way_flag;//phymemspace_mgr的子表分配路径控制位，初始的时候为true,直接走kpoolmemgr路径分配获得虚拟地址
-    //但是在gKernelSpace初始化好之后必须把这个位设置为0,让其走first_BCB分配并且gKspacePgsMemMgr映射虚拟地址的路径
-    class PHYSEG_LIST_ITEM:Ktemplats::list_doubly<PHYSEG>{//保证这个类的PHYSEG不重叠，从前至后基址递增
-    public:
-    using Ktemplats::list_doubly<PHYSEG>::iterator;
-    using Ktemplats::list_doubly<PHYSEG>::begin;
-    using Ktemplats::list_doubly<PHYSEG>::end;
-    using Ktemplats::list_doubly<PHYSEG>::size;
-    using Ktemplats::list_doubly<PHYSEG>::empty;
-        KURD_t add_seg(PHYSEG& seg);
-        KURD_t del_seg(phyaddr_t base);
-        PHYSEG* get_seg_by_base(phyaddr_t base,KURD_t& kurd);
-        PHYSEG* get_seg_by_addr(phyaddr_t addr,KURD_t& kurd);
-        bool is_seg_have_cover(phyaddr_t base,uint64_t size);
-    };
-    static PHYSEG_LIST_ITEM*physeg_list;
-    static spinlock_cpp_t module_global_lock;
-    static constexpr uint32_t _4KB_PG_SIZE = 4096; 
-    static constexpr uint32_t _1GB_PG_SIZE = 1024*1024*1024;
-    static constexpr uint32_t _2MB_PG_SIZE = 2*1024*1024;
-    // 全局常量（类内也可）
-
-    struct page_flags_t
-    {
-        page_state_t state;
-        uint8_t is_sub_valid:1;//在2mb中页,1GB大页中标记地址域是否有效，是否为非1原子页
-        uint8_t is_belonged_to_buddy:1;//标记该页是否是某个BCB的子区间
-    };
-    struct page_size4kb_t
-    {
-        uint32_t ref_count;
-        uint32_t map_count;
-        page_flags_t flags;
-    };
-    struct page_size2mb_t{
-        page_size4kb_t* sub_pages=nullptr;//子表若有效大小必然为512项
-        uint32_t ref_count;
-        uint32_t map_count;
-        page_flags_t flags;
-    };
-    struct page_size1gb_t{
-        page_size2mb_t* sub2mbpages=nullptr;
-        uint32_t ref_count;
-        uint32_t map_count;
-        page_flags_t flags;
-    };
-    static Ktemplats::sparse_table_2level_no_OBJCONTENT<uint32_t,page_size1gb_t,__builtin_ctz(MAX_PHYADDR_1GB_PGS_COUNT)-9,9>*top_1gb_table;
-    static page_size2mb_t* alloc_2mb_subtable();
-    static void free_2mb_subtable(page_size2mb_t* table);
-    static page_size4kb_t* alloc_4kb_subtable();
-    static void free_4kb_subtable(page_size4kb_t* table);
-    struct seg_to_pages_info_package_t{
-        struct pages_info_t{
-            phyaddr_t base;
-            uint64_t page_size_in_byte;
-            uint64_t num_of_pages;
-        };
-        pages_info_t entries[5];//里面的地址顺序是无序的
-    };
-    /**
-     * pages_state_set接口的标志结构体，下面讲解有效参数选择组合以及对应的行为
-     * 主参数：op有acclaim_backhole，declaim_blackhole，normal类型
-     *  normal类型下if_init_ref_count有效,if_mmio有效
-     *  if_init_ref_count控制是否在对应原子页视图把refcount初始化为1，否则为0
-     *  if_mmio控制在折叠这个操作的时候用什么鉴别占用空闲，在if_mmio语境下MMIO占用，MMIO_FREE表示空闲
-     *  acclaim_backhole类型下if_init_ref_count无效，也就是refcount设置为0
-     *  if_mmio的含义同上
-     *  参数：declaim_blackhole类型下if_init_ref_count无效
-     *  会把对应原子页视图的类型强制设置为RESERVED，如果try_fold_1gb_lambda折叠成功会在top_1gb_table中无效化项并且清零1gb表项数据 
-     */
-    struct pages_state_set_flags_t{
-        enum optype_t:uint8_t{
-            acclaim_backhole,
-            declaim_blackhole,
-            normal
-        }op;
-        struct paras_t
-        {
-        uint8_t if_init_ref_count:1;
-        uint8_t if_mmio:1;//0为dram,1为mmio
-        }params;
-    };
-    static KURD_t pages_state_set(phyaddr_t base,uint64_t num_of_4kbpgs,page_state_t state,pages_state_set_flags_t flags);//这个函数对大中页原子free表项的“染色”策略是染色成PARTIAL
-    static int phymemseg_to_pacage(phyaddr_t base,uint64_t num_of_4kbpgs,seg_to_pages_info_package_t& pakage);
-    struct dram_pages_state_set_flags_t
-    {
-        page_state_t state;
-        enum optype_t:uint8_t{
-            buddypages_regist,
-            buddypages_unregist,
-            normal,
-        }op;
-        struct paras_t
-        {
-        uint8_t if_init_ref_count:1;
-        }params;
-    };
-    static void in_module_panic(KURD_t kurd);
-    static KURD_t dram_pages_state_set(
-        const PHYSEG& current_seg,
-        phyaddr_t base,
-        uint64_t numof_4kbpgs,
-        dram_pages_state_set_flags_t flags
-    );
-    static KURD_t del_no_atomig_1GB_pg(uint64_t _1idx); // 添加新的私有成员函数声明
-    //比外部接口多允许UEFI_RUNTIME,ACPI_TABLES,这两个类型，最高支持到30 align_log2对齐
-    static KURD_t align4kb_pages_search(
-        const PHYSEG& current_seg,
-        phyaddr_t&result_base,
-        uint64_t numof_4kbpgs
-    );  
-    /**
-     * 二重循环扫描1gb,2mb两个级别的表项，预估这个是最高频使用的搜索器，要做好1gbfull跳跃
-     */
-    static KURD_t align2mb_pages_search(
-        const PHYSEG& current_seg,
-        phyaddr_t&result_base,
-        uint64_t numof_2mbpgs
-    );
-    /**
-     * 1gb级搜索器，只需要扫描1gb表项
-     */
-    static KURD_t align1gb_pages_search(
-        const PHYSEG& current_seg,
-        phyaddr_t&result_base,
-        uint64_t numof_1gbpgs
-    );
-    static KURD_t pages_recycle_verify(phyaddr_t phybase, uint64_t num_of_4kbpgs,page_state_t& state);
-    class atom_page_ptr
-    {
-        uint32_t _1gbtb_idx;
-        uint16_t _2mbtb_offestidx;
-        uint16_t _4kb_offestidx;
-        uint32_t page_size;
-        void*page_strut_ptr;
-        public:
-        atom_page_ptr(
-            uint32_t _1gbtb_idx,
-            uint16_t _2mbtb_offestidx,
-            uint16_t _4kb_offestidx
-        );
-        int the_next();
-        friend class phymemspace_mgr;
-    };
-    static int _phypg_count_modify(phyaddr_t base, bool is_inc, bool is_ref_count);
-    friend class atom_page_ptr;
-    static void phy_to_indices(phyaddr_t p, uint64_t &idx_1gb, uint64_t &idx_2mb, uint64_t &idx_4kb);
-    
-    public:
-    class low1mb_mgr_t{
-        public:
-        enum low1mb_seg_type_t:uint8_t{
-            LOW1MB_TRAMPOILE_SEG,
-            LOW1MB_RESERVED_SEG,
-            LOW1MB_MMIO_SEG
-        };
-        struct low1mb_seg_t{//左闭右开区间
-            uint32_t base;
-            uint32_t size;
-            low1mb_seg_type_t type;
-        };
-        private:
-        static constexpr uint32_t ADDR_TOP = 1024*1024;
-        class interval_LinkList:Ktemplats::list_doubly<low1mb_seg_t>{
-            static KURD_t default_kurd();
-            static KURD_t default_success();
-            static KURD_t default_failure();
-            static KURD_t default_fatal();
-            public:
-            using Ktemplats::list_doubly<low1mb_seg_t>::iterator;
-            using Ktemplats::list_doubly<low1mb_seg_t>::begin;
-            using Ktemplats::list_doubly<low1mb_seg_t>::end;
-            using Ktemplats::list_doubly<low1mb_seg_t>::size;
-            KURD_t regist_seg(low1mb_seg_t seg);
-            KURD_t del_seg(uint32_t  base);
-            low1mb_seg_t get_seg_by_addr(uint32_t addr);
-            bool is_seg_have_cover(phyaddr_t base,uint64_t size);
-        };
-        static interval_LinkList low1mb_seg_list;
-        low1mb_mgr_t();
-        friend class phymemspace_mgr;
-        public:
-        static KURD_t regist_seg(low1mb_seg_t seg);
-        static KURD_t del_seg(uint32_t  base);
-        static low1mb_seg_t get_seg_by_addr(uint32_t addr);//落在区间里面的地址返回对应seg副本
-        static bool is_seg_have_cover(phyaddr_t base,uint64_t size);
-    };
-    static low1mb_mgr_t* low1mb_mgr;
-    /**
-     *  KERNEL,        // 内核使用，内核堆之类的分配
-        USER_FILE,          // 用户进程
-        USER_ANONYMOUS,// 用户进程匿名页
-        DMA,    
-        只有这四个类型允许参与分配
-        KERNEL_PERSIST, //持久内核页，内核映像注册
-        UEFI_RUNTIME,   //只能Init中注册这种类型
-        ACPI_TABLES,    //只能Init中注册这种类型
-        MMIO,
-        RESERVED
-        这5个是被注册的，指定位置注册，其中MMIO能被外部注册，剩下四个只能被模块内Init时候注册
-        被
-        */
-    /**
-     * 函数的分配逻辑是由前向后面扫的时候优先在PARTIAL/对应相同state的预分配大页中分配，而后再染色free原子大页
-     * 基于那个多级表的线性扫描法，不浪费但是时间复杂度O(n)，
-     */
-    static phyaddr_t pages_linear_scan_and_alloc
-        (
-            uint64_t numof_4kbpgs,
-            KURD_t&kurd,
-            page_state_t state,
-            uint8_t align_log2=12
-        );
-    static KURD_t pages_mmio_regist(phyaddr_t phybase,uint64_t numof_4kbpgs);//只能从标记为MMIO_FREE的内存中注册为mmio
-    static KURD_t pages_recycle(phyaddr_t phybase,uint64_t numof_4kbpgs);
-    static KURD_t pages_mmio_unregist(phyaddr_t phybase,uint64_t numof_4kbpgs);
-    struct pages_dram_regist_flags_t{
-        seg_type_t type;
-        
-    };
-    static KURD_t pages_dram_buddy_regist(phyaddr_t phybase,uint64_t numof_4kbpgs);
-    static KURD_t pages_dram_buddy_unregist(phyaddr_t phybase,uint64_t numof_4kbpgs);
-    static KURD_t pages_dram_buddy_pages_set(phyaddr_t phybase,uint64_t numof_4kbpgs,page_state_t state);
-    static KURD_t pages_dram_buddy_pages_free(phyaddr_t phybase,uint64_t numof_4kbpgs);
-    static int phypg_refcount_dec(phyaddr_t base);
-    static int phypg_refcount_inc(phyaddr_t base);
-    static int phypg_mapcount_dec(phyaddr_t base);
-    static int phypg_mapcount_inc(phyaddr_t base);
+    static uint64_t mem_map_entry_count;
+    static page*mem_map;
     struct free_segs_t{
         uint64_t count;
         struct entry_t{ 
@@ -530,46 +77,35 @@ class phymemspace_mgr{
         };
         entry_t*entries;
     };
-    static free_segs_t*free_segs_get();//慎用，此函数会锁住整个模块扫描整个模块的表汇报内容，用于FreePagesAllocator的伙伴系统初始化内存段。返回值与entries均在堆上，调用者负责delete[] entries并delete该结构体。
-    static KURD_t blackhole_acclaim(
-        phyaddr_t base,
-        uint64_t numof_4kbpgs,
-        seg_type_t type,
-        blackhole_acclaim_flags_t flags
-    );
-    /**
-     * 显然，我们期望刚声明时的模样和刚释放时的模样一致，这样只有DRAM_SEG和MMIO_SEG才允许释放
-     */
-    static KURD_t blackhole_decclaim(
-        phyaddr_t base        
-    );
-    static PHYSEG get_physeg_by_addr(phyaddr_t addr);
-    static phymemmgr_statistics_t get_statisit_copy();
-    static void subtb_alloc_shift_pages_way();
-    /** 
-     * 这个函数的工作是
-     * 1.    phyaddr_t base;
-    uint64_t seg_size_in_byte;
-
-    uint64_t seg_support_4kb_page_count;//上面计算得出
-    uint64_t seg_support_2mb_page_count;
-    uint64_t seg_support_1gb_page_count;
-    从gBaseMemMgr中获取物理内存描述符表，初始化上面这些元数据
-     * 2.用标准的注册接口注册那些uefi运行时，acpi表，内核数据，内核代码，uefi内存表中明确记录的mmio空间
-     * 3.对于尾巴剩余的内存，用标准接口注册为reserved
-     */
-    
+    static free_segs_t*free_segs_get();
+    static void subtb_alloc_shift_pages_way();    
     static KURD_t Init(init_to_kernel_info*info);
+    /*
+    这五个接口都是返回mem_map中的引索，返回～0代表失败
+    */
+    static uint64_t page_head(uint64_t idx);
+    /*
+    必须是头页
+    */
+    static uint64_t page_size(uint64_t idx);
+    static KURD_t page_spilt(uint64_t idx,uint8_t target_order);//从原order拆分到对应order
+    /**
+     * freedram的判断条件是is_allocateble为1且type==free，refcount=0
+     */
+    static KURD_t page_merge_freedram(uint64_t head_idx,uint8_t target_order);
+    static KURD_t page_merge_identical(uint64_t head_idx,uint8_t target_order);
+    /**
+     * 设置内部的类的页面类型为TYPE，refcoutn为1,没有其它任何隐式行为
+     */
+    static void simp_pages_set(phyaddr_t phybase,uint64_t _4kbpgscount,page_state_t TYPE); 
     #ifdef USER_MODE
     phymemspace_mgr();
     #endif
-    static int print_all_atom_table();//打印top_1gb_table下所有有效表项以及递归打印非原子表项
-    static int print_allseg();//打印 static PHYSEG_LIST_ITEM*physeg_list;所有内容
-    
-};//todo:统计量相关子系统以及公开接口，强制统计量刷新的接口
+};
+
 extern "C"{
     void* __wrapped_pgs_valloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2);
     KURD_t __wrapped_pgs_vfree(void*vbase,uint64_t _4kbpgscount);
-    phyaddr_t __wrapped_pgs_alloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2);
-    KURD_t __wrapped_pgs_free(phyaddr_t phybase,uint64_t _4kbpgscount);
+    vaddr_t stack_alloc(KURD_t*kurd_out,uint64_t _4kbpgscount);//专用栈分配接口，内部调用__wrapped_pgs_valloc，返回的是栈底指针，栈底指针下面有1页读写作为缓冲
+    //但是注意，栈底指针在高位，栈顶在低位
 }
