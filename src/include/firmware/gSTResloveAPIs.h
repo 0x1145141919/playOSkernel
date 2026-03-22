@@ -1,7 +1,6 @@
 #pragma once
 #include <stdint.h>
 #include <efi.h>
-#include <efilib.h>
 #include "memory/memory_base.h"
 #include "abi/boot.h"
 //

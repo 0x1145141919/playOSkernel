@@ -8,7 +8,7 @@
 #include "core_hardwares/lapic.h"
 #include "memory/memory_base.h"
 #include "memory/kpoolmemmgr.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/FreePagesAllocator.h"
 #include "memory/init_memory_info.h"
 #include "util/arch/x86-64/cpuid_intel.h"
@@ -51,7 +51,10 @@ EFI_TIME global_time;
 uint32_t efi_map_ver;
 void ipi_test(){
     uint32_t self_processor_id=fast_get_processor_id();
-    bsp_kout<<"processor id "<< self_processor_id<<kendl;
+    for(uint32_t i=0;i<10;i++)
+    {
+        bsp_kout<<"processor id "<< self_processor_id<<kendl;
+    }
     asm volatile("hlt");
 }
 extern "C" void ap_norm_start( ){
@@ -62,9 +65,8 @@ void create_first_kthread(){
     textconsole_GoP::RuntimeInitServiceThread();
     GlobalKernelStatus=SCHEDUL_READY;
     x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
-    per_processor_scheduler*scheduler=(per_processor_scheduler*)read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX);
-    scheduler->schedule_and_switch();
-
+    per_processor_scheduler&sc=global_schedulers[0];
+    sc.sched();
 }
 extern "C" uint32_t assigned_cr3;
 loaded_VM_interval* VM_intervals;
@@ -154,7 +156,7 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
     }
     assigned_cr3=transfer->kmmu_root_table;
     asm volatile("sfence");
-    bsp_init_kurd=phymemspace_mgr::Init(transfer);
+    bsp_init_kurd=all_pages_arr::Init(transfer);
     if(error_kurd(bsp_init_kurd)){
         bsp_kout<<"phymemspace_mgr Init Failed"<<kendl;
         asm volatile("hlt");
@@ -274,15 +276,18 @@ extern "C" void kernel_start(init_to_kernel_info* transfer)
         bsp_kout<<"Kpoolmemmgr_t::multi_heap_enable Failed"<<kendl;
     }
     ktime::time_interrupt_generator::bsp_init();
-    all_scheduler_ptr=new per_processor_scheduler*[gAnalyzer->processor_x64_list->size()];
     bsp_init_kurd=x86_smp_processors_container::AP_Init_one_by_one();
     if(error_kurd(bsp_init_kurd)){
         bsp_kout<<"x86_smp_processors_container::AP_Init_one_by_one Failed maybe code bug"<<kendl;
     }    
+    Status=task_pool::Init();
+    if(Status){
+        bsp_kout<<"task_pool::Init Failed"<<kendl;
+        asm volatile("hlt");
+    }
     asm volatile("sti");   
     //中断接管工作
-    all_scheduler_ptr[0]=new per_processor_scheduler;
-    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)all_scheduler_ptr[0]);
+    new(global_schedulers) per_processor_scheduler;
     create_first_kthread();
 }
 extern "C" void ap_final_work();
@@ -294,8 +299,7 @@ extern "C" void ap_init(uint32_t processor_id)
     x86_smp_processors_container::regist_core(processor_id); 
     ktime::hardware_time::processor_regist();
     ktime::time_interrupt_generator::ap_init();
-    all_scheduler_ptr[processor_id]=new per_processor_scheduler;
-    gs_u64_write(SCHEDULER_PRIVATE_GS_INDEX,(uint64_t)all_scheduler_ptr[processor_id]);
+    new(global_schedulers+processor_id) per_processor_scheduler;
     //x2apic::x2apic_driver::write_eoi();
     init_finish_checkpoint.success_word=~query_x2apicid();
     asm volatile("sfence");

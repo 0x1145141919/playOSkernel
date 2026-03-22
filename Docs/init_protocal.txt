@@ -1,0 +1,395 @@
+出于在写多BCB时的对于v2的kernel.elf强制pa+0xffff800000000000==va导致的内存视图的丑陋不堪，以及bootloader代码里面过于耦合的加载函数（名义上只加载kernel.elf实际上要加载kernel.elf和ksymbols.bin）
+于是从bootloader开始，新建了第三代protocol,以应对更多文件的加载（后续可能的initramfs或者字符渲染文件）以及可能的更多的passthrough设备
+总叙述
+v3bootprotocol总共三个阶段：
+1.uefi bootloader阶段（见bootloader里面相关文档）
+    bootloader阶段负责加载需要的文件，现在有ksymbols.bin，kernel.elf,init.elf,后续可能有kconfig.json,initramfs等等
+    从固件那里拿到内存图，并且初始化内存视图
+    传递一些特殊设备，尤其是Gop
+2.init.elf阶段
+    # init.elf 阶段设计文档
+
+## 1. 阶段定位与职责
+
+init.elf 是 v3 boot protocol 的第二阶段，运行在 UEFI bootloader 之后、kernel.elf 之前。它的核心职责是**为 kernel.elf 准备运行时环境**，包括：
+
+- 解析 UEFI 传递的内存信息，构建物理内存分配器
+- 建立页表框架，为内核提供虚拟内存映射能力
+- 加载 kernel.elf 的所有 PT_LOAD 段
+- 分配并映射内核运行所需的辅助内存区域（栈、堆、日志缓冲等）
+- 将设备信息（如 GOP 帧缓冲）传递给内核
+- 构造 `init_to_kernel_info` 结构体，作为内核的启动参数
+
+---
+
+## 2. 输入与输出
+
+### 2.1 输入
+- `BootInfoHeader* header`：bootloader 传递的引导信息结构体，包含：
+  - 内存映射表（UEFI 格式）
+  - 已加载的文件列表（kernel.elf、ksymbols.bin 等）
+  - 透传设备信息（GOP 等）
+  - UEFI 系统表指针 `gST_ptr`
+
+### 2.2 输出
+- `init_to_kernel_info` 结构体，包含内核启动所需的所有信息
+- 通过 `shift_kernel` 跳转到内核入口点
+
+---
+
+## 3. 核心数据结构
+
+### 3.1 BootInfoHeader（由 bootloader 填充）
+
+```c
+typedef struct {
+    uint64_t signature;              // 'BOOTINFO'
+    uint32_t total_size;             // 结构总大小
+    uint32_t total_pages_count;      // 占用的总页数
+    uint16_t version;                // 版本号
+
+    uint64_t loaded_file_count;
+    loaded_file_entry* loaded_files; // 加载的文件列表
+
+    uint16_t memory_map_entry_count;
+    EFI_MEMORY_DESCRIPTORX64* memory_map_ptr; // UEFI 内存映射
+
+    uint64_t pass_through_device_info_count;
+    pass_through_device_info* pass_through_devices; // 透传设备
+
+    void* gST_ptr;                   // UEFI 系统表
+    char parameter_area[512];
+    uint64_t flags;
+    uint64_t checksum;
+} BootInfoHeader;
+```
+
+### 3.2 loaded_file_entry（已加载文件）
+
+```c
+struct loaded_file_entry {
+    char file_name[256];   // 文件路径
+    uint64_t file_size;    // 文件大小
+    uint16_t file_type;    // 类型：ELF/BINARY
+    void* raw_data;        // 文件内容指针
+};
+```
+
+### 3.3 init_to_kernel_info（传递给内核）
+
+```c
+struct init_to_kernel_info {
+    uint64_t magic;                     // 魔数校验
+    uint64_t self_pages_count;          // info 自身占用的页数
+
+    void* gST_ptr;                      // UEFI 系统表
+
+    uint64_t ksymbols_file_size;        // 符号文件大小
+    phyaddr_t kmmu_root_table;          // 内核页表根物理地址
+    phymem_segment kmmu_interval;       // 页表分配器占用的物理区间
+
+    uint64_t phymem_segment_count;      // 物理内存段数量
+    phymem_segment* memory_map;         // 物理内存视图
+
+    uint64_t loaded_VM_interval_count;  // 虚拟内存区间数量
+    loaded_VM_interval* loaded_VM_intervals; // 区间数组
+
+    uint64_t pass_through_device_info_count;
+    pass_through_device_info* pass_through_devices; // 透传设备信息
+};
+```
+
+### 3.4 loaded_VM_interval（虚拟内存区间描述）
+
+```c
+struct loaded_VM_interval {
+    phyaddr_t pbase;                    // 物理基址
+    vaddr_t vbase;                      // 虚拟基址
+    uint64_t size;                      // 区间大小
+    uint32_t VM_interval_specifyid;     // 区间标识（VM_ID_*）
+    pgaccess access;                    // 访问权限
+};
+```
+
+### 3.5 VM_ID 定义
+
+| ID | 名称 | 用途 | 大小 | 对齐 |
+|----|------|------|------|------|
+| 0x1001 | VM_ID_BSP_INIT_STACK | BSP 初始栈 | 32KB | 4KB |
+| 0x1002 | VM_ID_FIRST_HEAP_BITMAP | 内核堆位图 | 16KB | 4KB |
+| 0x1003 | VM_ID_FIRST_HEAP | 内核堆 | 4MB | 2MB |
+| 0x1004 | VM_ID_LOGBUFFER | 日志缓冲区 | 2MB | 2MB |
+| 0x1006 | VM_ID_KSYMBOLS | 符号表 | 文件大小 | 2MB |
+| 0x1007 | VM_ID_MEM_MAP | 页框数组 | 由物理内存大小决定 | 2MB |
+| 0x2001 | VM_ID_UP_KSPACE_PDPT | 高半空间 PDPT | 1MB | 4KB |
+| 0x2002 | VM_ID_GRAPHIC_BUFFER | 帧缓冲区映射 | 由 GOP 决定 | 2MB |
+
+---
+
+## 4. 执行流程
+
+### 4.1 初始化阶段
+
+```
+init(BootInfoHeader* header)
+├── GlobalStatus = EARLY_BOOT
+├── bsp_kout.Init()                    // 输出系统初始化
+├── heap.first_linekd_heap_Init()      // 堆分配器初始化
+├── 透传设备初始化（GOP）
+├── init_textconsole::Init()           // 文本控制台初始化
+├── serial_init_stage1()               // 串口初始化
+└── bsp_kout.register_backend()        // 注册输出后端
+```
+
+### 4.2 物理内存分配器初始化
+
+```c
+basic_allocator::Init(memory_map_ptr, memory_map_entry_count)
+```
+
+内部处理流程：
+
+1. **复制**：将 UEFI 内存描述符复制到双链表
+2. **排序**：按物理地址升序排序
+3. **填充空洞**：检测相邻段之间的间隙，插入 `OS_MEMSEG_HOLE` 类型描述符
+4. **回收**：将 `EFI_LOADER_*` 和 `EFI_BOOT_SERVICES_*` 类型标记为 `freeSystemRam`
+5. **合并**：合并相邻的空闲段
+6. **创建视图**：生成纯净的物理内存视图数组
+
+**关键函数**：
+- `pages_alloc(size, align_log2)`：从低地址开始分配物理页
+- `pages_set(interval, type)`：设置指定区间的内存类型
+- `get_pure_memory_view()`：获取物理内存视图
+
+4.3内存占用声明
+内存声明流程（在 basic_allocator::Init 之后）
+├── 1. init.elf 自身
+│   └── 范围：__init_text_start ~ __init_heap_end
+│   └── 类型：OS_KERNEL_DATA
+│
+├── 2. BootInfoHeader
+│   └── 范围：header ~ header + total_pages_count * 4096
+│   └── 类型：OS_KERNEL_DATA
+│   └── 注意：这覆盖了 header 本身、loaded_files 数组、pass_through_devices 数组
+│
+├── 3. 已加载文件（bootloader阶段非LOADED_FILE_ENTRY_TYPE_ELF_REAL_LOAD 类型，
+因为init.elf是bootloader紧接着跳到的下一个阶段，
+必然是按照程序头表进行装载，kernel.elf不是立马被装载的类型）
+│   └── 遍历 header->loaded_files
+│   └── 跳过 LOADED_FILE_ENTRY_TYPE_ELF_REAL_LOAD
+│   └── 范围：raw_data ~ raw_data + file_size（页对齐）
+│   └── 类型：OS_KERNEL_DATA
+### 4.4 内核页表初始化
+
+```c
+kernel_mmu* kmmu = new kernel_mmu(x86_64_PGLV4);
+```
+
+**mmu_specify_allocator**：专用的页表分配器
+- 从 `basic_allocator` 申请一块连续物理内存（默认 16 页）
+- 采用简单的线性分配策略（top 指针递增）
+- 每页 4KB，用于存放 PML4、PDPT、PD、PT
+
+**根表（PML4）初始化**：
+- 分配一页物理内存作为 PML4 表
+- 全部清零
+
+### 4.4 低端恒等映射
+
+```c
+setup_low_identity_maps(kmmu, header)
+```
+
+为所有物理内存段建立恒等映射（`虚拟地址 == 物理地址`），权限为 RWX。
+
+- 遍历 `pure_mem_view` 中的每个内存段
+- 根据段类型设置缓存策略：
+  - 普通 RAM：`WB`
+  - MMIO/ACPI NVS：`UC`
+
+### 4.5 加载 kernel.elf
+
+```c
+kernel_load(pak)
+```
+
+**ELF 解析**：
+- 验证 ELF 魔数
+- 遍历 program headers，统计 `PT_LOAD` 段数量
+- 按 `VM_INTERVAL_ALLOC_FACTOR = 3` 倍预留槽位
+
+**段加载流程**（对每个 PT_LOAD 段）：
+
+1. **解析权限**：从 `p_flags` 提取 `x/w/r`
+2. **PA 随机化**：若 `param.pa_random` 为真，通过 `basic_allocator::pages_alloc` 分配符合对齐要求的物理地址
+3. **VA 加载**：使用 `p_vaddr`（恒等映射，不随机化）
+4. **复制内容**：将 `p_filesz` 字节从文件复制到目标物理地址
+5. **BSS 清零**：若 `p_memsz > p_filesz`，将剩余部分清零
+6. **建立映射**：调用 `kmmu->map()` 建立页表映射
+
+**重要说明**：
+- 内核代码段/数据段严格按 ELF 声明的虚拟地址加载
+- 不进行 VA 随机化（因为内核入口点需要固定）
+- 映射权限与 ELF 声明的 flags 一致
+
+### 4.6 加载匿名内存区域
+
+按固定顺序调用 `anonymous_mem_map()` 分配并映射以下区域：
+
+| 顺序 | VM_ID | 用途 |
+|------|-------|------|
+| 1 | VM_ID_BSP_INIT_STACK | BSP 初始栈 |
+| 2 | VM_ID_FIRST_HEAP_BITMAP | 堆位图 |
+| 3 | VM_ID_UP_KSPACE_PDPT | 高半空间 PDPT |
+| 4 | VM_ID_FIRST_HEAP | 内核堆 |
+| 5 | VM_ID_LOGBUFFER | 日志缓冲区 |
+| 6 | VM_ID_MEM_MAP | 页框数组 |
+
+**anonymous_mem_map 流程**：
+
+```
+anonymous_mem_map(size, align_log2, assigned_id)
+├── 参数校验（size > 0，align >= 12）
+├── 检查槽位是否足够
+├── basic_allocator::pages_alloc()      // 分配物理内存
+├── basic_allocator::pages_set()        // 标记为 OS_ALLOCATABLE_MEMORY
+├── ksetmem_8()                         // 清零
+├── va_alloc()                          // 分配虚拟地址（从高地址向下单调分配）
+├── 构造 loaded_VM_interval
+└── kmmu->map()                         // 建立映射
+```
+
+### 4.7 符号表文件映射
+
+```c
+map_symbols_file(kmmu, pak, symbols_entry)
+```
+
+- 为 `ksymbols.bin` 分配物理页
+- 复制文件内容
+- 映射到虚拟地址空间，权限为 RW（不可执行）
+
+### 4.8 GOP 帧缓冲区映射
+
+```c
+map_gop_buffer(kmmu, pak, header)
+```
+
+- 从透传设备信息中提取 GOP 设备
+- 获取帧缓冲区的物理地址（由固件分配）
+- 映射到虚拟地址空间
+- 使用 `WC`（Write Combining）缓存策略以优化图形性能
+
+### 4.9 构造 init_to_kernel_info
+
+```c
+build_init_to_kernel_info(kmmu, header, symbols_entry, pak)
+```
+
+1. **分配 info 页面**：从 `basic_allocator` 分配 4 页（16KB）
+2. **填充基本信息**：
+   - `gST_ptr`、`kmmu_root_table`、`ksymbols_file_size`
+   - `kmmu_interval`（页表分配器占用的物理区间）
+3. **计算所需空间**：
+   - 物理内存视图数组
+   - VM 区间数组
+   - 透传设备数组（含设备特定数据）
+4. **内存布局**：
+   ```
+   +-------------------+ <-- info 起始
+   | init_to_kernel_info |
+   +-------------------+
+   |   memory_map[]    | <-- 物理内存视图
+   +-------------------+
+   | loaded_VM_intervals[] | <-- VM 区间
+   +-------------------+
+   | pass_through_devices[] | <-- 设备信息数组
+   +-------------------+
+   | device specify_data | <-- 设备特定数据（如 GOP 信息）
+   +-------------------+
+   ```
+5. **数据复制**：
+   - 物理内存视图：从 `basic_allocator::pure_mem_view` 复制
+   - VM 区间：从 `pak.VM_entries` 复制
+   - 透传设备：从 header 复制，深拷贝设备特定数据
+6. **输出调试信息**：调用 `print_init_to_kernel_info()` 打印所有信息
+
+### 4.10 跳转到内核
+
+```c
+shift_kernel(info, pak.stack_bottom, pak.entry_vaddr);
+```
+
+汇编函数 `shift_kernel` 执行：
+1. 加载内核页表到 `cr3`
+2. 设置 `rsp` 为 BSP 栈底
+3. 跳转到内核入口点
+
+---
+
+## 5. 错误处理
+
+| 错误码 | 含义 | 处理方式 |
+|--------|------|----------|
+| -1 | 参数无效 | 打印错误，hlt |
+| -2 | ELF 魔数不匹配 | 打印错误，hlt |
+| -3 | 内存分配失败 | 打印错误，hlt |
+| -4 | 无可加载段 | 打印错误，hlt |
+| OS_SUCCESS | 成功 | 继续执行 |
+
+所有错误均打印到 `bsp_kout`，然后执行 `hlt` 停机。
+
+---
+
+## 6. 调试输出示例
+
+```
+[INIT] System initialization started
+[INFO] ELF file detected:
+  - Program headers: 3
+  - Entry point: 0xffff800000100000
+[INFO] Found 2 PT_LOAD segments
+[INFO] Loading segment 0:
+  - Physical addr: 0x100000
+  - Virtual addr: 0xffff800000100000
+  - File size: 0x2000
+  - Memory size: 0x2000
+  - Flags: R-X
+[INFO] Anonymous memory mapping:
+  - Physical addr: 0x200000
+  - Virtual addr: 0xfffffffffffff000
+  - Size: 0x8000
+  - Align: 12 (0x1000)
+  - Assigned ID: 0x1001
+...
+[INFO] Kernel loaded successfully, 8 segments
+[INFO] init_to_kernel_info Details:
+========================================
+  magic: 0xdeadbeef
+  self_pages_count: 4 pages (0x4000 bytes)
+  gST_ptr: 0x7f6e8000
+  kmmu_root_table: 0x1ff000
+  ...
+```
+
+---
+
+## 7. 与 kernel.elf 的约定
+
+全凭loaded_VM_interval
+
+### 7.2 页表映射要求
+暂且只支持x86_64的PML4,在pml4下有：
+- 内核使用 `PML4` 索引 256 及以上（高半空间）
+- `is_global` 标志为 1，启用 TLB 全局页
+- `EXECUTE_DENY` 与权限位配合实现 NX
+
+---
+
+## 8. 与 bootloader 的协作
+
+| 阶段 | 职责 |
+|------|------|
+| bootloader | 装载init.elf把kernel.elf、ksymbols.bin，以及后续可能的其它文件暂时放到内存中；提供 GOP 设备信息 |
+| init.elf | 解析内存映射；建立页表；加载内核；构造启动信息 |
+| kernel.elf | 消费启动信息；初始化内存管理；接管系统 |

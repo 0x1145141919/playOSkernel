@@ -90,7 +90,7 @@ public:
     static bool RuntimeSubmitFlush(bool urgent = true);
 
 private:
-    static void RuntimeServiceThreadMain(void* data);
+    static void* RuntimeServiceThreadMain(void* data);
     static void RuntimeWakeServiceThread();
     static GfxImage template_character;
     static TextViewport view;
@@ -99,7 +99,7 @@ private:
     static uint32_t font_color;
     static uint32_t background_color;
     static void* glyph_cache;
-    static task* runtime_service_task;
+    static uint64_t runtime_service_tid;
     static spintrylock_cpp_t runtime_service_create_lock;
     static tc_ring runtime_ring;
     static bool ready;

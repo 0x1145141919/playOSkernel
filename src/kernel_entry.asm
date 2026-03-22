@@ -358,15 +358,6 @@ extern  bsp_init_idt_entries;这个IDT表
     shr rax, 16
     mov dword [rbx + 0x21*16 + 8], eax  ; offset_high
     mov dword [rbx + 0x21*16 + 12], 0   ; reserved
-
-    ; 设置汇编panic处理程序 (中断号 0xFF)
-    mov rax, qword asm_panic_bare_enter
-    mov word  [rbx + 0xFF*16 + 0], ax   ; offset_low
-    shr rax, 16
-    mov word  [rbx + 0xFF*16 + 6], ax   ; offset_mid
-    shr rax, 16
-    mov dword [rbx + 0xFF*16 + 8], eax  ; offset_high
-    mov dword [rbx + 0xFF*16 + 12], 0   ; reserved
     jmp .paging_done
 secure_hlt:
     sti 

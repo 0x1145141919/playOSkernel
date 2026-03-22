@@ -1,10 +1,10 @@
 #pragma once
 #include "AddresSpace.h"
-#include "phygpsmemmgr.h"
+#include "all_pages_arr.h"
 constexpr uint8_t CACHE_VMDESC_MAX=16;
 class PhyAddrAccessor { 
     friend KspacePageTable;
-    friend phymemspace_mgr;
+    friend all_pages_arr;
     static phyaddr_t init_pgtb_root;
     static VM_DESC BASIC_DESC;
     static VM_DESC cache_tb[CACHE_VMDESC_MAX];

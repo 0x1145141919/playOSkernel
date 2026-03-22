@@ -1,5 +1,5 @@
 #include "memory/FreePagesAllocator.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "util/kout.h"
 #include "util/OS_utils.h"
 #include "panic.h"

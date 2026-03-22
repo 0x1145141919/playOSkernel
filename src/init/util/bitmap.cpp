@@ -19,7 +19,7 @@ extern "C" int __popcountdi2(unsigned long x) {
 
 #include "util/Ktemplats.h"
 #ifdef KERNEL_MODE
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/kpoolmemmgr.h"
 #endif
 void bitmap_t::bit_set(uint64_t bit_idx, bool value)

@@ -260,7 +260,20 @@ public:
         free_node(n);
         --m_size;
     }
-
+    T pop_front_value()
+    {
+        if (!m_head) return;
+        node* n = m_head;
+        m_head = n->next;
+        if (m_head)
+            m_head->prev = nullptr;
+        else
+            m_tail = nullptr;
+        T val = n->value;
+        free_node(n);
+        --m_size;
+        return val;
+    }
     void pop_back() {
         if (!m_tail) return;
         node* n = m_tail;
@@ -272,7 +285,20 @@ public:
         free_node(n);
         --m_size;
     }
-
+    T pop_back_value()
+    {
+        if (!m_tail) return;
+        node* n = m_tail;
+        m_tail = n->prev;
+        if (m_tail)
+            m_tail->next = nullptr;
+        else
+            m_head = nullptr;
+        T val = n->value;
+        free_node(n);
+        --m_size;
+        return val;
+    }
     void clear() {
         node* cur = m_head;
         while (cur) {

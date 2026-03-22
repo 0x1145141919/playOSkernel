@@ -201,7 +201,7 @@ target_compile_options(
 
 add_executable(test_mem
     src/tests/test_memmodule.cpp
-    src/memory/phygpsmemmgr.cpp
+    src/memory/all_pages_arr.cpp
     src/memory/mixed_bitmap.cpp
     src/memory/FreePagesAllocator_BCB.cpp
     src/memory/FreePagesAllocator.cpp

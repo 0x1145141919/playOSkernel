@@ -1,6 +1,6 @@
 #include "memory/AddresSpace.h"
 #include "memory/memory_base.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/kpoolmemmgr.h"
 #include "memory/FreePagesAllocator.h"
 #include "memory/phyaddr_accessor.h"

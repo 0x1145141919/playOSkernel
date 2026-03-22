@@ -5,7 +5,7 @@
 #include "abi/arch/x86-64/GS_Slots_index_definitions.h"
 #include "Interrupt_system/Interrupt.h"
 #include "firmware/gSTResloveAPIs.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/AddresSpace.h"
 #include "util/kout.h"
 #include "ktime.h"

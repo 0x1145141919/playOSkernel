@@ -96,7 +96,7 @@ uint32_t fast_get_processor_id()
     asm volatile(
         "movl %%gs:%P1, %0"    // 从GS段选择器的指定偏移读取
         : "=r" (processor_id)         // 输出操作数
-        : "i" (PROCESSOR_ID_GS_OFFSET)  // 输入操作数，PROCESSOR_ID_GS_OFFSET通常是常数
+        : "i" (PROCESSOR_ID_GS_INDEX*8)  // 输入操作数，PROCESSOR_ID_GS_OFFSET通常是常数
     );
     return processor_id;
 #else

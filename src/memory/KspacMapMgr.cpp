@@ -1,6 +1,6 @@
 #include "memory/AddresSpace.h"
 #include "memory/memory_base.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "abi/os_error_definitions.h"
 #include "linker_symbols.h"
 #include "util/OS_utils.h"

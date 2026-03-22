@@ -7,15 +7,15 @@
 #include "util/kout.h"
 #include "panic.h"
 #include "util/kptrace.h"
-uint64_t phymemspace_mgr::page_head(uint64_t idx)
+uint64_t all_pages_arr::page_head(uint64_t idx)
 {
     return mem_map[idx].page_flags.bitfield.is_skipped ? mem_map[idx].tranp.head_page : (~0ull);
 }
-uint64_t phymemspace_mgr::page_size(uint64_t idx)
+uint64_t all_pages_arr::page_size(uint64_t idx)
 {
     return !mem_map[idx].page_flags.bitfield.is_skipped ? 1ull<<(12+mem_map[idx].head.order) : (~0ull);
 }
-KURD_t phymemspace_mgr::page_spilt(uint64_t idx, uint8_t target_order)
+KURD_t all_pages_arr::page_spilt(uint64_t idx, uint8_t target_order)
 {
     auto default_kurd = []() -> KURD_t {
         return KURD_t(
@@ -115,7 +115,7 @@ KURD_t phymemspace_mgr::page_spilt(uint64_t idx, uint8_t target_order)
     
     return make_success();
 }
-KURD_t phymemspace_mgr::page_merge_identical(uint64_t head_idx, uint8_t target_order)
+KURD_t all_pages_arr::page_merge_identical(uint64_t head_idx, uint8_t target_order)
 {
     auto default_kurd = []() -> KURD_t {
         return KURD_t(
@@ -279,7 +279,7 @@ KURD_t phymemspace_mgr::page_merge_identical(uint64_t head_idx, uint8_t target_o
     return make_success();
 }
 
-KURD_t phymemspace_mgr::page_merge_freedram(uint64_t head_idx, uint8_t target_order)
+KURD_t all_pages_arr::page_merge_freedram(uint64_t head_idx, uint8_t target_order)
 {
     auto default_kurd = []() -> KURD_t {
         return KURD_t(

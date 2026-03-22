@@ -65,7 +65,7 @@ namespace MEMMODULE_LOCAIONS{
  * 向外暴露的数据结构中pages_array_2mb保证在初始化逻辑中后可以不越界的情况下自由读写不产生页错误
  * 
  */
-class phymemspace_mgr{
+class all_pages_arr{
     public:
     static uint64_t mem_map_entry_count;
     static page*mem_map;
@@ -99,7 +99,7 @@ class phymemspace_mgr{
      */
     static void simp_pages_set(phyaddr_t phybase,uint64_t _4kbpgscount,page_state_t TYPE); 
     #ifdef USER_MODE
-    phymemspace_mgr();
+    all_pages_arr();
     #endif
 };
 

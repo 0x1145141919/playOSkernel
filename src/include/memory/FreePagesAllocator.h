@@ -5,7 +5,7 @@
 #include "util/lock.h"
 #include "util/Ktemplats.h"
 #include "util/bitmap.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 class KspacePageTable;
 struct fpa_stats {
     uint64_t alloc_main_hit;
@@ -236,7 +236,7 @@ public:
     public:
         bool is_bcb_avaliable();
         uint8_t get_max_order();
-        friend phymemspace_mgr;
+        friend all_pages_arr;
         void print_basic_info();
         void print_bitmap_info();
         void print_all_statistics();  // 新增：打印全部统计信息

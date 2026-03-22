@@ -1,5 +1,5 @@
 #include "memory/kpoolmemmgr.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/FreePagesAllocator.h"
 #include "memory/AddresSpace.h"
 #include "linker_symbols.h"

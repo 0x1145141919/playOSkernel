@@ -1,5 +1,5 @@
 #include "core_hardwares/HPET.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/AddresSpace.h"
 #include "util/OS_utils.h"
 HPET_driver_only_read_time_stamp*readonly_timer=nullptr;
@@ -49,7 +49,7 @@ KURD_t HPET_driver_only_read_time_stamp::second_stage_init()
             return fail;
         }
     //先找物理页框系统注册 mmio 物理页
-    page&hpet=phymemspace_mgr::mem_map[table->Base_Address>>12];
+    page&hpet=all_pages_arr::mem_map[table->Base_Address>>12];
     hpet.head.type=static_cast<uint64_t>(page_state_t::mmio);
     hpet.refcount=1;
     hpet.head.ptr=((uint64_t)this>>4);

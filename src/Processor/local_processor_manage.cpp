@@ -10,7 +10,7 @@
 #include "util/arch/x86-64/cpuid_intel.h"
 #include "util/OS_utils.h"
 #include "memory/AddresSpace.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "memory/phyaddr_accessor.h"
 #include "memory/FreePagesAllocator.h"
 #include "memory/kpoolmemmgr.h"

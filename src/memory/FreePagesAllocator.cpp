@@ -1,5 +1,5 @@
 #include "memory/FreePagesAllocator.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "firmware/ACPI_APIC.h"
 #include "panic.h"
 #include "util/kout.h"
@@ -88,7 +88,7 @@ KURD_t FreePagesAllocator::Init()
     g_viceBCBs_plan_list.clear();
     g_all_avaliable_mem_accumulate = 0;
 
-    phymemspace_mgr::free_segs_t* free_segs = phymemspace_mgr::free_segs_get();
+    all_pages_arr::free_segs_t* free_segs = all_pages_arr::free_segs_get();
     if(!free_segs){
         return set_fatal_result_level(KURD_t());
     }
@@ -559,11 +559,11 @@ Alloc_result FreePagesAllocator::alloc(uint64_t size, buddy_alloc_params params,
         uint64_t aligned_size = align_up(size, 4096);
         uint64_t base_idx = base >> 12;
         uint64_t end_idx = base_idx + (aligned_size >> 12);
-        if (end_idx > phymemspace_mgr::mem_map_entry_count) {
-            end_idx = phymemspace_mgr::mem_map_entry_count;
+        if (end_idx > all_pages_arr::mem_map_entry_count) {
+            end_idx = all_pages_arr::mem_map_entry_count;
         }
         for (uint64_t idx = base_idx; idx < end_idx; ++idx) {
-            page& p = phymemspace_mgr::mem_map[idx];
+            page& p = all_pages_arr::mem_map[idx];
             p.page_flags.raw = 0;
             p.refcount = 1;
             p.head.type = static_cast<uint64_t>(interval_type);
@@ -796,13 +796,13 @@ KURD_t FreePagesAllocator::free(phyaddr_t base, uint64_t size)
         return true;
     };
     auto validate_mem_map = [&](uint64_t base_idx, uint64_t end_idx) -> bool {
-        if (base_idx >= end_idx || end_idx > phymemspace_mgr::mem_map_entry_count) {
+        if (base_idx >= end_idx || end_idx > all_pages_arr::mem_map_entry_count) {
             return false;
         }
         bool type_set = false;
         uint64_t expected_type = 0;
         for (uint64_t idx = base_idx; idx < end_idx; ++idx) {
-            page& p = phymemspace_mgr::mem_map[idx];
+            page& p = all_pages_arr::mem_map[idx];
             if (p.page_flags.bitfield.is_skipped) {
                 return false;
             }
@@ -823,7 +823,7 @@ KURD_t FreePagesAllocator::free(phyaddr_t base, uint64_t size)
     };
     auto free_mem_map_4kb = [&](uint64_t base_idx, uint64_t end_idx) {
         for (uint64_t idx = base_idx; idx < end_idx; ++idx) {
-            page& p = phymemspace_mgr::mem_map[idx];
+            page& p = all_pages_arr::mem_map[idx];
             p.refcount = 0;
             p.page_flags.raw = 0;
             p.page_flags.bitfield.is_allocateble = 1;

@@ -1,4 +1,4 @@
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #include "abi/os_error_definitions.h"
 #include "util/OS_utils.h"
 #include "memory/kpoolmemmgr.h"
@@ -7,14 +7,14 @@
 #include "util/kout.h"
 #include "panic.h"
 #include "util/kptrace.h"
-uint64_t phymemspace_mgr::mem_map_entry_count;
-page*phymemspace_mgr::mem_map;
+uint64_t all_pages_arr::mem_map_entry_count;
+page*all_pages_arr::mem_map;
 void *ptr_dump(page *p)
 {
     return (void*)(0xFFFF000000000000+(uint64_t(p->head.ptr)<<4));
 }
 
-phymemspace_mgr::free_segs_t* phymemspace_mgr::free_segs_get()
+all_pages_arr::free_segs_t* all_pages_arr::free_segs_get()
 {
     if (!mem_map || mem_map_entry_count == 0) {
         return nullptr;
@@ -82,7 +82,7 @@ phymemspace_mgr::free_segs_t* phymemspace_mgr::free_segs_get()
     return result;
 }
 
-KURD_t phymemspace_mgr::Init(init_to_kernel_info *info)
+KURD_t all_pages_arr::Init(init_to_kernel_info *info)
 {
     phymem_segment*segs=info->memory_map;
     uint64_t physegs_count=info->phymem_segment_count;
@@ -193,7 +193,7 @@ KURD_t phymemspace_mgr::Init(init_to_kernel_info *info)
     PhyAddrAccessor::BASIC_DESC.SEG_SIZE_ONLY_UES_IN_BASIC_SEG=mem_map_entry_count<<12;
     return KURD_t();
 }
-void phymemspace_mgr::simp_pages_set(phyaddr_t phybase, uint64_t _4kbpgscount, page_state_t TYPE)
+void all_pages_arr::simp_pages_set(phyaddr_t phybase, uint64_t _4kbpgscount, page_state_t TYPE)
 {
     uint64_t base_idx=phybase>>12;
     if(base_idx>=mem_map_entry_count)return;

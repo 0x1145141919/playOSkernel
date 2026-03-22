@@ -10,7 +10,7 @@
 #include "memory/AddresSpace.h"
 #include "memory/kpoolmemmgr.h"
 #include "memory/FreePagesAllocator.h"
-#include "memory/phygpsmemmgr.h"
+#include "memory/all_pages_arr.h"
 #ifdef USER_MODE
 #include <cstring> 
 #include <unistd.h>

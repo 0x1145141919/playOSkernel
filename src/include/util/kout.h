@@ -115,7 +115,6 @@ class kout
     kout& operator<<(int16_t num);
     kout& operator<<(uint8_t num);
     kout& operator<<(int8_t num);
-    kout& operator<<(radix_shift_t radix);
     kout& operator<<(numer_system_select radix);
     uint64_t register_backend(kout_backend backend);//返回~0表示分配失败
     bool unregister_backend(uint64_t index);

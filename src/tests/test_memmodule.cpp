@@ -41,7 +41,7 @@ KURD_t test_basic_init() {
         .loaded_VM_intervals=&mem_map_interval,
         
     };
-    KURD_t status = phymemspace_mgr::Init(&init_info);
+    KURD_t status = all_pages_arr::Init(&init_info);
     if (!success_all_kurd(status)) {
         bsp_kout<< "phymemspace_mgr::Init() failed with status: ";
         bsp_kout<< status;

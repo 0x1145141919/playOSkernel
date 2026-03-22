@@ -45,13 +45,16 @@ const unsigned char* textconsole_GoP::font_bitmap = nullptr;
 uint32_t textconsole_GoP::font_color = 0;
 uint32_t textconsole_GoP::background_color = 0;
 void* textconsole_GoP::glyph_cache = nullptr;
-task* textconsole_GoP::runtime_service_task = nullptr;
 spintrylock_cpp_t textconsole_GoP::runtime_service_create_lock = {};
 tc_ring textconsole_GoP::runtime_ring = {};
 bool textconsole_GoP::ready = false;
 uint16_t textconsole_GoP::glyph_index[256] = {};
 bool textconsole_GoP::is_font_rendered = false;
-
+uint64_t textconsole_GoP::runtime_service_tid=INVALID_TID;
+uint32_t tid_to_idx(uint64_t tid)
+{
+    return tid>>32;
+}
 KURD_t textconsole_GoP::default_kurd()
 {
     return KURD_t(
@@ -177,7 +180,6 @@ KURD_t textconsole_GoP::Init(
     runtime_ring.push_count = 0;
     runtime_ring.pop_count = 0;
     runtime_ring.service_thread_sleeping = false;
-    runtime_service_task = nullptr;
     ready = true;
     return success;
 }
@@ -392,41 +394,24 @@ bool textconsole_GoP::RuntimeInitServiceThread()
 {
     if (!ready) return false;
     runtime_service_create_lock.lock();
-    if (runtime_service_task) {
+    if (runtime_service_tid!=INVALID_TID) {
         runtime_service_create_lock.unlock();
         return true;
     }
-
-    auto* scheduler = reinterpret_cast<per_processor_scheduler*>(read_gs_u64(SCHEDULER_PRIVATE_GS_INDEX));
-    if (!scheduler) {
-        runtime_service_create_lock.unlock();
-        return false;
-    }
-    per_processor_scheduler::create_kthread_param param = per_processor_scheduler::default_kthread_param;
-    param.is_soon_ready = 1;
-    task* created = scheduler->create_kthread(&textconsole_GoP::RuntimeServiceThreadMain, nullptr, &param);
-    if (!created || !success_all_kurd(param.result_kurd)) {
-        runtime_service_create_lock.unlock();
-        return false;
-    }
-    runtime_service_task = created;
+    KURD_t kurd=KURD_t();
+    runtime_service_tid=create_kthread(textconsole_GoP::RuntimeServiceThreadMain,nullptr,&kurd);
     runtime_service_create_lock.unlock();
     return true;
 }
 
 void textconsole_GoP::RuntimeWakeServiceThread()
 {
-    if (!runtime_service_task || !all_scheduler_ptr) return;
-    uint32_t owner = runtime_service_task->get_belonged_processor_id();
-    per_processor_scheduler* owner_scheduler = all_scheduler_ptr[owner];
-    if (!owner_scheduler) return;
-    KURD_t kurd = owner_scheduler->task_set_ready(runtime_service_task);
-    (void)kurd;
+    wakeup_thread(runtime_service_tid);
 }
 
 bool textconsole_GoP::RuntimeSubmitString(const char* s, uint64_t len, bool urgent)
 {
-    if (!ready || !runtime_service_task || !s || len == 0) return false;
+    if (!ready || runtime_service_tid==INVALID_TID || !s || len == 0) return false;
 
     runtime_ring.lock.lock();
     const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
@@ -455,7 +440,7 @@ bool textconsole_GoP::RuntimeSubmitString(const char* s, uint64_t len, bool urge
 
 bool textconsole_GoP::RuntimeSubmitChar(char ch, bool urgent)
 {
-    if (!ready || !runtime_service_task) return false;
+    if (!ready || runtime_service_tid==INVALID_TID) return false;
 
     runtime_ring.lock.lock();
     const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
@@ -483,7 +468,7 @@ bool textconsole_GoP::RuntimeSubmitChar(char ch, bool urgent)
 
 bool textconsole_GoP::RuntimeSubmitNum(uint64_t raw, num_format_t format, numer_system_select radix, bool urgent)
 {
-    if (!ready || !runtime_service_task) return false;
+    if (!ready || runtime_service_tid==INVALID_TID) return false;
 
     runtime_ring.lock.lock();
     const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
@@ -513,7 +498,7 @@ bool textconsole_GoP::RuntimeSubmitNum(uint64_t raw, num_format_t format, numer_
 
 bool textconsole_GoP::RuntimeSubmitFlush(bool urgent)
 {
-    if (!ready || !runtime_service_task) return false;
+    if (!ready || runtime_service_tid==INVALID_TID) return false;
 
     runtime_ring.lock.lock();
     const uint32_t next_tail = (runtime_ring.tail + 1) & (TC_RING_CAP - 1);
@@ -538,7 +523,7 @@ bool textconsole_GoP::RuntimeSubmitFlush(bool urgent)
     return true;
 }
 
-void textconsole_GoP::RuntimeServiceThreadMain(void* data)
+void* textconsole_GoP::RuntimeServiceThreadMain(void* data)
 {
     (void)data;
     tc_service_local_batch local_batch{};
