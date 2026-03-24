@@ -59,7 +59,6 @@ struct tc_ring {
     uint64_t drop_count;
     uint64_t push_count;
     uint64_t pop_count;
-    bool service_thread_sleeping;
 };
 struct tc_service_local_batch {
     uint32_t count;

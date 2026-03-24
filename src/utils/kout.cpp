@@ -28,206 +28,208 @@ void kio::defalut_KURD_module_interpator(KURD_t kurd)
 }
 
 
-static void __print_event_hex(uint8_t event_code)
+void kio::kout::__print_event_hex(uint8_t event_code)
 {
-    bsp_kout<< "[event:0x";
-    bsp_kout.shift_hex();
-    bsp_kout<< event_code;
-    bsp_kout.shift_dec();
-    bsp_kout<< "]";
+    bsp_kout.raw_puts_and_count("[event:0x", 9);
+    uint64_t code = event_code;
+    bsp_kout.print_numer(&code, HEX, 1, false);
+    bsp_kout.raw_puts_and_count("]", 1);
 }
 
-static void __print_memmodule_kurd(KURD_t kurd)
+void kio::kout::__print_memmodule_kurd(KURD_t kurd)
 {
+    auto put = [](const char* s) {
+        bsp_kout.raw_puts_and_count(s, (uint64_t)strlen_in_kernel(s));
+    };
     switch (kurd.in_module_location) {
         case MEMMODULE_LOCAIONS::LOCATION_CODE_ADDRESSPACE:
-            bsp_kout<< "[mem_loc:ADDRESSPACE]";
+            put("[mem_loc:ADDRESSPACE]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_ENABLE_VMENTRY:
-                    bsp_kout<< "[event:ENABLE_VMENTRY]"; break;
+                    put("[event:ENABLE_VMENTRY]"); break;
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_DISABLE_VMENTRY:
-                    bsp_kout<< "[event:DISABLE_VMENTRY]"; break;
+                    put("[event:DISABLE_VMENTRY]"); break;
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_TRAN_TO_PHY:
-                    bsp_kout<< "[event:TRAN_TO_PHY]"; break;
+                    put("[event:TRAN_TO_PHY]"); break;
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_INVALIDATE_TLB:
-                    bsp_kout<< "[event:INVALIDATE_TLB]"; break;
+                    put("[event:INVALIDATE_TLB]"); break;
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE:
-                    bsp_kout<< "[event:BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE]"; break;
+                    put("[event:BUILD_INDENTITY_MAP_ONLY_ON_gKERNELSPACE]"); break;
                 case MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::EVENT_CODE_UNREGIST:
-                    bsp_kout<< "[event:UNREGIST]"; break;
+                    put("[event:UNREGIST]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR:
-            bsp_kout<< "[mem_loc:KSPACE_MAP_MGR]";
+            put("[mem_loc:KSPACE_MAP_MGR]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_ENABLE_VMENTRY:
-                    bsp_kout<< "[event:ENABLE_VMENTRY]"; break;
+                    put("[event:ENABLE_VMENTRY]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_DISABLE_VMENTRY:
-                    bsp_kout<< "[event:DISABLE_VMENTRY]"; break;
+                    put("[event:DISABLE_VMENTRY]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_TRAN_TO_PHY_ENTRY:
-                    bsp_kout<< "[event:TRAN_TO_PHY_ENTRY]"; break;
+                    put("[event:TRAN_TO_PHY_ENTRY]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_INVALIDATE_TLB:
-                    bsp_kout<< "[event:INVALIDATE_TLB]"; break;
+                    put("[event:INVALIDATE_TLB]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_SET:
-                    bsp_kout<< "[event:PAGES_SET]"; break;
+                    put("[event:PAGES_SET]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_PAGES_CLEAR:
-                    bsp_kout<< "[event:PAGES_CLEAR]"; break;
+                    put("[event:PAGES_CLEAR]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_SEG_TO_INFO_PACKAGE:
-                    bsp_kout<< "[event:SEG_TO_INFO_PACKAGE]"; break;
+                    put("[event:SEG_TO_INFO_PACKAGE]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_VM_SEARCH_BY_ADDR:
-                    bsp_kout<< "[event:VM_SEARCH_BY_ADDR]"; break;
+                    put("[event:VM_SEARCH_BY_ADDR]"); break;
                 case MEMMODULE_LOCAIONS::KSPACE_MAPPER_EVENTS::EVENT_CODE_UNREGIST:
-                    bsp_kout<< "[event:UNREGIST]"; break;
+                    put("[event:UNREGIST]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR:
-            bsp_kout<< "[mem_loc:KPOOLMEMMGR]";
+            put("[mem_loc:KPOOLMEMMGR]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_ALLOC:
-                    bsp_kout<< "[event:ALLOC]"; break;
+                    put("[event:ALLOC]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_REALLOC:
-                    bsp_kout<< "[event:REALLOC]"; break;
+                    put("[event:REALLOC]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_EVENTS::EVENT_CODE_PER_PROCESSOR_HEAP_INIT:
-                    bsp_kout<< "[event:PER_PROCESSOR_HEAP_INIT]"; break;
+                    put("[event:PER_PROCESSOR_HEAP_INIT]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR_HCB:
-            bsp_kout<< "[mem_loc:KPOOLMEMMGR_HCB]";
+            put("[mem_loc:KPOOLMEMMGR_HCB]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_CLEAR:
-                    bsp_kout<< "[event:CLEAR]"; break;
+                    put("[event:CLEAR]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_ALLOC:
-                    bsp_kout<< "[event:ALLOC]"; break;
+                    put("[event:ALLOC]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_FREE:
-                    bsp_kout<< "[event:FREE]"; break;
+                    put("[event:FREE]"); break;
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::EVENT_CODE_INHEAP_REALLOC:
-                    bsp_kout<< "[event:INHEAP_REALLOC]"; break;
+                    put("[event:INHEAP_REALLOC]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_KPOOLMEMMGR_HCB_BITMAP:
-            bsp_kout<< "[mem_loc:KPOOLMEMMGR_HCB_BITMAP]";
+            put("[mem_loc:KPOOLMEMMGR_HCB_BITMAP]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_BITMAP_EVENTS::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR:
-            bsp_kout<< "[mem_loc:FREEPAGES_ALLOCATOR]";
+            put("[mem_loc:FREEPAGES_ALLOCATOR]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_INIT_SECOND_STAGE:
-                    bsp_kout<< "[event:INIT_SECOND_STAGE]"; break;
+                    put("[event:INIT_SECOND_STAGE]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_ALLOC:
-                    bsp_kout<< "[event:ALLOC]"; break;
+                    put("[event:ALLOC]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR::EVENT_CODE_FREE:
-                    bsp_kout<< "[event:FREE]"; break;
+                    put("[event:FREE]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_TRANSPARNENT_PAGE:
-            bsp_kout<< "[mem_loc:TRANSPARNENT_PAGE]";
+            put("[mem_loc:TRANSPARNENT_PAGE]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::TRANSPARNENT_PAGE_EVENTS::EVENT_CODE_SPILT:
-                    bsp_kout<< "[event:SPILT]"; break;
+                    put("[event:SPILT]"); break;
                 case MEMMODULE_LOCAIONS::TRANSPARNENT_PAGE_EVENTS::EVENT_CODE_MERGE:
-                    bsp_kout<< "[event:MERGE]"; break;
+                    put("[event:MERGE]"); break;
                 case MEMMODULE_LOCAIONS::TRANSPARNENT_PAGE_EVENTS::EVENT_CODE_MERGE_FREE:
-                    bsp_kout<< "[event:MERGE_FREE]"; break;
+                    put("[event:MERGE_FREE]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK:
-            bsp_kout<< "[mem_loc:FREEPAGES_ALLOCATOR_BCB]";
+            put("[mem_loc:FREEPAGES_ALLOCATOR_BCB]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_ALLOCATE_BUDY_WAY:
-                    bsp_kout<< "[event:ALLOCATE_BUDY_WAY]"; break;
+                    put("[event:ALLOCATE_BUDY_WAY]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_CONANICO_FREE:
-                    bsp_kout<< "[event:CONANICO_FREE]"; break;
+                    put("[event:CONANICO_FREE]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_SPLIT_PAGE:
-                    bsp_kout<< "[event:SPLIT_PAGE]"; break;
+                    put("[event:SPLIT_PAGE]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FLUSH_FREE_COUNT:
-                    bsp_kout<< "[event:FLUSH_FREE_COUNT]"; break;
+                    put("[event:FLUSH_FREE_COUNT]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_TOP_FOLD:
-                    bsp_kout<< "[event:TOP_FOLD]"; break;
+                    put("[event:TOP_FOLD]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FREE_PAGES_FLUSH:
-                    bsp_kout<< "[event:FREE_PAGES_FLUSH]"; break;
+                    put("[event:FREE_PAGES_FLUSH]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_FREE:
-                    bsp_kout<< "[event:FREE]"; break;
+                    put("[event:FREE]"); break;
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_EVENTS_CODES::EVENT_CODE_REPLAY_VALIDATE:
-                    bsp_kout<< "[event:REPLAY_VALIDATE]"; break;
+                    put("[event:REPLAY_VALIDATE]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP:
-            bsp_kout<< "[mem_loc:FREEPAGES_ALLOCATOR_BCB_BITMAP]";
+            put("[mem_loc:FREEPAGES_ALLOCATOR_BCB_BITMAP]");
             switch (kurd.event_code) {
                 case MEMMODULE_LOCAIONS::FREEPAGES_ALLOCATOR_BUDDY_CONTROL_BLOCK_BITMAP::EVENT_CODE_INIT:
-                    bsp_kout<< "[event:INIT]"; break;
+                    put("[event:INIT]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR_VMENTRY_RBTREE:
-            bsp_kout<< "[mem_loc:KSPACE_MAP_MGR_VMENTRY_RBTREE]";
+            put("[mem_loc:KSPACE_MAP_MGR_VMENTRY_RBTREE]");
             __print_event_hex(kurd.event_code);
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_KSPACE_MAP_MGR_PGS_PAGE_TABLE:
-            bsp_kout<< "[mem_loc:KSPACE_MAP_MGR_PGS_PAGE_TABLE]";
+            put("[mem_loc:KSPACE_MAP_MGR_PGS_PAGE_TABLE]");
             __print_event_hex(kurd.event_code);
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_BASE_MEMMGR:
-            bsp_kout<< "[mem_loc:BASE_MEMMGR]";
+            put("[mem_loc:BASE_MEMMGR]");
             __print_event_hex(kurd.event_code);
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_PHYMEM_ACCESSOR:
-            bsp_kout<< "[mem_loc:PHYMEM_ACCESSOR]";
+            put("[mem_loc:PHYMEM_ACCESSOR]");
             __print_event_hex(kurd.event_code);
             break;
         case MEMMODULE_LOCAIONS::LOCATION_CODE_OUT_SURFACES:
-            bsp_kout<< "[mem_loc:OUT_SURFACES]";
+            put("[mem_loc:OUT_SURFACES]");
             switch (kurd.event_code) {
                 case 0:
-                    bsp_kout<< "[event:PAGES_VALLOC]"; break;
+                    put("[event:PAGES_VALLOC]"); break;
                 case 1:
-                    bsp_kout<< "[event:PAGES_VFREE]"; break;
+                    put("[event:PAGES_VFREE]"); break;
                 case 2:
-                    bsp_kout<< "[event:PAGES_ALLOC]"; break;
+                    put("[event:PAGES_ALLOC]"); break;
                 case 3:
-                    bsp_kout<< "[event:PAGES_FREE]"; break;
+                    put("[event:PAGES_FREE]"); break;
                 case 4:
-                    bsp_kout<< "[event:KEYWORD_NEW]"; break;
+                    put("[event:KEYWORD_NEW]"); break;
                 case 5:
-                    bsp_kout<< "[event:KEYWORD_DELETE]"; break;
+                    put("[event:KEYWORD_DELETE]"); break;
                 default:
                     __print_event_hex(kurd.event_code); break;
             }
             break;
         default:
-            bsp_kout<< "[mem_loc:unknown]";
+            put("[mem_loc:unknown]");
             __print_event_hex(kurd.event_code);
             break;
     }
@@ -239,6 +241,51 @@ void kio::kout::print_numer(
     uint8_t len_in_bytes, 
     bool is_signed)
 {
+    #ifdef KERNEL_MODE
+    if (GlobalKernelStatus >= SCHEDUL_READY && GlobalKernelStatus != PANIC) {
+        num_format_t format = num_format_t::u64;
+        if (is_signed) {
+            switch (len_in_bytes) {
+                case 1: format = num_format_t::s8; break;
+                case 2: format = num_format_t::s16; break;
+                case 4: format = num_format_t::s32; break;
+                default: format = num_format_t::s64; break;
+            }
+        } else {
+            switch (len_in_bytes) {
+                case 1: format = num_format_t::u8; break;
+                case 2: format = num_format_t::u16; break;
+                case 4: format = num_format_t::u32; break;
+                default: format = num_format_t::u64; break;
+            }
+        }
+
+        uint64_t raw = 0;
+        switch (len_in_bytes) {
+            case 1: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int8_t*>(num_ptr))
+                : static_cast<uint64_t>(*reinterpret_cast<uint8_t*>(num_ptr)); break;
+            case 2: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int16_t*>(num_ptr))
+                : static_cast<uint64_t>(*reinterpret_cast<uint16_t*>(num_ptr)); break;
+            case 4: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int32_t*>(num_ptr))
+                : static_cast<uint64_t>(*reinterpret_cast<uint32_t*>(num_ptr)); break;
+            default: raw = is_signed
+                ? static_cast<uint64_t>(*reinterpret_cast<int64_t*>(num_ptr))
+                : *reinterpret_cast<uint64_t*>(num_ptr); break;
+        }
+
+        for (uint64_t i = 0; i < MAX_BACKEND_COUNT; i++) {
+            kout_backend* backend = backends[i];
+            if (!backend || backend->is_masked) continue;
+            if (backend->running_stage_num) {
+                backend->running_stage_num(raw, format, numer_system);
+            }
+        }
+        return;
+    } 
+    #endif
     char buf[70];          // 足够覆盖 64bit BIN + 符号
     char out[70];
     uint32_t idx = 0;
@@ -299,53 +346,12 @@ void kio::kout::print_numer(
     for (uint32_t i = 0; i < idx; ++i) {
         out[i] = buf[idx - 1 - i];
     }
+    
     #ifdef KERNEL_MODE
-    if (GlobalKernelStatus >= SCHEDUL_READY && GlobalKernelStatus != PANIC) {
-        num_format_t format = num_format_t::u64;
-        if (is_signed) {
-            switch (len_in_bytes) {
-                case 1: format = num_format_t::s8; break;
-                case 2: format = num_format_t::s16; break;
-                case 4: format = num_format_t::s32; break;
-                default: format = num_format_t::s64; break;
-            }
-        } else {
-            switch (len_in_bytes) {
-                case 1: format = num_format_t::u8; break;
-                case 2: format = num_format_t::u16; break;
-                case 4: format = num_format_t::u32; break;
-                default: format = num_format_t::u64; break;
-            }
-        }
-
-        uint64_t raw = 0;
-        switch (len_in_bytes) {
-            case 1: raw = is_signed
-                ? static_cast<uint64_t>(*reinterpret_cast<int8_t*>(num_ptr))
-                : static_cast<uint64_t>(*reinterpret_cast<uint8_t*>(num_ptr)); break;
-            case 2: raw = is_signed
-                ? static_cast<uint64_t>(*reinterpret_cast<int16_t*>(num_ptr))
-                : static_cast<uint64_t>(*reinterpret_cast<uint16_t*>(num_ptr)); break;
-            case 4: raw = is_signed
-                ? static_cast<uint64_t>(*reinterpret_cast<int32_t*>(num_ptr))
-                : static_cast<uint64_t>(*reinterpret_cast<uint32_t*>(num_ptr)); break;
-            default: raw = is_signed
-                ? static_cast<uint64_t>(*reinterpret_cast<int64_t*>(num_ptr))
-                : *reinterpret_cast<uint64_t*>(num_ptr); break;
-        }
-
-        for (uint64_t i = 0; i < MAX_BACKEND_COUNT; i++) {
-            kout_backend* backend = backends[i];
-            if (!backend || backend->is_masked) continue;
-            if (backend->running_stage_num) {
-                backend->running_stage_num(raw, format, numer_system);
-            }
-        }
-    } else {
         // EARLY/MM_READY/PANIC 统一走字符串路径并按状态机后端分发。
         uniform_puts(out, idx);
-    }
     #endif
+    
     #ifdef USER_MODE
     if (is_print_to_stdout) write(1, out, idx);
     if (is_print_to_stderr) write(2, out, idx);
@@ -358,25 +364,25 @@ void kio::kout::__print_level_code(KURD_t value)
     switch (value.level)
     {
         case level_code::INVALID:
-            *this << "[level:INVALID]";
+            raw_puts_and_count("[level:INVALID]", sizeof("[level:INVALID]") - 1);
             break;
         case level_code::INFO:
-            *this << "[level:INFO]";
+            raw_puts_and_count("[level:INFO]", sizeof("[level:INFO]") - 1);
             break;
         case level_code::NOTICE:
-            *this << "[level:NOTICE]";
+            raw_puts_and_count("[level:NOTICE]", sizeof("[level:NOTICE]") - 1);
             break;
         case level_code::WARNING:
-            *this << "[level:WARNING]";
+            raw_puts_and_count("[level:WARNING]", sizeof("[level:WARNING]") - 1);
             break;
         case level_code::ERROR:
-            *this << "[level:ERROR]";
+            raw_puts_and_count("[level:ERROR]", sizeof("[level:ERROR]") - 1);
             break;
         case level_code::FATAL:
-            *this << "[level:FATAL]";
+            raw_puts_and_count("[level:FATAL]", sizeof("[level:FATAL]") - 1);
             break;
         default:
-            *this << "[level:unknown]";
+            raw_puts_and_count("[level:unknown]", sizeof("[level:unknown]") - 1);
             break;
     }
 }
@@ -386,49 +392,49 @@ void kio::kout::__print_module_code(KURD_t value)
     switch (value.module_code)
     {
         case module_code::INVALID:
-            *this << "[module_code:INVALID]";
+            raw_puts_and_count("[module_code:INVALID]", sizeof("[module_code:INVALID]") - 1);
             break;
         case module_code::MEMORY:
-            *this << "[module_code:MEMORY]";
+            raw_puts_and_count("[module_code:MEMORY]", sizeof("[module_code:MEMORY]") - 1);
             break;
         case module_code::SCHEDULER:
-            *this << "[module_code:SCHEDULER]";
+            raw_puts_and_count("[module_code:SCHEDULER]", sizeof("[module_code:SCHEDULER]") - 1);
             break;
         case module_code::INTERRUPT:
-            *this << "[module_code:INTERRUPT]";
+            raw_puts_and_count("[module_code:INTERRUPT]", sizeof("[module_code:INTERRUPT]") - 1);
             break;
         case module_code::FIRMWARE:
-            *this << "[module_code:FIRMWARE]";
+            raw_puts_and_count("[module_code:FIRMWARE]", sizeof("[module_code:FIRMWARE]") - 1);
             break;
         case module_code::VFS:
-            *this << "[module_code:VFS]";
+            raw_puts_and_count("[module_code:VFS]", sizeof("[module_code:VFS]") - 1);
             break;
         case module_code::VMM:
-            *this << "[module_code:VMM]";
+            raw_puts_and_count("[module_code:VMM]", sizeof("[module_code:VMM]") - 1);
             break;
         case module_code::INFRA:
-            *this << "[module_code:INFRA]";
+            raw_puts_and_count("[module_code:INFRA]", sizeof("[module_code:INFRA]") - 1);
             break;
         case module_code::DEVICES:
-            *this << "[module_code:DEVICES]";
+            raw_puts_and_count("[module_code:DEVICES]", sizeof("[module_code:DEVICES]") - 1);
             break;
         case module_code::DEVICES_CORE:
-            *this << "[module_code:DEVICES_CORE]";
+            raw_puts_and_count("[module_code:DEVICES_CORE]", sizeof("[module_code:DEVICES_CORE]") - 1);
             break;
         case module_code::HARDWARE_DEBUG:
-            *this << "[module_code:HARDWARE_DEBUG]";
+            raw_puts_and_count("[module_code:HARDWARE_DEBUG]", sizeof("[module_code:HARDWARE_DEBUG]") - 1);
             break;
         case module_code::USER_KERNEL_ABI:
-            *this << "[module_code:USER_KERNEL_ABI]";
+            raw_puts_and_count("[module_code:USER_KERNEL_ABI]", sizeof("[module_code:USER_KERNEL_ABI]") - 1);
             break;
         case module_code::TIME:
-            *this << "[module_code:TIME]";
+            raw_puts_and_count("[module_code:TIME]", sizeof("[module_code:TIME]") - 1);
             break;
         case module_code::PANIC:
-            *this << "[module_code:PANIC]";
+            raw_puts_and_count("[module_code:PANIC]", sizeof("[module_code:PANIC]") - 1);
             break;
         default:
-            *this << "[module_code:unknown]";
+            raw_puts_and_count("[module_code:unknown]", sizeof("[module_code:unknown]") - 1);
             break;
     }
 }
@@ -438,25 +444,25 @@ void kio::kout::__print_result_code(KURD_t value)
     switch (value.result)
     {
         case result_code::SUCCESS:
-            *this << "[result:SUCCESS]";
+            raw_puts_and_count("[result:SUCCESS]", sizeof("[result:SUCCESS]") - 1);
             break;
         case result_code::SUCCESS_BUT_SIDE_EFFECT:
-            *this << "[result:SUCCESS_BUT_SIDE_EFFECT]";
+            raw_puts_and_count("[result:SUCCESS_BUT_SIDE_EFFECT]", sizeof("[result:SUCCESS_BUT_SIDE_EFFECT]") - 1);
             break;
         case result_code::PARTIAL_SUCCESS:
-            *this << "[result:PARTIAL_SUCCESS]";
+            raw_puts_and_count("[result:PARTIAL_SUCCESS]", sizeof("[result:PARTIAL_SUCCESS]") - 1);
             break;
         case result_code::FAIL:
-            *this << "[result:FAIL]";
+            raw_puts_and_count("[result:FAIL]", sizeof("[result:FAIL]") - 1);
             break;
         case result_code::RETRY:
-            *this << "[result:RETRY]";
+            raw_puts_and_count("[result:RETRY]", sizeof("[result:RETRY]") - 1);
             break;
         case result_code::FATAL:
-            *this << "[result:FATAL]";
+            raw_puts_and_count("[result:FATAL]", sizeof("[result:FATAL]") - 1);
             break;
         default:
-            *this << "[result:unknown]";
+            raw_puts_and_count("[result:unknown]", sizeof("[result:unknown]") - 1);
             break;
     }
 }
@@ -466,31 +472,31 @@ void kio::kout::__print_err_domain(KURD_t value)
     switch (value.domain)
     {
         case err_domain::INVALID:
-            *this << "[err_domain:INVALID]";
+            raw_puts_and_count("[err_domain:INVALID]", sizeof("[err_domain:INVALID]") - 1);
             break;
         case err_domain::CORE_MODULE:
-            *this << "[err_domain:CORE_MODULE]";
+            raw_puts_and_count("[err_domain:CORE_MODULE]", sizeof("[err_domain:CORE_MODULE]") - 1);
             break;
         case err_domain::ARCH:
-            *this << "[err_domain:ARCH]";
+            raw_puts_and_count("[err_domain:ARCH]", sizeof("[err_domain:ARCH]") - 1);
             break;
         case err_domain::USER:
-            *this << "[err_domain:USER]";
+            raw_puts_and_count("[err_domain:USER]", sizeof("[err_domain:USER]") - 1);
             break;
         case err_domain::HYPERVISOR:
-            *this << "[err_domain:HYPERVISOR]";
+            raw_puts_and_count("[err_domain:HYPERVISOR]", sizeof("[err_domain:HYPERVISOR]") - 1);
             break;
         case err_domain::OUT_MODULES:
-            *this << "[err_domain:OUT_MODULES]";
+            raw_puts_and_count("[err_domain:OUT_MODULES]", sizeof("[err_domain:OUT_MODULES]") - 1);
             break;
         case err_domain::FILE_SYSTEM:
-            *this << "[err_domain:FILE_SYSTEM]";
+            raw_puts_and_count("[err_domain:FILE_SYSTEM]", sizeof("[err_domain:FILE_SYSTEM]") - 1);
             break;
         case err_domain::HARDWARE:
-            *this << "[err_domain:HARDWARE]";
+            raw_puts_and_count("[err_domain:HARDWARE]", sizeof("[err_domain:HARDWARE]") - 1);
             break;
         default:
-            *this << "[err_domain:unknown]";
+            raw_puts_and_count("[err_domain:unknown]", sizeof("[err_domain:unknown]") - 1);
             break;
     }
 }
@@ -538,8 +544,137 @@ void kio::kout::uniform_puts(const char *str, uint64_t len)
 
 }
 
+void kio::kout::raw_puts_and_count(const char *str, uint64_t len)
+{
+    if (!str || len == 0) return;
+    uniform_puts(str, len);
+    statistics.calls_str++;
+    statistics.total_printed_chars += len;
+}
+
+kio::kout &kio::kout::operator<<(tmp_buff& tmp_buff)
+{
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    statistics.calls_tmp_buff++;
+
+    uint16_t limit = tmp_buff.entry_top;
+    if (limit > tmp_buff::entry_max) {
+        limit = tmp_buff::entry_max;
+    }
+
+    for (uint16_t i = 0; i < limit; ++i) {
+        const tmp_buff::entry& e = tmp_buff.entry_array[i];
+        switch (e.entry_type) {
+            case tmp_buff::entry_type_t::str: {
+                if (e.data.str) {
+                    uint32_t len = e.str_len;
+                    raw_puts_and_count(e.data.str, len);
+                } else {
+                    raw_puts_and_count("(null)", 6);
+                }
+                break;
+            }
+            case tmp_buff::entry_type_t::character: {
+                #ifdef KERNEL_MODE
+                uniform_puts(&e.data.character, 1);
+                #endif
+                #ifdef USER_MODE
+                if (is_print_to_stdout) write(1, &e.data.character, 1);
+                if (is_print_to_stderr) write(2, &e.data.character, 1);
+                #endif
+                statistics.calls_char++;
+                statistics.total_printed_chars++;
+                break;
+            }
+            case tmp_buff::entry_type_t::num: {
+                bool is_signed = false;
+                uint8_t len = 8;
+                switch (e.num_type) {
+                    case num_format_t::u8:  statistics.calls_u8++;  len = 1; break;
+                    case num_format_t::s8:  statistics.calls_s8++;  len = 1; is_signed = true; break;
+                    case num_format_t::u16: statistics.calls_u16++; len = 2; break;
+                    case num_format_t::s16: statistics.calls_s16++; len = 2; is_signed = true; break;
+                    case num_format_t::u32: statistics.calls_u32++; len = 4; break;
+                    case num_format_t::s32: statistics.calls_s32++; len = 4; is_signed = true; break;
+                    case num_format_t::u64: statistics.calls_u64++; len = 8; break;
+                    case num_format_t::s64: statistics.calls_s64++; len = 8; is_signed = true; break;
+                    default: break;
+                }
+
+                if (is_signed) {
+                    if (len == 1) {
+                        int8_t v = (int8_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, true);
+                    } else if (len == 2) {
+                        int16_t v = (int16_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, true);
+                    } else if (len == 4) {
+                        int32_t v = (int32_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, true);
+                    } else {
+                        int64_t v = (int64_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, true);
+                    }
+                } else {
+                    if (len == 1) {
+                        uint8_t v = (uint8_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, false);
+                    } else if (len == 2) {
+                        uint16_t v = (uint16_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, false);
+                    } else if (len == 4) {
+                        uint32_t v = (uint32_t)e.data.data;
+                        print_numer((uint64_t*)&v, e.num_sys, len, false);
+                    } else {
+                        uint64_t v = (uint64_t)e.data.data;
+                        print_numer(&v, e.num_sys, len, false);
+                    }
+                }
+                break;
+            }
+            case tmp_buff::entry_type_t::time: {
+                statistics.calls_now_time++;
+                #ifdef KERNEL_MODE
+                if (ktime::hardware_time::get_if_hpet_initialized()) {
+                    raw_puts_and_count("[", 1);
+                    miusecond_time_stamp_t stamp = ktime::hardware_time::get_stamp();
+                    print_numer(&stamp, DEC, 8, false);
+                    raw_puts_and_count("]", 1);
+                } else {
+                    raw_puts_and_count("<", 1);
+                    miusecond_time_stamp_t stamp = ktime::hardware_time::get_stamp();
+                    print_numer(&stamp, DEC, 8, false);
+                    raw_puts_and_count(">", 1);
+                }
+                #endif
+                #ifdef USER_MODE
+                raw_puts_and_count("<tsc=", sizeof("<tsc=") - 1);
+                uint64_t tsc = rdtsc();
+                print_numer(&tsc, DEC, 8, false);
+                raw_puts_and_count(">", 1);
+                #endif
+                break;
+            }
+            case tmp_buff::entry_type_t::KURD: {
+                statistics.calls_KURD++;
+                __print_level_code(e.data.kurd);
+                __print_result_code(e.data.kurd);
+                __print_err_domain(e.data.kurd);
+                __print_module_code(e.data.kurd);
+                top_module_KURD_interpreter[e.data.kurd.module_code](e.data.kurd);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return *this;
+}
+
 kio::kout &kio::kout::operator<<(KURD_t info)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    statistics.calls_KURD++;
     __print_level_code(info);
     __print_result_code(info);
     __print_err_domain(info);
@@ -550,6 +685,8 @@ kio::kout &kio::kout::operator<<(KURD_t info)
 kio::kout &kio::kout::operator<<(const char *str)
     
 {
+    if(GlobalKernelStatus!=PANIC)
+    spinlock_guard guard(lock);
     int strlength = strlen_in_kernel(str);
     #ifdef KERNEL_MODE
     
@@ -566,6 +703,7 @@ kio::kout &kio::kout::operator<<(const char *str)
 
 kio::kout &kio::kout::operator<<(char c)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     #ifdef KERNEL_MODE
     uniform_puts(&c, 1);
     #endif
@@ -604,6 +742,7 @@ void kio::kout::Init()
 }
 kio::kout &kio::kout::operator<<(const void *ptr)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     #ifdef KERNEL_MODE
     uniform_puts("0x", 2);
     #endif
@@ -618,6 +757,7 @@ kio::kout &kio::kout::operator<<(const void *ptr)
 }
 kio::kout &kio::kout::operator<<(uint64_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_u64++;
     print_numer(&num, curr_numer_system, 8, false);
     return *this;
@@ -625,6 +765,7 @@ kio::kout &kio::kout::operator<<(uint64_t num)
 
 kio::kout &kio::kout::operator<<(int64_t num)
 {
+    spinlock_guard guard(lock);
     statistics.calls_s64++;
     print_numer((uint64_t*)&num, curr_numer_system, 8, true);
     return *this;
@@ -632,6 +773,7 @@ kio::kout &kio::kout::operator<<(int64_t num)
 
 kio::kout &kio::kout::operator<<(uint32_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_u32++;
     print_numer((uint64_t*)&num, curr_numer_system, 4, false);
     return *this;
@@ -639,6 +781,7 @@ kio::kout &kio::kout::operator<<(uint32_t num)
 
 kio::kout &kio::kout::operator<<(int32_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_s32++;
     print_numer((uint64_t*)&num, curr_numer_system, 4, true);
     return *this;
@@ -646,6 +789,7 @@ kio::kout &kio::kout::operator<<(int32_t num)
 
 kio::kout &kio::kout::operator<<(uint16_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_u16++;
     print_numer((uint64_t*)&num, curr_numer_system, 2, false);
     return *this;
@@ -653,6 +797,7 @@ kio::kout &kio::kout::operator<<(uint16_t num)
 
 kio::kout &kio::kout::operator<<(int16_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_s16++;
     print_numer((uint64_t*)&num, curr_numer_system, 2, true);
     return *this;
@@ -660,6 +805,7 @@ kio::kout &kio::kout::operator<<(int16_t num)
 
 kio::kout &kio::kout::operator<<(uint8_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_u8++;
     print_numer((uint64_t*)&num, curr_numer_system, 1, false);
     return *this;
@@ -667,28 +813,12 @@ kio::kout &kio::kout::operator<<(uint8_t num)
 
 kio::kout &kio::kout::operator<<(int8_t num)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.calls_s8++;
     print_numer((uint64_t*)&num, curr_numer_system, 1, true);
     return *this;
 }
 
-kio::kout &kio::kout::operator<<(radix_shift_t radix)
-{
-    switch (radix)
-    {
-        case BIN_shift:
-            shift_bin();
-            break;
-        case DEC_shift:
-            shift_dec();
-            break;
-        case HEX_shift:
-            shift_hex();
-            break;
-        default:shift_dec();
-    }
-    return *this;
-}
 void kio::kout::shift_bin()
 {
     curr_numer_system = BIN;
@@ -706,39 +836,42 @@ void kio::kout::shift_hex()
 
 kio::kout::kout_statistics_t kio::kout::get_statistics()
 {
+    spinlock_guard guard(lock);
     return statistics;
 }
 
 kio::kout &kio::kout::operator<<(now_time time)
 {
+    spinlock_guard guard(lock);
     statistics.calls_now_time++;
     #ifdef KERNEL_MODE 
     
     if(ktime::hardware_time::get_if_hpet_initialized()){
-        *this<<'[';
+        raw_puts_and_count("[", 1);
         miusecond_time_stamp_t stamp=ktime::hardware_time::get_stamp();
         print_numer(&stamp, DEC, 8, false);
-        *this<<']';
+        raw_puts_and_count("]", 1);
     }else{
-        *this<<'<';
+        raw_puts_and_count("<", 1);
         miusecond_time_stamp_t stamp=ktime::hardware_time::get_stamp();
         print_numer(&stamp, DEC, 8, false);
-        *this<<'>';
+        raw_puts_and_count(">", 1);
     }
     #endif
     #ifdef USER_MODE
-    *this<<"<tsc=";
+    raw_puts_and_count("<tsc=", sizeof("<tsc=") - 1);
     uint64_t tsc=rdtsc();
     print_numer(&tsc, DEC, 8, false);
-    *this<<'>';
+    raw_puts_and_count(">", 1);
     #endif
     return *this;
 }
 
 kio::kout &kio::kout::operator<<(endl end)
 {
+    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
     statistics.explicit_endl++;
-    *this<<'\n';
+    raw_puts_and_count("\n", 1);
     return *this;
 }
 uint64_t kio::kout::register_backend(kout_backend backend)
@@ -775,11 +908,12 @@ bool kio::kout::mask_backend(uint64_t index)
 
 kio::kout &kio::kout::operator<<(numer_system_select radix)
 {   
+     if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
      switch (radix) {
-        case BIN: shift_bin(); break;
-        case DEC: shift_dec(); break;
-        case HEX: shift_hex(); break;
-        default: shift_dec(); break;
+        case BIN: shift_bin(); statistics.calls_shift_bin++; break;
+        case DEC: shift_dec(); statistics.calls_shift_dec++; break;
+        case HEX: shift_hex(); statistics.calls_shift_hex++; break;
+        default: shift_dec(); statistics.calls_shift_dec++; break;
     }
     return *this;
 }

@@ -97,6 +97,15 @@ namespace Scheduler{
                 constexpr uint16_t illeage_state=5;
             }
         }
+        constexpr uint8_t kthread_sleep=6;
+        constexpr uint8_t sleep_task_insert=7;
+        namespace sleep_task_insert_results{
+            namespace fail_reasons{
+                constexpr uint16_t null_task_ptr=1;
+                constexpr uint16_t bad_task_type=2;
+                constexpr uint16_t insert_fail=3;
+            }
+        }
     }
 };
 enum task_type_t:uint8_t{
@@ -191,7 +200,7 @@ class task{
     bool set_dead();//成功返回true,只能由zombie切换到才合法/成功，非法不会改状态字段
     bool set_zombie();//合法前驱仅限running,blocked,ready
     bool set_running();
-    spinlock_cpp_t task_lock;
+    reentrant_spinlock_cpp_t task_lock;
     ~task();//析构函数,原本是想只有dead才能运行，但是受abi制约，行为是无条件折构，只不过非dead状态会warning记录到日志
     void assign_valid_tid(uint64_t tid);
     static constexpr uint8_t task_not_in_term=0;
@@ -204,6 +213,7 @@ class task{
     miusecond_time_stamp_t accumulated_time;
     miusecond_time_stamp_t lastest_run_stamp;
     miusecond_time_stamp_t lastest_span_length;
+    miusecond_time_stamp_t sleep_wakeup_stamp;//若状态为blocked,且blocked_reason为sleeping,则sleep_wakeup_stamp有效,系统时间戳大于等于sleep_wakeup_stamp,才允许解除阻塞
     uint32_t get_belonged_processor_id();
     void set_belonged_processor_id(uint32_t pid);
     union{
@@ -260,7 +270,7 @@ class task_pool{
     static KURD_t release_tid(uint64_t tid);
     static int Init();
 };
- class alignas(64) per_processor_scheduler { 
+class alignas(64) per_processor_scheduler { 
     private:
     static constexpr uint8_t PRIVATE_STACK_DEFAULT_PG_COUNT=4;
     vaddr_t stack_bottom;
@@ -270,12 +280,25 @@ class task_pool{
     KURD_t default_fatal();
     task* idle;
     public:
-    Ktemplats::list_doubly<task*> ready_queue;
-    spinlock_cpp_t ready_queues_lock;
-    uint64_t now_running_tid;
+    Ktemplats::list_doubly<task*> ready_queue;//FIFO,除了从睡眠队列拿出来的是push_head,其他都是push_tail，但是运行一个任务都是在队列上pop_head
+    class sleep_queue_t:Ktemplats::list_doubly<task*>
+    {
+        //继承自list_doubly的类，插入的时候要按照唤醒时间戳升序
+        private:
+        public:
+        using list_doubly<task*>::empty;
+        using list_doubly<task*>::front;
+        using list_doubly<task*>::pop_front_value;
+        sleep_queue_t()=default;
+        KURD_t insert(task*task_ptr);//由于期望出队列的时候用pop_head_value的时候是时间戳最低的，因此这个insert要注意排序
+    };
+    sleep_queue_t sleep_queue;
+    reentrant_spinlock_cpp_t sched_lock;//调度器数据结构锁，保护running tid,sleep_queue_t
+    bool is_idle;
     vaddr_t get_stack_top();
-    void sched();//h会内部修改ready_queue数据结构用ready_queues_lock保护，然后对应的task也会用锁保护其状态改变
+    void sched();//会内部修改ready_queue数据结构用ready_queues_lock保护，然后对应的task也会用锁保护其状态改变
     KURD_t insert_ready_task(task*task_ptr);
+    void sleep_tasks_wake();
     per_processor_scheduler();
 };
 extern per_processor_scheduler global_schedulers[MAX_PROCESSORS_COUNT];
@@ -288,6 +311,8 @@ extern "C"{
     void kthread_exit(uint64_t will);
     void kthread_true_exit(uint64_t will);
     void kthread_self_blocked(task_blocked_reason_t reason);
+    void kthread_sleep(miusecond_time_stamp_t offset);
+    void kthread_sleep_cppenter(kthread_yield_raw_context* context);
     void kthread_self_blocked_cppenter(kthread_yield_raw_context* context);
     uint64_t wakeup_thread(uint64_t tid);//返回的是KURD但是受限于abi，需要分析
 }

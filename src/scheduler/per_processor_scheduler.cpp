@@ -154,7 +154,60 @@ task* task_pool::get_by_tid(uint64_t tid, KURD_t &kurd)
     kurd = success;
     return sub->task_table[low_idx].task_ptr;
 }
+KURD_t per_processor_scheduler::sleep_queue_t::insert(task* task_ptr)
+{
+    KURD_t success = KURD_t(result_code::SUCCESS, 0, module_code::SCHEDULER,
+                             Scheduler::self_scheduler, Scheduler::self_scheduler_events::insert_ready_task, level_code::INFO,
+                             err_domain::CORE_MODULE);
+    KURD_t fail = KURD_t(result_code::FAIL, 0, module_code::SCHEDULER,
+                          Scheduler::self_scheduler, Scheduler::self_scheduler_events::insert_ready_task, level_code::ERROR,
+                          err_domain::CORE_MODULE);
+    if (task_ptr == nullptr) {
+        fail.reason = Scheduler::self_scheduler_events::sleep_task_insert_results::fail_reasons::null_task_ptr;
+        return fail;
+    }
 
+    node* n = alloc_node(task_ptr);
+
+    if (!m_head) {
+        m_head = m_tail = n;
+        ++m_size;
+        return success;
+    }
+
+    const miusecond_time_stamp_t new_stamp = task_ptr->sleep_wakeup_stamp;
+    node* cur = m_head;
+    while (cur) {
+        task* cur_task = cur->value;
+        if (cur_task && cur_task->sleep_wakeup_stamp > new_stamp) {
+            break;
+        }
+        cur = cur->next;
+    }
+
+    if (!cur) {
+        n->prev = m_tail;
+        m_tail->next = n;
+        m_tail = n;
+        ++m_size;
+        return success;
+    }
+
+    if (cur == m_head) {
+        n->next = m_head;
+        m_head->prev = n;
+        m_head = n;
+        ++m_size;
+        return success;
+    }
+
+    n->next = cur;
+    n->prev = cur->prev;
+    cur->prev->next = n;
+    cur->prev = n;
+    ++m_size;
+    return success;
+}
 uint64_t task_pool::alloc(task* task_ptr, KURD_t& kurd)
 {
     spinrwlock_write_guard guard(lock);
@@ -381,16 +434,51 @@ KURD_t per_processor_scheduler::default_fatal()
 {
     return set_fatal_result_level(default_kurd());
 }
+void per_processor_scheduler::sleep_tasks_wake()
+{
+    constexpr  uint8_t arr_len_max = 64; 
+    int arr_len = 0;
+    task* arr[arr_len_max];
+    ksetmem_8(arr,0,arr_len_max);
+    miusecond_time_stamp_t stamp=ktime::hardware_time::get_stamp();
+    this->sched_lock.lock();
+    
+    for(;arr_len<arr_len_max;arr_len++){
+        if(sleep_queue.empty()){
+        this->sched_lock.unlock();
+        break;
+        }
+        task*task_ptr=*sleep_queue.front();
+        if(task_ptr->sleep_wakeup_stamp<stamp){
+            break;
+        }else{
+            arr[arr_len]=sleep_queue.pop_front_value();
+        }
+    }
+    this->sched_lock.unlock();
+    arr_len++;
+    for(uint64_t i=0;i<arr_len;i++){
+        if(arr[i]){
+            arr[i]->task_lock.lock();
+            arr[i]->set_ready();
+            arr[i]->task_lock.unlock();
+            sched_lock.lock();
+            ready_queue.push_back(arr[i]);
+            sched_lock.unlock();
+        }
+    }
+}
 void per_processor_scheduler::sched()
 {
-    ready_queues_lock.lock();
-    task*to_run=[&]()->task*
-    { 
-        if(ready_queue.empty())return idle;
-        else return ready_queue.pop_front_value();
-    }();
-    now_running_tid=to_run->get_tid();
-    ready_queues_lock.unlock();
+    sched_lock.lock();
+    task* to_run=nullptr;
+    if(ready_queue.empty()){
+        to_run=idle;
+    }else{
+        to_run=ready_queue.pop_front_value();
+    }
+    gs_u64_write(PROCESSOR_NOW_RUNNING_TID_GS_INDEX,to_run->get_tid());
+    sched_lock.unlock();
     to_run->task_lock.lock();
     to_run->set_running();
     to_run->lastest_run_stamp=ktime::hardware_time::get_stamp();

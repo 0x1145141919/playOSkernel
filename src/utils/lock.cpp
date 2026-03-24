@@ -1,4 +1,5 @@
 #include "util/lock.h"
+#include "util/arch/x86-64/cpuid_intel.h"
 static inline void cpu_relax()
 {
 #if defined(__x86_64__) || defined(__i386__)
@@ -9,7 +10,12 @@ static inline void cpu_relax()
         __asm__ __volatile__("" ::: "memory");
 #endif
 }
-
+static inline void tmp_disable_interrupt(){
+    asm volatile("cli" ::: "memory");
+}
+static inline uint32_t e()
+{ 
+}
 void spinlock_cpp_t::lock()
  {
         while (__atomic_test_and_set(&status, __ATOMIC_ACQUIRE)) {
@@ -35,6 +41,71 @@ spinlock_guard::spinlock_guard(spinlock_cpp_t& lock)
 }
 
 spinlock_guard::~spinlock_guard()
+{
+    lock_ref.unlock();
+}
+
+reentrant_spinlock_cpp_t::reentrant_spinlock_cpp_t()
+{
+    complex.store(0);
+}
+
+void reentrant_spinlock_cpp_t::lock()
+{
+    const uint64_t pid = static_cast<uint64_t>(fast_get_processor_id());
+
+    while (true) {
+        uint64_t cur = complex.load();
+        uint64_t depth = cur & DEPTH_MASK;
+        uint64_t owner = cur >> PID_SHIFT;
+
+        if (depth == 0) {
+            uint64_t desired = (pid << PID_SHIFT) | 1;
+            if (complex.cmpxchg_strong(cur, desired)) {
+                return;
+            }
+        } else if (owner == pid) {
+            if (depth >= DEPTH_MASK) {
+                __builtin_trap();
+            }
+            uint64_t desired = (cur & ~DEPTH_MASK) | (depth + 1);
+            if (complex.cmpxchg_strong(cur, desired)) {
+                return;
+            }
+        } else {
+            cpu_relax();
+        }
+    }
+}
+
+void reentrant_spinlock_cpp_t::unlock()
+{
+    const uint64_t pid = static_cast<uint64_t>(fast_get_processor_id());
+    uint64_t cur = complex.load();
+    uint64_t depth = cur & DEPTH_MASK;
+    uint64_t owner = cur >> PID_SHIFT;
+
+    if (depth == 0 || owner != pid) {
+        return;
+    }
+    complex.store(0);
+    
+}
+
+bool reentrant_spinlock_cpp_t::is_locked()
+{
+    constexpr uint64_t DEPTH_MASK = 0xFULL;
+    uint64_t cur = complex.load();
+    return (cur & DEPTH_MASK) != 0;
+}
+
+reentrant_spinlock_guard::reentrant_spinlock_guard(reentrant_spinlock_cpp_t& lock)
+    : lock_ref(lock)
+{
+    lock_ref.lock();
+}
+
+reentrant_spinlock_guard::~reentrant_spinlock_guard()
 {
     lock_ref.unlock();
 }

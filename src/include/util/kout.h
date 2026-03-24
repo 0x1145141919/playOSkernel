@@ -1,6 +1,7 @@
 #pragma once
 #include "abi/os_error_definitions.h"
 #include "util/OS_utils.h"
+#include "util/lock.h"
 namespace kio
 {
 class now_time
@@ -27,6 +28,54 @@ struct kout_backend {
     void (*panic_write)(const char* buf, uint64_t len);
     void (*early_write)(const char* buf, uint64_t len);
 };
+class kout;
+class tmp_buff{
+    //一般是栈上分配的临时缓冲区，用于多线程下统一给kout输出
+    private:
+    numer_system_select num_sys;
+    enum entry_type_t:uint8_t {
+        character,
+        num,str,time,KURD
+    };
+    struct entry{
+        entry_type_t entry_type;
+        num_format_t num_type;//i8,u8,i16,u16,i32,u32,i64,u64,(float,double)浮点类型不支持
+        numer_system_select num_sys;
+        uint32_t str_len;
+        union 
+        {
+            uint64_t data;
+            char*str;
+            char character;
+            KURD_t kurd;
+        }data;
+        entry():entry_type(entry_type_t::character),num_type(num_format_t::u8),num_sys(numer_system_select::DEC),str_len(0),data(0){
+        }
+    };
+    static constexpr uint16_t entry_max=64;
+    entry entry_array[entry_max];
+    uint16_t entry_top;
+    friend kout;
+    public:
+    tmp_buff& operator<<(KURD_t info);
+    tmp_buff& operator<<(const char* str);
+    tmp_buff& operator<<(char c);
+    tmp_buff& operator<<(const void* ptr);
+    tmp_buff& operator<<(uint64_t num);
+    tmp_buff& operator<<(int64_t num);
+    tmp_buff& operator<<(uint32_t num);
+    tmp_buff& operator<<(int32_t num);
+    tmp_buff& operator<<(now_time time);
+    tmp_buff& operator<<(endl end);
+    tmp_buff& operator<<(uint16_t num);
+    tmp_buff& operator<<(int16_t num);
+    tmp_buff& operator<<(uint8_t num);
+    tmp_buff& operator<<(int8_t num);
+    tmp_buff& operator<<(numer_system_select radix);
+    tmp_buff();//初始化时entry_array栈上分配，设计上是栈用，没有多线程安全
+    ~tmp_buff();
+    bool is_full();
+};
 class kout
 {
     public:
@@ -49,7 +98,7 @@ class kout
     uint64_t calls_s64;
     uint64_t calls_KURD;
     uint64_t calls_now_time;        // operator<<(now_time)
-
+    uint64_t calls_tmp_buff;
     // ===== 控制/状态类调用 =====
     uint64_t calls_shift_bin;
     uint64_t calls_shift_dec;
@@ -81,6 +130,8 @@ class kout
     void __print_result_code(KURD_t value);
     // 打印KURD_t中err_domain字段对应的字符串表示
     void __print_err_domain(KURD_t value);
+    static void __print_event_hex(uint8_t event_code);
+    static void __print_memmodule_kurd(KURD_t kurd);
     static void (*top_module_KURD_interpreter[256])(KURD_t info);
     /**
      * @brief 输出数字
@@ -100,7 +151,10 @@ class kout
     static constexpr uint16_t MAX_BACKEND_COUNT=64;
     kout_backend*backends[MAX_BACKEND_COUNT]={0};
     void uniform_puts(const char* str,uint64_t len);
+    void raw_puts_and_count(const char* str,uint64_t len);
+    spinlock_cpp_t lock;
     public:
+    kout& operator<<(tmp_buff& tmp_buff);
     kout& operator<<(KURD_t info);
     kout& operator<<(const char* str);
     kout& operator<<(char c);

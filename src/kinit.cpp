@@ -49,12 +49,35 @@ extern "C" void delay(unsigned int milliseconds) {
 }
 EFI_TIME global_time;
 uint32_t efi_map_ver;
+void* Collatz_kthread(void* init_value){
+    uint64_t value=(uint64_t)init_value;
+    bsp_kout<<"Collatz_kthread "<<value<<kendl;
+    uint64_t loop_count=0;
+    while(true)
+    {
+    bsp_kout<<"processor id "<< fast_get_processor_id()<<" in term "<<loop_count<<" with value "<<value<<" "<<kendl;
+    //kthread_yield();
+    kthread_sleep(10000);
+    if(value&1){
+        value=value*3+1;
+    }else{
+        value>>=1;
+    }
+    loop_count++;
+    if(value==1)
+        return (void*)1;
+    }
+
+};
 void ipi_test(){
     uint32_t self_processor_id=fast_get_processor_id();
-    for(uint32_t i=0;i<10;i++)
-    {
-        bsp_kout<<"processor id "<< self_processor_id<<kendl;
-    }
+    bsp_kout<<"processor id "<< self_processor_id<<kendl;
+    KURD_t kurd=KURD_t();
+    uint64_t first_test_kthread=create_kthread(
+        Collatz_kthread,
+        (void*)rdtsc(),&kurd);
+    ktime::time_interrupt_generator::set_clock_by_offset(20000);
+    global_schedulers[self_processor_id].sched();
     asm volatile("hlt");
 }
 extern "C" void ap_norm_start( ){
@@ -64,7 +87,11 @@ void create_first_kthread(){
     ktime::time_interrupt_generator::set_clock_by_offset(20000);
     textconsole_GoP::RuntimeInitServiceThread();
     GlobalKernelStatus=SCHEDUL_READY;
-    x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
+    //x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
+    KURD_t kurd=KURD_t();
+    uint64_t first_test_kthread=create_kthread(
+        Collatz_kthread,
+        (void*)rdtsc(),&kurd);
     per_processor_scheduler&sc=global_schedulers[0];
     sc.sched();
 }

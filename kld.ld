@@ -3,77 +3,67 @@ __KImgSize = 128M;
 EXTERN(PAGE_LEVEL)
 PAGE_LEVEL_5 = 0xFF00000000000000;
 PAGE_LEVEL_4 = 0xFFFF800000000000;
-__HEAP_SIZE = 4M;
-__HEAP_BITMAP_SIZE = __HEAP_SIZE / 128;
-__KLOG_SIZE = 2M;
-__STACK_SIZE = 32K;
-__PGTB_HEAP_SIZE = 2M;
-init_sec_base = 0x1000;
+ap_bootstrap_base = 0x4000;
 init_sec_size   = 0x100000;
-KImgphybase = 0x4000000;
-PROVIDE(KImgphybase = 0x4000000);
+KImgphybase = 0x2000000;
+PROVIDE(KImgphybase = 0x2000000);
 
 
-KImgvbase = KImgphybase + PAGE_LEVEL_4;
+KImgvbase = PAGE_LEVEL_4;
 Koffset = KImgvbase - KImgphybase;
 
 MEMORY {
     /* 虚拟内存内核主体区域 */
     VRAM (rwx) : ORIGIN = KImgvbase, LENGTH = __KImgSize
     /*物理内存初始化代码区 */
-    init (rx) : ORIGIN = init_sec_base, LENGTH = init_sec_size
+    init (rx) : ORIGIN = ap_bootstrap_base, LENGTH = init_sec_size
 }
 
 SECTIONS { 
-    . = init_sec_base;
-    .init_text : {
-        init_text_begin = .;
-        CMakeFiles/kernel.elf.dir/src/kernel_entry.asm.o(.boottext)
+    . = ap_bootstrap_base;
+    .ap_bootstrap_text : {
+        ap_bootstrap_begin = .;
+        *(.boottext)
         . = ALIGN(4096);
-        init_text_end = .;
-    } > init : init_text
-    .init_rodata : {
-        init_rodata_begin = .;
-        CMakeFiles/kernel.elf.dir/src/kernel_entry.asm.o(.init_rodata)
+        ap_bootstrap_end = .;
+    } > init : ap_bootstrap_text
+    .ap_bootstrap_rodata : {
+        ap_bootstrap_begin = .;
+        *(.ap_bootstrap_rodata)
         . = ALIGN(4K);
-        init_rodata_end = .;
-    } > init : init_rodata
-    .init_data : {
-        init_data_begin = .;
-        CMakeFiles/kernel.elf.dir/src/kernel_entry.asm.o(.bootdata)
+        ap_bootstrap_end = .;
+    } > init : ap_bootstrap_rodata
+    .ap_bootstrap_data : {
+        ap_bootstrap_begin = .;
+        *(.ap_bootstrap_data)
         . = ALIGN(4K);
-        init_data_end = .;
-    } > init : init_data
-    .init_stack : {
-        init_stack_begin = .;
-        CMakeFiles/kernel.elf.dir/src/kernel_entry.asm.o(.init_stack)
+        ap_bootstrap_end = .;
+    } > init : ap_bootstrap_data
+    .ap_bootstrap_stack : {
+        ap_bootstrap_begin = .;
+        *(.ap_bootstrap_stack)
         . = ALIGN(4K);
-        init_stack_end = .;
-    } > init : init_stack
+        ap_bootstrap_end = .;
+    } > init : ap_bootstrap_stack
     . = KImgvbase;
-    .text_main :  AT( KImgphybase){
+    .text_main : {
         text_begin = .;
          *(.text .text.*)
          . = ALIGN(4096); 
          text_end = . ;
     } > VRAM :text_main
-    /* 计算数据段加载地址 */
-    _data_lma = ALIGN(LOADADDR(.text_main) + SIZEOF( .text_main) ,4096);
-    .data : AT(_data_lma){
+    .data : {
         _data_start = .;
         *(.data .data.*)
          *(.got .got.*)
          *(.*array)
          *(.note.*)
-         *(.lbss .lbss.*)
-        *(.bss .bss.*)
         *(COMMON)
         *(.gnu.property)
     . = ALIGN(4096); 
     _data_end = . ;
     } > VRAM :data
-    _rodata_lma = ALIGN(LOADADDR(.data) + SIZEOF(.data),4096);
-    .rodata :  AT( _rodata_lma){
+    .rodata : {
         _rodata_start = . ;
          *(.rodata .rodata.*)
          *(.eh_frame)
@@ -82,62 +72,23 @@ SECTIONS {
     } > VRAM :rodata
     . = ALIGN(4096);
     
-    _stack_lma = ALIGN(LOADADDR(.rodata) + SIZEOF(.rodata),4096);
-    .stack :  AT( _stack_lma){
-        _stack_bottom = .;
-        . = . + __STACK_SIZE; 
-        _stack_top = .;
+ 
+    .bss :  {
+        _bss_begin = .;
+        *(.bss .bss.*)
+        *(.lbss .lbss.*)
+        _bss_end = .;
         . = ALIGN(4096); 
-    } > VRAM :stack
-    
-    /* 内核页表段 - kspaceUPpdpt表 */
-    _kspace_uppdpt_lma = ALIGN(LOADADDR(.stack) + SIZEOF(.stack), 4096);
-    .kspace_uppdpt : AT(_kspace_uppdpt_lma) {
-    __kspace_uppdpt_start = .;
-    *(.kspace_uppdpt)
-    __kspace_uppdpt_end = .;
-    . = ALIGN(4096);
-    } > VRAM :kspace_uppdpt
-
-    _heap_bitmap_lma = ALIGN(LOADADDR(.kspace_uppdpt) + SIZEOF(.kspace_uppdpt),4096);
-    . = ALIGN(4096);
-    .heap_bitmap :  AT( _heap_bitmap_lma){
-        __heap_bitmap_start = .;
-        . = . + __HEAP_BITMAP_SIZE;
-        __heap_bitmap_end = .;
-        . = ALIGN(2M);
-    } > VRAM :heap_bitmap
-
-    /* 计算堆段加载地址 */
-    _heap_lma = ALIGN(LOADADDR(.heap_bitmap) + SIZEOF(.heap_bitmap),2M);
-    . = ALIGN(2M);
-    .heap :  AT( _heap_lma){
-        __heap_start = .;
-        . = . + __HEAP_SIZE;
-        __heap_end = .;
-    } > VRAM :heap    
-    /* 计算内核日志段加载地址 */
-    _klog_lma = ALIGN(LOADADDR(.heap) + SIZEOF(.heap),2M);
-    .klog : AT( _klog_lma){
-        __klog_start = .;
-        . = . + __KLOG_SIZE;
-        __klog_end = .;
-    } > VRAM :klog
-
-
+    } > VRAM :bss
 }
 /* 定义段权限 */
 PHDRS {
-    init_text PT_LOAD FLAGS(5);      /* PF_R | PF_X (RX) */
-    init_rodata PT_LOAD FLAGS(4);
-    init_data PT_LOAD FLAGS(6);
-    init_stack PT_LOAD FLAGS(6);
-    text_main PT_LOAD FLAGS(5);      /* PF_R | PF_X (RX) */
-    data PT_LOAD FLAGS(6);      /* PF_R | PF_W (RW) */   
-    rodata PT_LOAD FLAGS(4);    /* PF_R (R) */
-    stack PT_LOAD FLAGS(6);     /* PF_R | PF_W (RW) */
-    kspace_uppdpt PT_LOAD FLAGS(6);  /* PF_R | PF_W (RW) */    
-    heap_bitmap PT_LOAD FLAGS(6);
-    heap PT_LOAD FLAGS(6);
-    klog PT_LOAD FLAGS(6);
+    ap_bootstrap_text PT_LOAD FLAGS(5);      /* PF_R | PF_X (RX) */
+    ap_bootstrap_rodata PT_LOAD FLAGS(4);
+    ap_bootstrap_data PT_LOAD FLAGS(6);
+    ap_bootstrap_stack PT_LOAD FLAGS(6);
+    text_main PT_LOAD FLAGS(5 | 0x100);      /* PF_R | PF_X (RX) */
+    data PT_LOAD FLAGS(6 | 0x100);      /* PF_R | PF_W (RW) */   
+    rodata PT_LOAD FLAGS(4 | 0x100);    /* PF_R (R) */
+    bss PT_LOAD FLAGS(6 | 0x100);
 }
