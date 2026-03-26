@@ -429,7 +429,7 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
 
     if(pglv_4_or_5==PAGE_TBALE_LV::LV_4)
     {
-        lock.write_lock();
+        spinrwlock_interrupt_about_write_guard lock_guard(lock);
         for(int i=0;i<5;i++) {
             auto &entry = package.entryies[i];
             if(entry.num_of_pages==0) continue;
@@ -506,24 +506,24 @@ KURD_t AddressSpace::enable_VM_desc(VM_DESC desc)
 
     
     success:
-    lock.write_unlock();
+
     if(is_reach_va_bottom){
         success.result=result_code::SUCCESS_BUT_SIDE_EFFECT;
         success.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::SUCCESS_BUT_SIDE_AFFECTS::REASON_CODE_MAP_LOW_16K;
     }
     return success;
     page_size_invalid:
-    lock.write_unlock();
+
     fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
     return fatal;
     bad_vmentry_unlock:
-    lock.write_unlock();
+
     return fail;
     sub_step_invalid:
-    lock.write_unlock();
+
     fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::ENABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_TRY_TO_GET_SUB_PAGE_IN_ATOM_PAGE;
     pages_runout_chech:
-    lock.write_unlock();
+
     return pages_alloc_event_kurd;
 }
 /**
@@ -834,7 +834,7 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
         return fail;
     }
     if (pglv_4_or_5 == PAGE_TBALE_LV::LV_4) {
-        lock.write_lock();
+        spinrwlock_interrupt_about_write_guard lock_guard(lock);
         switch (package.congruence_level) {
         case congruence_level_1gb: {
             for (int i = 0; i < 5; i++) {
@@ -941,17 +941,13 @@ auto _4lv_pdpte_1GB_entries_clear = [pml4tb_phyaddr_base, will_invalidate_soon](
     }
 
 success:
-    lock.write_unlock();
     return success;
 page_size_invalid:
-    lock.write_unlock();
     fatal.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::DISABLE_VMENTRY_RESULTS::FATAL_REASONS::REASON_CODE_INVALID_PAGE_SIZE;
     return fatal;
 bad_vmentry_unlock:
-    lock.write_unlock();
     return fail;
 sub_step_invalid:
-    lock.write_unlock();
     switch (clear_status)
     {
     case pages_clear_error_status::TRY_TO_CLEAR_UNPRESENT_PAGE:
@@ -975,7 +971,7 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr,KURD_t& kurd)
     uint16_t pdpte_idx = (vaddr >> 30)&511;
     uint16_t pde_idx = (vaddr >> 21)&511;
     uint16_t pte_idx = (vaddr >> 12)&511;
-    lock.read_lock();
+    spinrwlock_interrupt_about_read_guard lock_guard(lock);
     KURD_t success=default_success();
    KURD_t fail=default_fail();
    KURD_t fatal=default_fatal();
@@ -1015,27 +1011,21 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr,KURD_t& kurd)
     }else{
         fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::TRAN_TO_PHY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_SUPPORT_LV5_PAGING;
     kurd=fail;
-    lock.read_unlock();
     return 0;
     }
     not_allowd:
     fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::TRAN_TO_PHY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_ALLOW_KSPACE_VA;
     kurd=fail;
-    lock.read_unlock();
     return 0;
     entry_not_presnt:
     fail.reason=MEMMODULE_LOCAIONS::ADDRESSPACE_EVENTS::TRAN_TO_PHY_RESULTS_CODE::FAIL_REASONS::REASON_CODE_NOT_PRESENT_ENTRY;
     kurd=fail;
-    lock.read_unlock();
     return 0;
     pdpte_end:
-    lock.read_unlock();
     return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pdpte_idx)<<30)+(vaddr&(_1GB_SIZE-1));
     pde_end:
-    lock.read_unlock();
     return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pde_idx)<<21)+(vaddr&(_2MB_SIZE-1));
     pte_end:
-    lock.read_unlock();
     return (uint64_t(pml5_idx)<<48)+(uint64_t(pml4_idx)<<39)+(uint64_t(pde_idx)<<21)+(uint64_t(pte_idx)<<12)+(vaddr&(_4KB_SIZE-1));
 }
 /**
@@ -1043,9 +1033,9 @@ phyaddr_t AddressSpace::vaddr_to_paddr(vaddr_t vaddr,KURD_t& kurd)
  */
 int VM_desc_cmp(const VM_DESC &a, const VM_DESC &b)
 {
-    if((a.start==b.start)&&(a.end==b.end))return 0;
     if(a.start>=b.end)return 1;
     if(a.end<=b.start)return -1;
+    return 0;
 }
 void AddressSpace::unsafe_load_pml4_to_cr3(uint16_t pcid)
 {

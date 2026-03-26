@@ -20,7 +20,7 @@ int ktime::hardware_time::try_tsc()
         eax=0x15;
         cpuid(&eax, &ebx, &ecx, &edx);
         uint64_t tsc_freq_hz=(uint64_t)ecx*ebx/eax;
-        bsp_tsc_fs_per_cycle=1000000000000000ULL/tsc_freq_hz;
+        bsp_tsc_fs_per_cycle=FS_per_mius/tsc_freq_hz;
     }else{
         is_tsc_reliable = false;
     }
@@ -57,7 +57,7 @@ void ktime::hardware_time::processor_regist()
             eax=0x15;
             cpuid(&eax, &ebx, &ecx, &edx);
             uint64_t tsc_freq_hz=(uint64_t)ecx*ebx/eax;
-            complex->private_token.tsc_fs_per_cycle=1000000000000000ULL/tsc_freq_hz;
+            complex->private_token.tsc_fs_per_cycle=FS_per_mius/tsc_freq_hz;
         }
         is_bsp_registed=true;
         gs_u64_write(TIME_COMPLEX_GS_INDEX,(uint64_t)complex);
@@ -67,17 +67,7 @@ void ktime::hardware_time::processor_regist()
 miusecond_time_stamp_t ktime::hardware_time::get_stamp( )
 {
     if(is_hpet_initialized){
-        if(is_tsc_reliable){
-            //同时可靠，使用TSC进行换算
-            time_complex*complex=(time_complex*)read_gs_u64(TIME_COMPLEX_GS_INDEX);
-            uint64_t current_tsc=rdtsc();
-            uint64_t delta_cycles=current_tsc-complex->private_token.tsc_base;
-            uint64_t tsc_fs_per_cycle=(is_bsp_registed?complex->private_token.tsc_fs_per_cycle:bsp_tsc_fs_per_cycle);
-            uint64_t delta_mius=((__uint128_t)delta_cycles*tsc_fs_per_cycle)/1000000000;
-            return complex->private_token.hpet_base+delta_mius;
-        }else{
-            return readonly_timer->get_time_stamp_in_mius();
-        }
+        return readonly_timer->get_time_stamp_in_mius();
     }else{
         return rdtsc();
     }

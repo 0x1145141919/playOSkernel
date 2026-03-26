@@ -107,7 +107,7 @@ void x2apic::lapic_timer_one_shot::processor_regist()
     ktime::hardware_time::timer_polling_spin_delay(10000);//这里是刻意假设不会把~0跑光
     uint64_t current=x2apic_driver::get_timer_current_count();
     time_complex*complex=(time_complex*)read_gs_u64(TIME_COMPLEX_GS_INDEX);
-    complex->private_token.lapic_fs_per_cycle=(__uint128_t)(10000*(__uint128_t)1000000000)/(0xFFFFFFFF-current);
+    complex->private_token.lapic_fs_per_cycle=(__uint128_t)(10000*(__uint128_t)FS_per_mius)/(0xFFFFFFFF-current);
     x2apic_driver::raw_config_timer_init_count(0);
     gs_u64_write(TIME_COMPLEX_GS_INDEX,(uint64_t)complex);
 }
@@ -125,7 +125,7 @@ void x2apic::lapic_timer_one_shot::set_clock_by_offset(uint64_t offset_mius)
 {
     time_complex*complex=(time_complex*)read_gs_u64(TIME_COMPLEX_GS_INDEX);
     uint32_t lapic_fs_per_cycle=complex->private_token.lapic_fs_per_cycle;
-    uint64_t init_count=(__uint128_t)offset_mius*1000000000/lapic_fs_per_cycle;
+    uint64_t init_count=(__uint128_t)offset_mius*FS_per_mius/lapic_fs_per_cycle;
     x2apic_driver::raw_config_timer_init_count(init_count);
 }
 uint32_t x2apic::lapic_timer_one_shot::get_current_clock()
@@ -144,7 +144,7 @@ void x2apic::lapic_timer_tsc_ddline::set_clock_by_offset(uint64_t offset_mius)
 {
     time_complex*complex=(time_complex*)read_gs_u64(TIME_COMPLEX_GS_INDEX);
     uint32_t tsc_fs_per_cycle=complex->private_token.tsc_fs_per_cycle;
-    uint64_t target_tsc=rdtsc()+(__uint128_t)offset_mius*1000000000/tsc_fs_per_cycle;
+    uint64_t target_tsc=rdtsc()+(__uint128_t)offset_mius*FS_per_mius/tsc_fs_per_cycle;
     wrmsr(msr::timer::IA32_TSC_DEADLINE,target_tsc);
 }
 void x2apic::lapic_timer_tsc_ddline::set_clock_by_stamp(uint64_t stamp_mius)

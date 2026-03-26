@@ -12,7 +12,7 @@
 constexpr uint32_t arr_count = 0x1000;
 uint64_t shuffled_arr[arr_count];
 uint32_t index=0;
-spinlock_cpp_t shuffled_lock;
+spinlock_interrupt_about_cpp_t shuffled_lock;
 constexpr uint32_t ring_max_len = 0x400;
 class ring{
     private:
@@ -20,7 +20,7 @@ class ring{
     uint64_t head;
     uint64_t tail;
     uint64_t lose_package_count;
-    spinlock_cpp_t lock;
+    spinlock_interrupt_about_cpp_t lock;
     public:
     void print_lose_package_count(){
         lock.lock();
@@ -33,7 +33,7 @@ class ring{
 }ring_buffer;
 constexpr uint32_t Coefficient = 0x10;
 Ktemplats::kernel_bitmap results_bitmap(Coefficient*arr_count);//引索代表值
-spinlock_cpp_t bitmap_lock;
+spinlock_interrupt_about_cpp_t bitmap_lock;
 uint8_t start_line=0;
 constexpr uint8_t producer_thread_count=8;
 u8ka finished_producer_thread_count(0);

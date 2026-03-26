@@ -21,9 +21,9 @@ namespace MEMMODULE_LOCAIONS{
         uint8_t EVENT_CODE_KEYWORD_DELETE=5;
     }
 }
-#ifdef KERNEL_MODE
+
 void* __wrapped_pgs_valloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t TYPE, uint8_t alignment_log2) {
-    spinlock_guard guard(kspace_pagetable_modify_lock);
+    interrupt_guard g;
     Alloc_result result=FreePagesAllocator::alloc(
         _4kbpgscount*0x1000,
         buddy_alloc_params{
@@ -39,11 +39,25 @@ void* __wrapped_pgs_valloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t T
 
             return nullptr;
     }
+    spinlock_interrupt_about_guard guard(kspace_pagetable_modify_lock);
     vaddr_t vbase=kspace_vm_table->alloc_available_space(_4kbpgscount*0x1000,result.base%0x400000000);
     if(vbase==0){
         //回滚FreePagesAllocator::alloc
 
         *kurd_out=result.result;
+        return nullptr;
+    }
+    VM_DESC new_desc={
+        .start=vbase,
+        .end=vbase+_4kbpgscount*0x1000,
+        .map_type=VM_DESC::map_type_t::MAP_PHYSICAL,
+        .phys_start=result.base,
+        .access=KspacePageTable::PG_RW,
+        .committed_full=true,
+        .is_vaddr_alloced=true,
+    };
+    int res=kspace_vm_table->insert(new_desc);
+    if(res!=OS_SUCCESS){
         return nullptr;
     }
     vm_interval interval={
@@ -58,11 +72,54 @@ void* __wrapped_pgs_valloc(KURD_t*kurd_out,uint64_t _4kbpgscount, page_state_t T
 }
 vaddr_t stack_alloc(KURD_t *kurd_out, uint64_t _4kbpgscount)
 {
+    interrupt_guard g;
     if(_4kbpgscount==0)return 0;
-    vaddr_t stack_top=(vaddr_t)__wrapped_pgs_valloc(kurd_out,_4kbpgscount,page_state_t::kernel_pinned,12);
-    return stack_top+(_4kbpgscount-1)*0x1000;
+    uint64_t real_alloc_phypages=_4kbpgscount+1;
+    Alloc_result result=FreePagesAllocator::alloc(
+        real_alloc_phypages*0x1000,
+        buddy_alloc_params{
+            .numa=0,
+            .try_lock_always_try=0,
+            .align_log2=12
+        },
+        page_state_t::kernel_pinned
+    );
+    if(result.base==0||result.result.result!=result_code::SUCCESS){
+        //尝试用phymemspace_mgr::pages_linear_scan_and_alloc
+            *kurd_out=result.result;
+            return 0;
+    }
+    spinlock_interrupt_about_guard guard(kspace_pagetable_modify_lock);
+    vaddr_t vbase=kspace_vm_table->alloc_available_space((real_alloc_phypages+1)*0x1000,result.base%0x400000000);
+    if(vbase==0){
+        return 0;
+    }
+    vbase+=0x1000;
+    VM_DESC new_desc={
+        .start=vbase,
+        .end=vbase+real_alloc_phypages*0x1000,
+        .map_type=VM_DESC::map_type_t::MAP_PHYSICAL,
+        .phys_start=result.base,
+        .access=KspacePageTable::PG_RW,
+        .committed_full=true,
+        .is_vaddr_alloced=true,
+    };
+    int res=kspace_vm_table->insert(new_desc);
+    if(res!=OS_SUCCESS){
+        return 0;
+    }
+    vm_interval interval={
+        .vbase=vbase,
+        .pbase=result.base,
+        .size=real_alloc_phypages*0x1000,
+        .access=KspacePageTable::PG_RW
+    };
+    *kurd_out=KspacePageTable::enable_VMentry(interval);
+    return vbase+_4kbpgscount*0x1000;
 }
+#ifdef KERNEL_MODE
 KURD_t __wrapped_pgs_vfree(void*vbase,uint64_t _4kbpgscount){
+    interrupt_guard g;
     phyaddr_t pbase=0;
     KURD_t status=KspacePageTable::v_to_phyaddrtraslation((vaddr_t)vbase,pbase);
     if(status.result!=result_code::SUCCESS){
@@ -75,7 +132,7 @@ KURD_t __wrapped_pgs_vfree(void*vbase,uint64_t _4kbpgscount){
         .size=_4kbpgscount*0x1000,
         .access=KspacePageTable::PG_RW
     };
-    spinlock_guard guard(kspace_pagetable_modify_lock);
+    spinlock_interrupt_about_guard guard(kspace_pagetable_modify_lock);
     int result= kspace_vm_table->remove((vaddr_t)vbase);
     if(result!=0){
         return KURD_t(result_code::FAIL,
@@ -93,12 +150,15 @@ KURD_t __wrapped_pgs_vfree(void*vbase,uint64_t _4kbpgscount){
 }
 
 void* __wrapped_heap_alloc(uint64_t size,KURD_t*kurd,alloc_flags_t flags) {
+    interrupt_guard g;
     return kpoolmemmgr_t::kalloc(size,*kurd,flags);
 }
 void __wrapped_heap_free(void*addr){
+    interrupt_guard g;
     kpoolmemmgr_t::kfree(addr);
 }
 void* __wrapped_heap_realloc(void*addr,uint64_t size,KURD_t*kurd,alloc_flags_t flags) {
+    interrupt_guard g;
     return kpoolmemmgr_t::realloc(addr,*kurd, size, flags);
 }
 void* operator new(size_t size) {

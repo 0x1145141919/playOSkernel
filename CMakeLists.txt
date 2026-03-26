@@ -58,6 +58,7 @@ set(SRC_COMMON
     src/utils/intel_cpuid.cpp
     src/panic.cpp
     src/utils/kptrace.cpp
+    src/utils/tmp_buff.cpp
 )
 
 # 添加gnu-efi作为外部项目

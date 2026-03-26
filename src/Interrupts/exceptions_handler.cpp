@@ -139,8 +139,9 @@ void general_protection_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_mem_corruption=0,
             .is_escalated=0
         };
+        GlobalKernelStatus=PANIC;
         symbol_entry*lastest_rip =ksymmanager::get_entry_near_addr(frame->rip);
-        //bsp_kout<<"lastest_rip:"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kendl;
+        bsp_kout<<"lastest_rip:"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kendl;
         else_trace((void*)frame->rbp);
         panic_context::x64_context panic_context = Panic::convert_to_panic_context(frame, 0xD);
         Panic::panic(default_panic_behaviors_flags,"kernel_context cause #GP(General Protection)", &panic_context,&inshort,KURD_t());
@@ -163,6 +164,7 @@ void page_fault_cpp_enter(x64_Interrupt_saved_context *frame)
             .is_mem_corruption=1,
             .is_escalated=0
         };
+        GlobalKernelStatus=PANIC;
         symbol_entry*lastest_rip =ksymmanager::get_entry_near_addr(frame->rip);
         bsp_kout<<"kernel oops in page_fault_cpp_enter"<<kendl;
         bsp_kout<<"lastest_rip:"<<(void*)lastest_rip->address<<" at "<<lastest_rip->name <<kendl;

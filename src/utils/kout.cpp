@@ -24,7 +24,7 @@ void kio::defalut_KURD_module_interpator(KURD_t kurd)
     result_t result={
         .kernel_result=kurd
     };
-    bsp_kout<<"default_KURD_module_interpator the raw:"<<result.raw<<kendl;
+    bsp_kout<<"default_KURD_module_interpator the raw:"<<HEX<<result.raw<<DEC<<kendl;
 }
 
 
@@ -554,7 +554,7 @@ void kio::kout::raw_puts_and_count(const char *str, uint64_t len)
 
 kio::kout &kio::kout::operator<<(tmp_buff& tmp_buff)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_tmp_buff++;
 
     uint16_t limit = tmp_buff.entry_top;
@@ -673,7 +673,7 @@ kio::kout &kio::kout::operator<<(tmp_buff& tmp_buff)
 
 kio::kout &kio::kout::operator<<(KURD_t info)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_KURD++;
     __print_level_code(info);
     __print_result_code(info);
@@ -686,7 +686,7 @@ kio::kout &kio::kout::operator<<(const char *str)
     
 {
     if(GlobalKernelStatus!=PANIC)
-    spinlock_guard guard(lock);
+    spinlock_interrupt_about_guard guard(lock);
     int strlength = strlen_in_kernel(str);
     #ifdef KERNEL_MODE
     
@@ -703,7 +703,7 @@ kio::kout &kio::kout::operator<<(const char *str)
 
 kio::kout &kio::kout::operator<<(char c)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     #ifdef KERNEL_MODE
     uniform_puts(&c, 1);
     #endif
@@ -742,7 +742,7 @@ void kio::kout::Init()
 }
 kio::kout &kio::kout::operator<<(const void *ptr)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     #ifdef KERNEL_MODE
     uniform_puts("0x", 2);
     #endif
@@ -757,7 +757,7 @@ kio::kout &kio::kout::operator<<(const void *ptr)
 }
 kio::kout &kio::kout::operator<<(uint64_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_u64++;
     print_numer(&num, curr_numer_system, 8, false);
     return *this;
@@ -765,7 +765,7 @@ kio::kout &kio::kout::operator<<(uint64_t num)
 
 kio::kout &kio::kout::operator<<(int64_t num)
 {
-    spinlock_guard guard(lock);
+    spinlock_interrupt_about_guard guard(lock);
     statistics.calls_s64++;
     print_numer((uint64_t*)&num, curr_numer_system, 8, true);
     return *this;
@@ -773,7 +773,7 @@ kio::kout &kio::kout::operator<<(int64_t num)
 
 kio::kout &kio::kout::operator<<(uint32_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_u32++;
     print_numer((uint64_t*)&num, curr_numer_system, 4, false);
     return *this;
@@ -781,7 +781,7 @@ kio::kout &kio::kout::operator<<(uint32_t num)
 
 kio::kout &kio::kout::operator<<(int32_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_s32++;
     print_numer((uint64_t*)&num, curr_numer_system, 4, true);
     return *this;
@@ -789,7 +789,7 @@ kio::kout &kio::kout::operator<<(int32_t num)
 
 kio::kout &kio::kout::operator<<(uint16_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_u16++;
     print_numer((uint64_t*)&num, curr_numer_system, 2, false);
     return *this;
@@ -797,7 +797,7 @@ kio::kout &kio::kout::operator<<(uint16_t num)
 
 kio::kout &kio::kout::operator<<(int16_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_s16++;
     print_numer((uint64_t*)&num, curr_numer_system, 2, true);
     return *this;
@@ -805,7 +805,7 @@ kio::kout &kio::kout::operator<<(int16_t num)
 
 kio::kout &kio::kout::operator<<(uint8_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_u8++;
     print_numer((uint64_t*)&num, curr_numer_system, 1, false);
     return *this;
@@ -813,7 +813,7 @@ kio::kout &kio::kout::operator<<(uint8_t num)
 
 kio::kout &kio::kout::operator<<(int8_t num)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.calls_s8++;
     print_numer((uint64_t*)&num, curr_numer_system, 1, true);
     return *this;
@@ -836,13 +836,13 @@ void kio::kout::shift_hex()
 
 kio::kout::kout_statistics_t kio::kout::get_statistics()
 {
-    spinlock_guard guard(lock);
+    spinlock_interrupt_about_guard guard(lock);
     return statistics;
 }
 
 kio::kout &kio::kout::operator<<(now_time time)
 {
-    spinlock_guard guard(lock);
+    spinlock_interrupt_about_guard guard(lock);
     statistics.calls_now_time++;
     #ifdef KERNEL_MODE 
     
@@ -869,7 +869,7 @@ kio::kout &kio::kout::operator<<(now_time time)
 
 kio::kout &kio::kout::operator<<(endl end)
 {
-    if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+    if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
     statistics.explicit_endl++;
     raw_puts_and_count("\n", 1);
     return *this;
@@ -908,7 +908,7 @@ bool kio::kout::mask_backend(uint64_t index)
 
 kio::kout &kio::kout::operator<<(numer_system_select radix)
 {   
-     if(GlobalKernelStatus!=PANIC)spinlock_guard guard(lock);
+     if(GlobalKernelStatus!=PANIC)spinlock_interrupt_about_guard guard(lock);
      switch (radix) {
         case BIN: shift_bin(); statistics.calls_shift_bin++; break;
         case DEC: shift_dec(); statistics.calls_shift_dec++; break;

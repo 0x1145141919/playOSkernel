@@ -118,9 +118,9 @@ kspace_vm_table_t::Node* kspace_vm_table_t::search(vaddr_t vaddr) {
 
 int kspace_vm_table_t::insert(VM_DESC data) {
     lock.lock();
-    int ret = Ktemplats::RBTree<VM_DESC,VM_desc_cmp>::insert(data) ? 0 : -1;
+    bool ret = Ktemplats::RBTree<VM_DESC,VM_desc_cmp>::insert(data);
     lock.unlock();
-    return ret;
+    return ret?OS_SUCCESS:OS_MEMRY_ALLOCATE_FALT;
 }
 
 int kspace_vm_table_t::remove(vaddr_t vaddr) {

@@ -20,6 +20,7 @@ void DmesgRingBuffer::Init(loaded_VM_interval*logbuffer)
 
 // 在文档2中更新putsk函数实现
 void DmesgRingBuffer::putsk(char *str, uint64_t len_in_bytes) {
+    interrupt_guard j;
     if (str == nullptr || len_in_bytes == 0) return;
     rwlock.write_lock();
     if (buffSize == 0) {

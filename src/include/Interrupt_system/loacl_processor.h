@@ -183,7 +183,7 @@ class x64_local_processor {//承担部分当前核心状态机切换维护的语
         bool is_avx_supported;
         bool is_x2apic_supported;
     }processor_features;
-    spinlock_cpp_t  lock;
+    spinlock_interrupt_about_cpp_t  lock;
     KURD_t default_kurd();
     KURD_t default_success();
     KURD_t default_fail();
@@ -225,7 +225,7 @@ class  x86_smp_processors_container {
     static uint32_t total_processor_count;
     static uint32_t bsp_apic_id;
     static x64_local_processor *local_processor_interrupt_mgr_array[max_processor_count];
-    static spinlock_cpp_t lock;
+    static spinlock_interrupt_about_cpp_t lock;
     static KURD_t default_kurd();
     static KURD_t default_success();
     static KURD_t default_fail();

@@ -12,8 +12,9 @@ struct hardware_time_base_token{
 struct time_complex{
     hardware_time_base_token private_token;
     class time_interrupt_generator*private_clock;
-
 };
+constexpr uint64_t fs_per_ns=1000000ull;
+constexpr uint64_t FS_per_mius=1000000000ull;
 namespace ktime
 {
     

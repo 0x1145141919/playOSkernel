@@ -19,21 +19,12 @@ static void textconsole_backend_write(const char* buf, uint64_t len)
 static void textconsole_backend_running_write(const char* buf, uint64_t len)
 {
     if (!buf || len == 0) return;
-    if (!textconsole_GoP::RuntimeSubmitString(buf, len, false)) {
-        textconsole_backend_write(buf, len);
-    }
+    textconsole_GoP::RuntimeSubmitString(buf, len, false);
 }
 
 static void textconsole_backend_running_num(uint64_t raw, num_format_t format, numer_system_select radix)
 {
-    if (textconsole_GoP::RuntimeSubmitNum(raw, format, radix, false)) {
-        return;
-    }
-    char out[70];
-    uint64_t n = format_num_to_buffer(out, raw, format, radix);
-    if (n > 0) {
-        textconsole_backend_write(out, n);
-    }
+    textconsole_GoP::RuntimeSubmitNum(raw, format, radix, false);
 }
     
 } // namespace
@@ -179,7 +170,6 @@ KURD_t textconsole_GoP::Init(
     runtime_ring.drop_count = 0;
     runtime_ring.push_count = 0;
     runtime_ring.pop_count = 0;
-    runtime_ring.service_thread_sleeping = false;
     ready = true;
     return success;
 }
@@ -430,11 +420,9 @@ bool textconsole_GoP::RuntimeSubmitString(const char* s, uint64_t len, bool urge
     slot.payload.s.len = len;
     runtime_ring.tail = next_tail;
     runtime_ring.push_count++;
-    const bool should_wake = runtime_ring.service_thread_sleeping;
-    runtime_ring.service_thread_sleeping = false;
     runtime_ring.lock.unlock();
 
-    if (should_wake) RuntimeWakeServiceThread();
+    RuntimeWakeServiceThread();
     return true;
 }
 
@@ -458,11 +446,9 @@ bool textconsole_GoP::RuntimeSubmitChar(char ch, bool urgent)
     slot.payload.c.ch = ch;
     runtime_ring.tail = next_tail;
     runtime_ring.push_count++;
-    const bool should_wake = runtime_ring.service_thread_sleeping;
-    runtime_ring.service_thread_sleeping = false;
     runtime_ring.lock.unlock();
 
-    if (should_wake) RuntimeWakeServiceThread();
+    RuntimeWakeServiceThread();
     return true;
 }
 
@@ -488,11 +474,9 @@ bool textconsole_GoP::RuntimeSubmitNum(uint64_t raw, num_format_t format, numer_
     slot.payload.n.radix = radix;
     runtime_ring.tail = next_tail;
     runtime_ring.push_count++;
-    const bool should_wake = runtime_ring.service_thread_sleeping;
-    runtime_ring.service_thread_sleeping = false;
     runtime_ring.lock.unlock();
 
-    if (should_wake) RuntimeWakeServiceThread();
+    RuntimeWakeServiceThread();
     return true;
 }
 
@@ -515,11 +499,9 @@ bool textconsole_GoP::RuntimeSubmitFlush(bool urgent)
     slot.head.seq = runtime_ring.seq_gen++;
     runtime_ring.tail = next_tail;
     runtime_ring.push_count++;
-    const bool should_wake = runtime_ring.service_thread_sleeping;
-    runtime_ring.service_thread_sleeping = false;
     runtime_ring.lock.unlock();
 
-    if (should_wake) RuntimeWakeServiceThread();
+    RuntimeWakeServiceThread();
     return true;
 }
 
@@ -542,9 +524,6 @@ void* textconsole_GoP::RuntimeServiceThreadMain(void* data)
             runtime_ring.pop_count++;
             local_batch.count++;
         }
-        if (local_batch.count == 0) {
-            runtime_ring.service_thread_sleeping = true;
-        }
         runtime_ring.lock.unlock();
 
         if (local_batch.count == 0) {
@@ -565,7 +544,7 @@ void* textconsole_GoP::RuntimeServiceThreadMain(void* data)
                     PutChar(slot.payload.c.ch);
                     break;
                 case tc_msg_type::num: {
-                    const uint64_t n = format_num_to_buffer(
+                    uint64_t n = format_num_to_buffer(
                         num_buf,
                         slot.payload.n.num_raw,
                         slot.payload.n.format,

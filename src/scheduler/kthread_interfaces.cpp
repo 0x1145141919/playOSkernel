@@ -9,7 +9,7 @@
 alignas(64) per_processor_scheduler global_schedulers[MAX_PROCESSORS_COUNT];
 namespace {
 constexpr uint64_t kthread_yield_saved_stack_delta = 16 * sizeof(uint64_t);
-spinlock_cpp_t global_tid_lock;
+spinlock_interrupt_about_cpp_t global_tid_lock;
 uint64_t global_tid_counter = 0;
 
 
@@ -79,7 +79,7 @@ static inline void convert_interrupt_no_err_to_basic(const x64_Interrupt_saved_c
     out->rsi = frame->rsi;
     out->rdi = frame->rdi;
     out->rbp = frame->rbp;
-    out->rsp = frame->rsp;
+    out->iret_context.rsp = frame->rsp;
     out->r8 = frame->r8;
     out->r9 = frame->r9;
     out->r10 = frame->r10;
@@ -88,55 +88,30 @@ static inline void convert_interrupt_no_err_to_basic(const x64_Interrupt_saved_c
     out->r13 = frame->r13;
     out->r14 = frame->r14;
     out->r15 = frame->r15;
-    out->rip = frame->rip;
-    out->rflags = frame->rflags;
-}
-
-static inline void convert_kthread_yield_raw_to_basic(const kthread_yield_raw_context *context,
-                                                      x64_basic_context *out)
-{
-    if (!context || !out) {
-        return;
-    }
-    out->rax = context->rax;
-    out->rbx = context->rbx;
-    out->rcx = context->rcx;
-    out->rdx = context->rdx;
-    out->rsi = context->rsi;
-    out->rdi = context->rdi;
-    out->rbp = context->rbp;
-    out->r8 = context->r8;
-    out->r9 = context->r9;
-    out->r10 = context->r10;
-    out->r11 = context->r11;
-    out->r12 = context->r12;
-    out->r13 = context->r13;
-    out->r14 = context->r14;
-    out->r15 = context->r15;
-    out->rflags = context->rflags;
-
-    const uint64_t real_rsp = context->rsp + kthread_yield_saved_stack_delta;
-    const auto *ret_slot = reinterpret_cast<const uint64_t *>(real_rsp);
-    out->rsp = real_rsp;
-    out->rip = *ret_slot;
-    out->rsp+= sizeof(uint64_t);
+    out->iret_context.rip = frame->rip;
+    out->iret_context.rflags = frame->rflags;
+    out->iret_context.cs = frame->cs;
+    out->iret_context.ss = frame->ss;
 }
 } // namespace
 
 void allthread_true_enter(void *(*entry)(void *), void *arg){
     uint64_t return_value=(uint64_t)entry(arg);
-    kthread_true_exit(return_value);
+    kthread_exit(return_value);
 };
 uint64_t create_kthread(void *(*entry)(void *), void *arg, KURD_t *out_kurd)
 {
+    interrupt_guard g;
     kthread_context* context = new kthread_context();
-    context->regs.rip = (uint64_t)allthread_true_enter;
+    context->regs.iret_context.rip = (uint64_t)allthread_true_enter;
     context->regs.rsi = (uint64_t)arg;
     context->regs.rdi = (uint64_t)entry;
+    context->regs.iret_context.cs = x64_local_processor::K_cs_idx<<3;
+    context->regs.iret_context.ss = x64_local_processor::K_ds_ss_idx<<3;
     context->stacksize = DEFAULT_STACK_SIZE;
-    context->stack_top = (uint64_t)__wrapped_pgs_valloc(out_kurd, DEFAULT_STACK_PG_COUNT, page_state_t::kernel_pinned, 12);
-    context->regs.rsp = context->stack_top + context->stacksize;
-    context->regs.rflags = INIT_DEFAULT_RFLAGS;
+    context->stack_bottom = (uint64_t)stack_alloc(out_kurd,DEFAULT_STACK_PG_COUNT);
+    context->regs.iret_context.rsp = context->stack_bottom;
+    context->regs.iret_context.rflags = INIT_DEFAULT_RFLAGS;
     task* new_task = new task(task_type_t::kthreadm, context);
     new_task->task_lock.lock();
     uint64_t assigned_tid = task_pool::alloc(new_task, *out_kurd);
@@ -160,10 +135,10 @@ uint64_t create_kthread(void *(*entry)(void *), void *arg, KURD_t *out_kurd)
     self_scheduler.sched_lock.unlock();
     return assigned_tid;
 }
-void kthread_yield_true_enter(kthread_yield_raw_context *context)
+void kthread_yield_true_enter(x64_basic_context*context)
 {
-    x64_basic_context basic_ctx{};
-    convert_kthread_yield_raw_to_basic(context, &basic_ctx);
+
+    x64_basic_context basic_ctx=*context;
     per_processor_scheduler&scheduler=global_schedulers[fast_get_processor_id()];
     KURD_t running_task_kurd=KURD_t();
     task* interrupted_task=task_pool::get_by_tid(read_gs_u64(PROCESSOR_NOW_RUNNING_TID_GS_INDEX),running_task_kurd);
@@ -197,9 +172,9 @@ void kthread_yield_true_enter(kthread_yield_raw_context *context)
         ));
     }
     {
-        vaddr_t stack_top = interrupted_task->context.kthread->stack_top;
-        vaddr_t stack_bottom = stack_top + interrupted_task->context.kthread->stacksize;
-        if(basic_ctx.rsp < stack_top || basic_ctx.rsp >= stack_bottom){
+        vaddr_t stack_top = interrupted_task->context.kthread->stack_bottom-interrupted_task->context.kthread->stacksize;
+        vaddr_t stack_bottom = interrupted_task->context.kthread->stack_bottom;
+        if(basic_ctx.iret_context.rsp < stack_top || basic_ctx.iret_context.rsp >= stack_bottom){
             interrupted_task->task_lock.unlock();
             panic_with_kurd(make_self_scheduler_fatal(
                 Scheduler::self_scheduler_events::kthread_yield_enter,
@@ -222,7 +197,6 @@ void kthread_yield_true_enter(kthread_yield_raw_context *context)
 }
 void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
 {
-    asm volatile("cli");
     x64_basic_context basic_ctx{};
     KURD_t kurd=KURD_t();
     convert_interrupt_no_err_to_basic(frame, &basic_ctx);
@@ -260,14 +234,17 @@ void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
             ));
         }
         {
-            vaddr_t stack_top = interrupted_task->context.kthread->stack_top;
-            vaddr_t stack_bottom = stack_top + interrupted_task->context.kthread->stacksize;
-            if(basic_ctx.rsp < stack_top || basic_ctx.rsp >= stack_bottom){
+            vaddr_t stack_top = interrupted_task->context.kthread->stack_bottom-interrupted_task->context.kthread->stacksize;
+        vaddr_t stack_bottom = interrupted_task->context.kthread->stack_bottom;
+            if(basic_ctx.iret_context.rsp < stack_top || basic_ctx.iret_context.rsp >= stack_bottom){
                 interrupted_task->task_lock.unlock();
+                x2apic::x2apic_driver::broadcast_exself_fixed_ipi(Panic::other_processors_froze_handler);
+                GlobalKernelStatus=PANIC;
+                bsp_kout<<"Panic: stackptr out of range that current stack ptr:0x"<<HEX<<basic_ctx.iret_context.rsp<<"\n stack top:0x"<<stack_top<<"\n stack bottom:0x"<<stack_bottom<<kendl;
                 panic_with_kurd(frame, make_self_scheduler_fatal(
                     Scheduler::self_scheduler_events::timer_cpp_enter,
                     Scheduler::self_scheduler_events::timer_cpp_enter_results::fatal_reasons::rsp_out_of_range
-                ),"stackptr out of range");
+                ));
             }
         }
             break;
@@ -305,13 +282,12 @@ void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
         panic_with_kurd(frame, kurd);
     }
     scheduler.sched_lock.unlock();
-    asm volatile("sti");
     x2apic::x2apic_driver::write_eoi();
     ktime::time_interrupt_generator::set_clock_by_offset(DEFALUT_TIMER_SPAN_MIUS);
     scheduler.sleep_tasks_wake();
     scheduler.sched();
 }
-void kthread_true_exit(uint64_t will) 
+void kthread_exit_cppenter(x64_basic_context*context) 
 {
     per_processor_scheduler&scheduler=global_schedulers[fast_get_processor_id()];
     KURD_t running_task_kurd=KURD_t();
@@ -322,7 +298,7 @@ void kthread_true_exit(uint64_t will)
     exit_task->task_lock.lock();
     exit_task->lastest_span_length=ktime::hardware_time::get_stamp()-exit_task->lastest_run_stamp;
     exit_task->accumulated_time+=exit_task->lastest_span_length;
-    exit_task->context.kthread->regs.rax=will;
+    exit_task->context.kthread->regs.rax=context->rdi;
     exit_task->task_lock.unlock();
     scheduler.sched_lock.lock();
     scheduler.sched_lock.unlock();
@@ -333,10 +309,9 @@ void kthread_true_exit(uint64_t will)
     scheduler.sched();
 }
 
-void kthread_self_blocked_cppenter(kthread_yield_raw_context* context)
+void kthread_self_blocked_cppenter(x64_basic_context* context)
 {
-    x64_basic_context basic_ctx{};
-    convert_kthread_yield_raw_to_basic(context, &basic_ctx);
+    x64_basic_context basic_ctx=*context;
     per_processor_scheduler&scheduler=global_schedulers[fast_get_processor_id()];
     KURD_t running_task_kurd=KURD_t();
     task* interrupted_task=task_pool::get_by_tid(read_gs_u64(PROCESSOR_NOW_RUNNING_TID_GS_INDEX),running_task_kurd);
@@ -370,9 +345,9 @@ void kthread_self_blocked_cppenter(kthread_yield_raw_context* context)
         ));
     }
     {
-        vaddr_t stack_top = interrupted_task->context.kthread->stack_top;
-        vaddr_t stack_bottom = stack_top + interrupted_task->context.kthread->stacksize;
-        if(basic_ctx.rsp < stack_top || basic_ctx.rsp >= stack_bottom){
+        vaddr_t stack_top = interrupted_task->context.kthread->stack_bottom-interrupted_task->context.kthread->stacksize;
+        vaddr_t stack_bottom = interrupted_task->context.kthread->stack_bottom;
+        if(basic_ctx.iret_context.rsp < stack_top || basic_ctx.iret_context.rsp >= stack_bottom){
             interrupted_task->task_lock.unlock();
             panic_with_kurd(make_self_scheduler_fatal(
                 Scheduler::self_scheduler_events::kthread_block,
@@ -394,6 +369,7 @@ void kthread_self_blocked_cppenter(kthread_yield_raw_context* context)
     scheduler.sched();
 }
 uint64_t wakeup_thread(uint64_t tid){
+    interrupt_guard g;
     KURD_t kurd=KURD_t();
     KURD_t success,fail,fatal;
     success=KURD_t(result_code::SUCCESS,0,module_code::SCHEDULER,Scheduler::scheduler_task_pool,Scheduler::self_scheduler_events::wake_up_kthread,level_code::INFO,err_domain::CORE_MODULE);
@@ -432,10 +408,9 @@ uint64_t wakeup_thread(uint64_t tid){
         return kurd_get_raw(success);
     }
 }
-void kthread_sleep_cppenter(kthread_yield_raw_context *context)
+void kthread_sleep_cppenter(x64_basic_context*context)
 {
-    x64_basic_context basic_ctx{};
-    convert_kthread_yield_raw_to_basic(context, &basic_ctx);
+    x64_basic_context basic_ctx=*context;
     per_processor_scheduler&scheduler=global_schedulers[fast_get_processor_id()];
     KURD_t running_task_kurd=KURD_t();
      task* sleeper_task=task_pool::get_by_tid(read_gs_u64(PROCESSOR_NOW_RUNNING_TID_GS_INDEX),running_task_kurd);
@@ -469,9 +444,9 @@ void kthread_sleep_cppenter(kthread_yield_raw_context *context)
         ));
     }
     {
-        vaddr_t stack_top = sleeper_task->context.kthread->stack_top;
-        vaddr_t stack_bottom = stack_top + sleeper_task->context.kthread->stacksize;
-        if(basic_ctx.rsp < stack_top || basic_ctx.rsp >= stack_bottom){
+        vaddr_t stack_top = sleeper_task->context.kthread->stack_bottom-sleeper_task->context.kthread->stacksize;
+        vaddr_t stack_bottom = sleeper_task->context.kthread->stack_bottom;
+        if(basic_ctx.iret_context.rsp < stack_top || basic_ctx.iret_context.rsp >= stack_bottom){
             sleeper_task->task_lock.unlock();
             panic_with_kurd(make_self_scheduler_fatal(
                 Scheduler::self_scheduler_events::kthread_block,
@@ -494,4 +469,35 @@ void kthread_sleep_cppenter(kthread_yield_raw_context *context)
     scheduler.sched_lock.unlock();
     scheduler.sleep_tasks_wake();
     scheduler.sched();
+}
+void kthread_call_cpp_enter(x64_Interrupt_saved_context_no_errcode *frame)
+{
+    x64_basic_context basic_ctx{};
+    convert_interrupt_no_err_to_basic(frame, &basic_ctx);
+    switch(frame->rax){
+        case kthread_call_num::exit:
+        {
+            kthread_exit_cppenter(&basic_ctx);
+        }
+        case kthread_call_num::sleep:
+        {
+            kthread_sleep_cppenter(&basic_ctx);
+        }
+        case kthread_call_num::yield:
+        {
+            kthread_yield_true_enter(&basic_ctx);
+        }
+        case kthread_call_num::join:
+        {
+            
+        }
+        case kthread_call_num::block:
+        {
+            kthread_self_blocked_cppenter(&basic_ctx);
+        }
+        default:
+        {
+            //panic
+        }
+    }
 }

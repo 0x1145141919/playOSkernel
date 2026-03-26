@@ -26,6 +26,7 @@ static constexpr uint8_t CONTROL_PROTECTION_EXCEPTION = 21;
 static constexpr uint8_t BOTTOM_FOR_SYSTEM_RESERVED_VECS = 224;
 static constexpr uint8_t LAPIC_TIMER = 224;
 static constexpr uint8_t ASM_PANIC = 225;//只推荐用int ASM_PANIC触发
+static constexpr uint8_t KTHREAD_CALL = 226;
 static constexpr uint8_t IPI = 240;
 static constexpr uint8_t LAPIC_ERR=241;
 };

@@ -1,4 +1,5 @@
 #include "Scheduler/per_processor_scheduler.h"
+#include "Interrupt_system/loacl_processor.h"
 #include "memory/kpoolmemmgr.h"
 #include "memory/all_pages_arr.h"
 #include "memory/FreePagesAllocator.h"
@@ -121,7 +122,7 @@ uint64_t task_pool::alloc_tid(KURD_t& kurd)
 
 task* task_pool::get_by_tid(uint64_t tid, KURD_t &kurd)
 {
-    spinrwlock_read_guard guard(lock);
+    spinrwlock_interrupt_about_read_guard guard(lock);
     KURD_t success = default_success();
     KURD_t fail = default_fail();
 
@@ -210,7 +211,7 @@ KURD_t per_processor_scheduler::sleep_queue_t::insert(task* task_ptr)
 }
 uint64_t task_pool::alloc(task* task_ptr, KURD_t& kurd)
 {
-    spinrwlock_write_guard guard(lock);
+    spinrwlock_interrupt_about_write_guard guard(lock);
     if (!task_ptr) {
         kurd = default_fail();
         return ~0ull;
@@ -229,7 +230,7 @@ uint64_t task_pool::alloc(task* task_ptr, KURD_t& kurd)
 
 KURD_t task_pool::release_tid(uint64_t tid)
 {
-    spinrwlock_write_guard guard(lock);
+    spinrwlock_interrupt_about_write_guard guard(lock);
     KURD_t success = default_success();
     KURD_t fail = default_fail();
     success.event_code = Scheduler::task_pool_events::slot_free;
@@ -271,20 +272,21 @@ KURD_t task_pool::release_tid(uint64_t tid)
 per_processor_scheduler::per_processor_scheduler()
 {
     KURD_t kurd;
-    stack_bottom=(vaddr_t)stack_alloc(&kurd,PRIVATE_STACK_DEFAULT_PG_COUNT);
     if(error_kurd(kurd)){
         Panic::panic(default_panic_behaviors_flags,"stack alloc failed when alloc per_processor_scheduler private stack",nullptr,nullptr,kurd);
     }
     // Idle task must not be enqueued into ready_queue.
     kthread_context* idle_ctx = new kthread_context();
-    idle_ctx->regs.rip = (uint64_t)secure_hlt_wrapper;
+    idle_ctx->regs.iret_context.cs = x64_local_processor::K_cs_idx<<3;
+    idle_ctx->regs.iret_context.ss = x64_local_processor::K_ds_ss_idx<<3;
+    idle_ctx->regs.iret_context.rip = (uint64_t)secure_hlt_wrapper;
     idle_ctx->regs.rsi = 0;
     idle_ctx->regs.rdi = 0;
-    idle_ctx->stacksize = DEFAULT_STACK_SIZE;
-    idle_ctx->stack_top = (uint64_t)__wrapped_pgs_valloc(&kurd, DEFAULT_STACK_PG_COUNT, page_state_t::kernel_pinned, 12);
-    idle_ctx->regs.rsp = idle_ctx->stack_top + idle_ctx->stacksize;
-    idle_ctx->regs.rflags = INIT_DEFAULT_RFLAGS;
-    if(error_kurd(kurd) || idle_ctx->stack_top == 0){
+    idle_ctx->stacksize = 0x1000;
+    idle_ctx->stack_bottom = (uint64_t)stack_alloc(&kurd,1);
+    idle_ctx->regs.iret_context.rsp = idle_ctx->stack_bottom;
+    idle_ctx->regs.iret_context.rflags = INIT_DEFAULT_RFLAGS;
+    if(error_kurd(kurd) || idle_ctx->stack_bottom == 0){
         Panic::panic(default_panic_behaviors_flags,"idle task stack alloc failed",nullptr,nullptr,kurd);
     }
     task* idle_task = new task(task_type_t::kthreadm, idle_ctx);
@@ -367,7 +369,7 @@ static inline void convert_interrupt_no_err_to_basic(const x64_Interrupt_saved_c
     out->rsi = frame->rsi;
     out->rdi = frame->rdi;
     out->rbp = frame->rbp;
-    out->rsp = frame->rsp;
+    out->iret_context.rsp = frame->rsp;
     out->r8 = frame->r8;
     out->r9 = frame->r9;
     out->r10 = frame->r10;
@@ -376,38 +378,10 @@ static inline void convert_interrupt_no_err_to_basic(const x64_Interrupt_saved_c
     out->r13 = frame->r13;
     out->r14 = frame->r14;
     out->r15 = frame->r15;
-    out->rip = frame->rip;
-    out->rflags = frame->rflags;
-}
-
-static inline void convert_kthread_yield_raw_to_basic(const kthread_yield_raw_context *context,
-                                                      x64_basic_context *out)
-{
-    if (!context || !out) {
-        return;
-    }
-    out->rax = context->rax;
-    out->rbx = context->rbx;
-    out->rcx = context->rcx;
-    out->rdx = context->rdx;
-    out->rsi = context->rsi;
-    out->rdi = context->rdi;
-    out->rbp = context->rbp;
-    out->r8 = context->r8;
-    out->r9 = context->r9;
-    out->r10 = context->r10;
-    out->r11 = context->r11;
-    out->r12 = context->r12;
-    out->r13 = context->r13;
-    out->r14 = context->r14;
-    out->r15 = context->r15;
-    out->rflags = context->rflags;
-
-    const uint64_t real_rsp = context->rsp + kthread_yield_saved_stack_delta;
-    const auto *ret_slot = reinterpret_cast<const uint64_t *>(real_rsp);
-    out->rsp = real_rsp;
-    out->rip = *ret_slot;
-    out->rsp+= sizeof(uint64_t);
+    out->iret_context.rip = frame->rip;
+    out->iret_context.rflags = frame->rflags;
+    out->iret_context.cs = frame->cs;
+    out->iret_context.ss = frame->ss;
 }
 } // namespace
 
@@ -444,12 +418,9 @@ void per_processor_scheduler::sleep_tasks_wake()
     this->sched_lock.lock();
     
     for(;arr_len<arr_len_max;arr_len++){
-        if(sleep_queue.empty()){
-        this->sched_lock.unlock();
-        break;
-        }
-        task*task_ptr=*sleep_queue.front();
-        if(task_ptr->sleep_wakeup_stamp<stamp){
+        task**task_ptr_ptr=sleep_queue.front();
+        if(task_ptr_ptr==nullptr)break;
+        if((*task_ptr_ptr)->sleep_wakeup_stamp>stamp){
             break;
         }else{
             arr[arr_len]=sleep_queue.pop_front_value();
@@ -507,14 +478,6 @@ KURD_t per_processor_scheduler::insert_ready_task(task *task_ptr)
         return fail;
     }
     return success;
-}
-vaddr_t per_processor_scheduler::get_stack_top()
-{
-    return stack_bottom+((PRIVATE_STACK_DEFAULT_PG_COUNT-1)<<12);
-}
-extern "C" uint64_t* get_scheduler_private_stack_top()
-{
-    return (uint64_t*)global_schedulers[fast_get_processor_id()].get_stack_top();
 }
 
 task::task(task_type_t task_type, void *context)

@@ -1,3 +1,4 @@
+#pragma once
 #include <stdint.h>
 #include "fixed_interrupt_vectors.h"
 #include "abi/arch/x86-64/pt_regs.h"
@@ -32,6 +33,7 @@ extern "C" void Control_Protection_cpp_enter(x64_Interrupt_saved_context* frame)
 extern "C" void timer_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
 extern "C" void ipi_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
 extern "C" void asm_panic_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
+extern "C" void kthread_call_cpp_enter(x64_Interrupt_saved_context_no_errcode* frame);
 // 汇编定义的异常处理入口点
 extern "C" char div_by_zero_bare_enter;
 extern "C" char breakpoint_bare_enter;
@@ -48,3 +50,4 @@ extern "C" char virtualization_bare_enter;
 extern "C" char timer_bare_enter;
 extern "C" char ipi_bare_enter;
 extern "C" char asm_panic_bare_enter;
+extern "C" char kthread_call_bare_enter;

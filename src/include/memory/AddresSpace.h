@@ -217,7 +217,6 @@ class AddressSpace//到时候进程管理器可以用这个类创建，但是内
     KURD_t   default_success();
     KURD_t   default_fail();
     KURD_t   default_fatal();
-    int seg_to_pages_info_get(seg_to_pages_info_pakage_t& result,VM_DESC desc);
     public:
     AddressSpace();
     KURD_t enable_VM_desc(VM_DESC desc);

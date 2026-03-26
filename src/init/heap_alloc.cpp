@@ -363,9 +363,6 @@ INIT_HCB::HCB_bitmap_error_code_t&err)
     if(err!=SUCCESS){
         return false;
     }
-
-    bitmap_rwlock.read_lock();
-
     uint64_t start_bit = bit_idx;
     uint64_t end_bit = bit_idx + bit_count;
 
@@ -381,11 +378,9 @@ INIT_HCB::HCB_bitmap_error_code_t&err)
         {
             if (bit_get(bit_idx + i))
             {
-                bitmap_rwlock.read_unlock();
                 return false;
             }
         }
-        bitmap_rwlock.read_unlock();
         return true;
     }
 
@@ -396,7 +391,7 @@ INIT_HCB::HCB_bitmap_error_code_t&err)
         uint64_t mask = (~0ULL) << start_off;
         if (bitmap[start_u64] & mask)
         {
-            bitmap_rwlock.read_unlock();
+
             return false;
         }
         start_u64++;
@@ -407,7 +402,7 @@ INIT_HCB::HCB_bitmap_error_code_t&err)
     {
         if (bitmap[i] != 0ULL)
         {
-            bitmap_rwlock.read_unlock();
+
             return false;
         }
     }
@@ -418,12 +413,11 @@ INIT_HCB::HCB_bitmap_error_code_t&err)
         uint64_t mask = (1ULL << end_off) - 1ULL;
         if (bitmap[end_u64] & mask)
         {
-            bitmap_rwlock.read_unlock();
+
             return false;
         }
     }
 
-    bitmap_rwlock.read_unlock();
     return true;
 }
 
@@ -436,9 +430,6 @@ INIT_HCB::HCB_bitmap_error_code_t
     if(status!=SUCCESS){
         return status;
     }
-
-    bitmap_rwlock.write_lock();
-
     uint64_t end_bit = bit_idx + bit_count;
     uint64_t start_align64 = (bit_idx + 63) & ~63ULL;   // 下一个64位边界
     uint64_t end_align64 = end_bit & ~63ULL;            // 末尾对齐边界
@@ -465,8 +456,6 @@ INIT_HCB::HCB_bitmap_error_code_t
     {
         bits_set(bit_idx, end_bit - bit_idx, value);
     }
-
-    bitmap_rwlock.write_unlock();
     return SUCCESS;
 }
 
@@ -617,28 +606,22 @@ KURD_t INIT_HCB::in_heap_alloc(
     case 4: {  // 小块分配 (16字节对齐)
         uint32_t serial_bits_count = (size + SMALL_UNIT_BYTES - 1 + sizeof(data_meta)) >> 4;
         uint64_t base_bit_idx = 0;
-        bitmap_controller.bitmap_rwlock.read_lock();
         status = bitmap_controller.continual_avaliable_bits_search(serial_bits_count, base_bit_idx);
-        bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
             {
                 fail.reason=INIT_MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
                 return fail;
             }
         bitmap_controller.bit_seg_set(base_bit_idx, serial_bits_count,true);
-        bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit+=serial_bits_count;
         uintptr_t offset = bytes_per_bit * (base_bit_idx + 1);
-        bitmap_controller.used_bit_count_lock.unlock();
         addr = (void *)(base_addr + offset);
         break;
     }
     case 7: {  // 中块分配 (128字节对齐)
         uint32_t serial_bytes_count = ((size + MID_UNIT_BYTES - 1) >> 7) + 1;
         uint64_t base_byte_idx = 0;
-        bitmap_controller.bitmap_rwlock.read_lock();
         status = bitmap_controller.continual_avaliable_bytes_search(serial_bytes_count, base_byte_idx);
-        bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
             {
                 fail.reason=INIT_MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
@@ -646,12 +629,10 @@ KURD_t INIT_HCB::in_heap_alloc(
             }
 
         bitmap_controller.bit_set(7 + (base_byte_idx << 3) , true);
-        bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit++;
         uint32_t total_bitcount = (size + SMALL_UNIT_BYTES - 1) >> 4;
         bitmap_controller.bit_seg_set((base_byte_idx+1)*8, total_bitcount,true);
         bitmap_controller.bitmap_used_bit+=total_bitcount;
-        bitmap_controller.used_bit_count_lock.unlock();
         uintptr_t offset = bytes_per_bit * ((base_byte_idx + 1) << 3);
         addr = (void *)(base_addr + offset);
         break;
@@ -659,9 +640,7 @@ KURD_t INIT_HCB::in_heap_alloc(
     case 10: {  // 大块分配 (1024字节对齐)
         uint32_t serial_u64_count = ((size + LARGE_UNIT_BYTES - 1) >> 10) + 1;
         uint64_t base_u64_idx = 0;
-        bitmap_controller.bitmap_rwlock.read_lock();
         status = bitmap_controller.continual_avaliable_u64s_search(serial_u64_count, base_u64_idx);
-        bitmap_controller.bitmap_rwlock.read_unlock();
         if (status != OS_SUCCESS)
             {
                 fail.reason=INIT_MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
@@ -669,12 +648,10 @@ KURD_t INIT_HCB::in_heap_alloc(
             }
 
         bitmap_controller.bit_set( 63 + (base_u64_idx << 6), true);
-        bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit++;
         uint32_t total_bitcount = (size + SMALL_UNIT_BYTES - 1) >> 4;
         bitmap_controller.bit_seg_set((base_u64_idx+1)*64, total_bitcount,true);
         bitmap_controller.bitmap_used_bit += total_bitcount;
-        bitmap_controller.used_bit_count_lock.unlock();
         uintptr_t offset = bytes_per_bit * ((base_u64_idx + 1) << 6);
         addr = (void *)(base_addr + offset);
         break;
@@ -708,14 +685,11 @@ KURD_t INIT_HCB::in_heap_alloc(
     // ------------------------------------
     // 搜索（只保证：有一个对齐起点能放下 payload）
     // ------------------------------------
-    bitmap_controller.bitmap_rwlock.read_lock();
     status = bitmap_controller.continual_avaliable_u64s_search_higher_alignment(
         u64_align_log2,
         search_u64_count,
         base_u64_idx
     );
-    bitmap_controller.bitmap_rwlock.read_unlock();
-
     if (status != OS_SUCCESS)
         {
                 fail.reason=INIT_MEMMODULE_LOCAIONS::KPOOLMEMMGR_HCB_EVENTS::ALLOC_RESULTS::FAIL_RESONS::REASON_CODE_SEARCH_MEMSEG_FAIL;
@@ -735,8 +709,6 @@ KURD_t INIT_HCB::in_heap_alloc(
     // sentinel: real_base_bit - 1
     // ------------------------------------
     bitmap_controller.bit_set(real_base_bit - 1, true);
-
-    bitmap_controller.used_bit_count_lock.lock();
     bitmap_controller.bitmap_used_bit++;
 
     const uint32_t total_bitcount =
@@ -749,7 +721,6 @@ KURD_t INIT_HCB::in_heap_alloc(
     );
 
     bitmap_controller.bitmap_used_bit += total_bitcount;
-    bitmap_controller.used_bit_count_lock.unlock();
 
     // ------------------------------------
     // 返回地址（与 real_base_u64 严格一致）
@@ -820,13 +791,9 @@ KURD_t INIT_HCB::free(void *ptr)
     }
     uint32_t total_bits_count=(meta->data_size+15)/16;
     uint32_t base_bit_idx=in_heap_offset/16;
-    bitmap_controller.bitmap_rwlock.write_lock();
     bitmap_controller.bit_set(base_bit_idx-1,false);
-    bitmap_controller.bitmap_rwlock.write_unlock();
-    bitmap_controller.used_bit_count_lock.lock();
     bitmap_controller.bitmap_used_bit--;
     bitmap_controller.bitmap_used_bit-=total_bits_count;
-    bitmap_controller.used_bit_count_lock.unlock();
     bitmap_controller.bit_seg_set(
         base_bit_idx,
         total_bits_count,
@@ -897,10 +864,7 @@ KURD_t INIT_HCB::in_heap_realloc(
             old_bits_count-new_bits_count,
             false
         );
-        bitmap_controller.used_bit_count_lock.lock();
         bitmap_controller.bitmap_used_bit-=(old_bits_count-new_bits_count);
-        bitmap_controller.used_bit_count_lock.unlock();
-
         return success;
     }else{
         HCB_bitmap_error_code_t err;
@@ -917,9 +881,7 @@ KURD_t INIT_HCB::in_heap_realloc(
                 new_bits_count-old_bits_count,
                 true
             );
-            bitmap_controller.used_bit_count_lock.lock();
             bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
-            bitmap_controller.used_bit_count_lock.unlock();
             return success;
         }else{
             void*new_ptr;
@@ -930,9 +892,7 @@ KURD_t INIT_HCB::in_heap_realloc(
                 ksystemramcpy(ptr,new_ptr,old_size);
                 status=free(ptr);
                 ptr=new_ptr;
-                bitmap_controller.used_bit_count_lock.lock();
                 bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
-                bitmap_controller.used_bit_count_lock.unlock();
                 return success;
             }else{
                 return status;
@@ -948,9 +908,7 @@ KURD_t INIT_HCB::in_heap_realloc(
                 ksystemramcpy(ptr,new_ptr,old_size);
                 status=free(ptr);
                 ptr=new_ptr;
-                bitmap_controller.used_bit_count_lock.lock();
                 bitmap_controller.bitmap_used_bit+=(new_bits_count-old_bits_count);
-                bitmap_controller.used_bit_count_lock.unlock();
                 return success;
             }else{
                 return status;
@@ -966,9 +924,7 @@ uint64_t INIT_HCB::get_used_bytes_count()
 
 bool INIT_HCB::is_full()
 {
-    bitmap_controller.used_bit_count_lock.lock();
     uint64_t used_bit_count=bitmap_controller.bitmap_used_bit;
-    bitmap_controller.used_bit_count_lock.unlock();
     return used_bit_count==bitmap_controller.bitmap_size_in_64bit_units*64 ;
 }
 void INIT_HCB::count_used_bytes()

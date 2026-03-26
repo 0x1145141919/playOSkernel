@@ -57,7 +57,7 @@ void* Collatz_kthread(void* init_value){
     {
     bsp_kout<<"processor id "<< fast_get_processor_id()<<" in term "<<loop_count<<" with value "<<value<<" "<<kendl;
     //kthread_yield();
-    kthread_sleep(10000);
+    kthread_sleep(100000ull);
     if(value&1){
         value=value*3+1;
     }else{
@@ -87,7 +87,7 @@ void create_first_kthread(){
     ktime::time_interrupt_generator::set_clock_by_offset(20000);
     textconsole_GoP::RuntimeInitServiceThread();
     GlobalKernelStatus=SCHEDUL_READY;
-    //x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
+    x2apic::x2apic_driver::broadcast_exself_fixed_ipi(ipi_test);
     KURD_t kurd=KURD_t();
     uint64_t first_test_kthread=create_kthread(
         Collatz_kthread,

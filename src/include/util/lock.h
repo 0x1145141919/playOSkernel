@@ -3,14 +3,33 @@
 #include "util/OS_utils.h"
 static constexpr uint8_t LOCKED = 1;
 static constexpr uint8_t UNLOCKED = 0;
+struct lock_flags {
+    uint8_t if_enable_accept_interrupt:1;
+};
+class interrupt_guard{
+    uint8_t if_enable_accept_interrupt:1;
+    public:
+    interrupt_guard();
+    ~interrupt_guard();
+};
 class spinlock_cpp_t {
     uint8_t status;  
 public:
-    spinlock_cpp_t() : status(UNLOCKED) {}
+    spinlock_cpp_t() : status(UNLOCKED){}
     
     void lock();
     bool is_locked();
     void unlock();
+};
+
+class spinlock_interrupt_about_cpp_t {
+    uint8_t status;  
+public:
+    spinlock_interrupt_about_cpp_t() : status(UNLOCKED){}
+    
+    void lock(lock_flags flag);
+    bool is_locked();
+    void unlock(lock_flags flag);
 };
 class reentrant_spinlock_cpp_t {
     
@@ -33,13 +52,14 @@ public:
     reentrant_spinlock_guard(const reentrant_spinlock_guard&) = delete;
     reentrant_spinlock_guard& operator=(const reentrant_spinlock_guard&) = delete;
 };
-class spinlock_guard {
+class spinlock_interrupt_about_guard {
     spinlock_cpp_t& lock_ref;
+    lock_flags flag;
 public:
-    explicit spinlock_guard(spinlock_cpp_t& lock);
-    ~spinlock_guard();
-    spinlock_guard(const spinlock_guard&) = delete;
-    spinlock_guard& operator=(const spinlock_guard&) = delete;
+    explicit spinlock_interrupt_about_guard(spinlock_cpp_t& lock);
+    ~spinlock_interrupt_about_guard();
+    spinlock_interrupt_about_guard(const spinlock_interrupt_about_guard&) = delete;
+    spinlock_interrupt_about_guard& operator=(const spinlock_interrupt_about_guard&) = delete;
 };
 class spinrwlock_cpp_t{
     spinlock_cpp_t readlock;
@@ -52,21 +72,34 @@ public:
     void write_lock();
     void write_unlock();
 };
-class spinrwlock_read_guard {
-    spinrwlock_cpp_t& lock_ref;
+class spinrwlock_interrupt_about_cpp_t{
+    spinlock_interrupt_about_cpp_t readlock;
+    spinlock_interrupt_about_cpp_t writelock;
+    uint32_t readers=0;
 public:
-    explicit spinrwlock_read_guard(spinrwlock_cpp_t& lock);
-    ~spinrwlock_read_guard();
-    spinrwlock_read_guard(const spinrwlock_read_guard&) = delete;
-    spinrwlock_read_guard& operator=(const spinrwlock_read_guard&) = delete;
+    spinrwlock_interrupt_about_cpp_t()=default;
+    void read_lock(lock_flags flag);
+    void read_unlock(lock_flags flag);
+    void write_lock(lock_flags flag);
+    void write_unlock(lock_flags flag);
 };
-class spinrwlock_write_guard {
+class spinrwlock_interrupt_about_read_guard {
     spinrwlock_cpp_t& lock_ref;
+    lock_flags flag;
 public:
-    explicit spinrwlock_write_guard(spinrwlock_cpp_t& lock);
-    ~spinrwlock_write_guard();
-    spinrwlock_write_guard(const spinrwlock_write_guard&) = delete;
-    spinrwlock_write_guard& operator=(const spinrwlock_write_guard&) = delete;
+    explicit spinrwlock_interrupt_about_read_guard(spinrwlock_cpp_t& lock);
+    ~spinrwlock_interrupt_about_read_guard();
+    spinrwlock_interrupt_about_read_guard(const spinrwlock_interrupt_about_read_guard&) = delete;
+    spinrwlock_interrupt_about_read_guard& operator=(const spinrwlock_interrupt_about_read_guard&) = delete;
+};
+class spinrwlock_interrupt_about_write_guard {
+    spinrwlock_cpp_t& lock_ref;
+    lock_flags flag;
+public:
+    explicit spinrwlock_interrupt_about_write_guard(spinrwlock_cpp_t& lock);
+    ~spinrwlock_interrupt_about_write_guard();
+    spinrwlock_interrupt_about_write_guard(const spinrwlock_interrupt_about_write_guard&) = delete;
+    spinrwlock_interrupt_about_write_guard& operator=(const spinrwlock_interrupt_about_write_guard&) = delete;
 };
 class trylock_cpp_t {
     uint8_t status;
@@ -96,17 +129,4 @@ public:
     bool try_lock();
 
     void unlock();
-};
-class trywritelock_cpp_t:public trylock_cpp_t {
-    uint8_t status;
-    static constexpr uint8_t LOCKED = 1;
-    static constexpr uint8_t UNLOCKED = 0;
-    
-public:
-    trywritelock_cpp_t() : status(UNLOCKED) {}
-    
-    // 尝试获取锁，成功返回true，失败返回false
-    using trylock_cpp_t::try_lock;
-    
-    using trylock_cpp_t::unlock;
 };

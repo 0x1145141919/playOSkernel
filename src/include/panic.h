@@ -58,8 +58,9 @@ private:
 
     static bool is_latest_panic_valid;
     static void write_will();
-    static void other_processors_froze_handler();
+    
 public:
+    static void other_processors_froze_handler();
     Panic();
     ~Panic();
 

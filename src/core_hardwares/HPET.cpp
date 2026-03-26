@@ -1,5 +1,6 @@
 #include "core_hardwares/HPET.h"
 #include "memory/all_pages_arr.h"
+#include "ktime.h"
 #include "memory/AddresSpace.h"
 #include "util/OS_utils.h"
 HPET_driver_only_read_time_stamp*readonly_timer=nullptr;
@@ -123,13 +124,13 @@ HPET_driver_only_read_time_stamp::~HPET_driver_only_read_time_stamp()
 uint64_t HPET_driver_only_read_time_stamp::get_time_stamp_in_ns()
 {
     uint64_t tmp_count=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_main_counter_value));
-    __uint128_t result=__uint128_t(tmp_count)*hpet_timer_period_fs/1000000;
+    __uint128_t result=__uint128_t(tmp_count)*hpet_timer_period_fs/fs_per_ns;
     return uint64_t(result);
 }
 
 uint64_t HPET_driver_only_read_time_stamp::get_time_stamp_in_mius()
 {
     uint64_t tmp_count=atomic_read64_rmb((void*)(virt_reg_base+HPET::regs::offset_main_counter_value));
-    __uint128_t result=__uint128_t(tmp_count)*hpet_timer_period_fs/1000000000;
+    __uint128_t result=__uint128_t(tmp_count)*hpet_timer_period_fs/FS_per_mius;
     return uint64_t(result);
 }

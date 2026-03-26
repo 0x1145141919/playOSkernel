@@ -117,12 +117,13 @@ x64_local_processor::x64_local_processor(uint32_t alloced_id)
     gs_slot[L_PROCESSOR_GS_IDX]=(uint64_t)this;//应该用rdrand搞一个随机值
     gs_slot[PROCESSOR_ID_GS_INDEX]=static_cast<uint64_t>(this->processor_id);
     wrmsr(msr::syscall::IA32_GS_BASE,(uint64_t)&gs_slot);
-    tss.rsp0=stack_alloc(&kurd,8);
+    tss.rsp0=stack_alloc(&kurd,7);
     tss.ist[0]=0;
     tss.ist[1]=stack_alloc(&kurd,2);
     tss.ist[2]=stack_alloc(&kurd,3);
     tss.ist[3]=stack_alloc(&kurd,3);
     tss.ist[4]=stack_alloc(&kurd,3);
+    tss.ist[5]=stack_alloc(&kurd,3);
     if (!tss.rsp0 || !tss.ist[1] || !tss.ist[2] || !tss.ist[3]|| !tss.ist[4]||kurd.result!=result_code::SUCCESS) {
         panic_info_inshort inshort={
             .is_bug=true,
