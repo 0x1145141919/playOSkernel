@@ -85,6 +85,7 @@ namespace Scheduler{
             }
             namespace fail_reasons{
                 constexpr uint16_t bad_task_state=1;
+                constexpr uint16_t kthread_cant_wake_for_bad_block_reason=2;
             }
         }
         constexpr uint8_t kthread_block=5;
@@ -97,13 +98,37 @@ namespace Scheduler{
                 constexpr uint16_t illeage_state=5;
             }
         }
-        constexpr uint8_t kthread_sleep=6;
         constexpr uint8_t sleep_task_insert=7;
         namespace sleep_task_insert_results{
             namespace fail_reasons{
                 constexpr uint16_t null_task_ptr=1;
                 constexpr uint16_t bad_task_type=2;
                 constexpr uint16_t insert_fail=3;
+            }
+        }
+        constexpr uint8_t kthread_sleep=6;
+        namespace kthread_sleep_results{ 
+            namespace fatal_reasons{
+                constexpr uint16_t bad_task_state=1;
+                constexpr uint16_t context_nullptr=2;
+                constexpr uint16_t context_null_stack_size=3;
+                constexpr uint16_t context_stackptr_out_of_range=4;
+                constexpr uint16_t illeage_state=5;
+            }
+        }
+        constexpr uint8_t kthread_wait=8;
+        namespace kthread_wait_results{
+            namespace fatal_reasons{
+                constexpr uint16_t bad_task_state=1;
+                constexpr uint16_t context_stackptr_out_of_range=4;
+            } 
+        }
+        constexpr uint8_t kthread_exit=9;
+        namespace kthread_exit_results{
+            namespace fatal_reasons{
+                constexpr uint16_t bad_task_state=1;
+                constexpr uint16_t waiter_bad_state_and_block_reason=2;
+                constexpr uint16_t context_stackptr_out_of_range=4;
             }
         }
     }
@@ -125,7 +150,8 @@ enum task_blocked_reason_t:uint8_t{
     invalid,
     sleeping,
     mutex,
-    no_job
+    no_job,
+    wait_other_kthread
 };
 struct iret_complex_context{
     uint64_t rip;
@@ -156,7 +182,7 @@ namespace kthread_call_num{
     constexpr uint64_t exit=0;
     constexpr uint64_t sleep=1;
     constexpr uint64_t yield=2;
-    constexpr uint64_t join=3;
+    constexpr uint64_t wait=3;
     constexpr uint64_t block=4;
 };
 constexpr uint64_t INVALID_TID=~0ull;
@@ -197,10 +223,9 @@ class task{
     void assign_valid_tid(uint64_t tid);
     static constexpr uint8_t task_not_in_term=0;
     static constexpr uint8_t task_in_term=1;
+    u8ka task_in_term_flag;//标记任务是否在被迁移的途中
     static constexpr uint8_t task_not_on_queue=0;
     static constexpr uint8_t task_on_queue=1;
-    trylock_cpp_t wakeup;
-    u8ka onqueue_flag;
     task_blocked_reason_t blocked_reason;
     miusecond_time_stamp_t accumulated_time;
     miusecond_time_stamp_t lastest_run_stamp;
@@ -213,6 +238,7 @@ class task{
         userthread_context*userthread;
         vCPU_context*vCPU;
     }context;
+    Ktemplats::list_doubly<uint64_t> waiters;//在锁下的，exit的时候都唤醒
     task_state_t get_state();
     uint64_t get_tid();
     task_type_t get_task_type();
@@ -264,7 +290,6 @@ class task_pool{
 };
 class alignas(64) per_processor_scheduler { 
     private:
-    static constexpr uint8_t PRIVATE_STACK_DEFAULT_PG_COUNT=4;
     KURD_t default_kurd();
     KURD_t default_success();
     KURD_t default_fail();
@@ -299,6 +324,8 @@ extern "C"{
     void kthread_yield();
     uint64_t* get_scheduler_private_stack_top();
     void kthread_exit(uint64_t will);
+    uint64_t kthread_wait(uint64_t tid);//注意，若对应的tid不存在返回~0ull
+    void kthread_wait_cppenter(x64_basic_context*context);
     void kthread_exit_cppenter(x64_basic_context*context);
     void kthread_self_blocked(task_blocked_reason_t reason);
     void kthread_sleep(miusecond_time_stamp_t offset);

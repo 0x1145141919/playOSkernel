@@ -5,7 +5,7 @@ bits 64
 %define KTHREAD_CALL_EXIT   0
 %define KTHREAD_CALL_SLEEP  1
 %define KTHREAD_CALL_YIELD  2
-%define KTHREAD_CALL_JOIN   3
+%define KTHREAD_CALL_WAIT   3
 %define KTHREAD_CALL_BLOCK  4
 atoimc_kthread_load:
     mov rsp, rdi
@@ -35,21 +35,29 @@ kthread_yield:
     ret
     nop
 global kthread_exit
-extern kthread_true_exit
+
 kthread_exit:
     mov rax, KTHREAD_CALL_EXIT
     int kthread_call_ivec
     ud2
 global kthread_self_blocked
-extern kthread_self_blocked_cppenter
+
 kthread_self_blocked:
     mov rax, KTHREAD_CALL_BLOCK
     int kthread_call_ivec
     ret
     nop
 global kthread_sleep
-extern kthread_sleep_cppenter
+
 kthread_sleep:
     mov rax, KTHREAD_CALL_SLEEP
     int kthread_call_ivec
     ret
+    nop
+global kthread_wait_truly_wait
+
+kthread_wait_truly_wait:
+    mov rax, KTHREAD_CALL_WAIT
+    int kthread_call_ivec
+    ret
+    nop

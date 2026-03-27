@@ -4,6 +4,7 @@
 #include "memory/all_pages_arr.h"
 #include "memory/FreePagesAllocator.h"
 #include "util/kout.h"
+#include "firmware/ACPI_APIC.h"
 #include "Interrupt_system/Interrupt.h"
 #include "core_hardwares/lapic.h"
 #include "util/arch/x86-64/cpuid_intel.h"
@@ -410,48 +411,63 @@ KURD_t per_processor_scheduler::default_fatal()
 }
 void per_processor_scheduler::sleep_tasks_wake()
 {
-    constexpr  uint8_t arr_len_max = 64; 
+    constexpr  uint8_t arr_len_max = 16; 
     int arr_len = 0;
     task* arr[arr_len_max];
     ksetmem_8(arr,0,arr_len_max);
-    miusecond_time_stamp_t stamp=ktime::hardware_time::get_stamp();
+    miusecond_time_stamp_t current_stamp=ktime::hardware_time::get_stamp();
     this->sched_lock.lock();
-    
     for(;arr_len<arr_len_max;arr_len++){
-        task**task_ptr_ptr=sleep_queue.front();
-        if(task_ptr_ptr==nullptr)break;
-        if((*task_ptr_ptr)->sleep_wakeup_stamp>stamp){
-            break;
-        }else{
-            arr[arr_len]=sleep_queue.pop_front_value();
-        }
+        if(sleep_queue.empty())break;
+        arr[arr_len]=sleep_queue.pop_front_value();
     }
     this->sched_lock.unlock();
-    arr_len++;
     for(uint64_t i=0;i<arr_len;i++){
         if(arr[i]){
             arr[i]->task_lock.lock();
-            arr[i]->set_ready();
-            arr[i]->task_lock.unlock();
             sched_lock.lock();
-            ready_queue.push_back(arr[i]);
+            if(arr[i]->sleep_wakeup_stamp>current_stamp){
+                sleep_queue.insert(arr[i]);
+            }else{
+                arr[i]->set_ready();
+                ready_queue.push_front(arr[i]);
+            }
             sched_lock.unlock();
+            arr[i]->task_lock.unlock();
         }
     }
 }
 void per_processor_scheduler::sched()
 {
-    sched_lock.lock();
-    task* to_run=nullptr;
-    if(ready_queue.empty()){
-        to_run=idle;
-    }else{
-        to_run=ready_queue.pop_front_value();
-    }
+    task* to_run=[&]()->task*{
+        this->sched_lock.lock();
+        if(this->ready_queue.empty()){
+            this->sched_lock.unlock();
+            uint32_t processor_count=[]()->uint32_t{
+                return gAnalyzer->processor_x64_list->size();
+            }();
+            for(uint32_t i=0;i<processor_count;i++){
+                if((global_schedulers+i)==this)continue;
+                global_schedulers[i].sched_lock.lock();
+                if(global_schedulers[i].ready_queue.empty()){
+                    global_schedulers[i].sched_lock.unlock();
+                    continue;
+                }
+                task* candidate=global_schedulers[i].ready_queue.pop_front_value();
+                global_schedulers[i].sched_lock.unlock();
+                return candidate;
+            }
+            return idle;
+        }else{
+            task* candidate=this->ready_queue.pop_front_value();
+            this->sched_lock.unlock();
+            return candidate;
+        }
+    }();
     gs_u64_write(PROCESSOR_NOW_RUNNING_TID_GS_INDEX,to_run->get_tid());
-    sched_lock.unlock();
     to_run->task_lock.lock();
     to_run->set_running();
+    to_run->set_belonged_processor_id(fast_get_processor_id());
     to_run->lastest_run_stamp=ktime::hardware_time::get_stamp();
     to_run->task_lock.unlock();
     to_run->atomic_load();
